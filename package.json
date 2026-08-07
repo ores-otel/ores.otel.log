@@ -1,20 +1,18 @@
 {
-  "name": "@oresoftware/next-loggers",
-  "version": "0.1.0",
-  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, and edge workers",
-  "type": "module",
-  "types": "./dist/base-logger.d.ts",
-  "sideEffects": false,
   "bin": {
     "next-loggers": "./dist/cli/main.js"
   },
-  "files": [
-    "dist",
-    "src",
-    ".cli-flags.toml",
-    "README.md",
-    "LICENSE"
-  ],
+  "bugs": {
+    "url": "https://github.com/ORESoftware/next-loggers.ts/issues"
+  },
+  "description": "Runtime-aware ESM loggers for Next.js, browsers, Node.js, Bun, Deno, Cloudflare Workers, edge workers, and polyglot services",
+  "devDependencies": {
+    "eslint": "^10.7.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "exports": {
     ".": {
       "edge-light": {
@@ -57,25 +55,21 @@
       "types": "./dist/browser-logger.d.ts",
       "default": "./dist/browser-logger.js"
     },
-    "./edge": {
-      "types": "./dist/edge-logger.d.ts",
-      "default": "./dist/edge-logger.js"
-    },
-    "./cloudflare": {
-      "types": "./dist/cloudflare-worker-logger.d.ts",
-      "default": "./dist/cloudflare-worker-logger.js"
-    },
-    "./node": {
-      "types": "./dist/node-logger.d.ts",
-      "default": "./dist/node-logger.js"
+    "./browser-stream": {
+      "types": "./dist/browser-stream.d.ts",
+      "default": "./dist/browser-stream.js"
     },
     "./bun": {
       "types": "./dist/bun-logger.d.ts",
       "default": "./dist/bun-logger.js"
     },
-    "./deno": {
-      "types": "./dist/deno-logger.d.ts",
-      "default": "./dist/deno-logger.js"
+    "./cloudflare": {
+      "types": "./dist/cloudflare-worker-logger.d.ts",
+      "default": "./dist/cloudflare-worker-logger.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
     },
     "./context": {
       "browser": {
@@ -89,14 +83,35 @@
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
-    "./browser-stream": {
-      "types": "./dist/browser-stream.d.ts",
-      "default": "./dist/browser-stream.js"
+    "./deno": {
+      "types": "./dist/deno-logger.d.ts",
+      "default": "./dist/deno-logger.js"
+    },
+    "./edge": {
+      "types": "./dist/edge-logger.d.ts",
+      "default": "./dist/edge-logger.js"
+    },
+    "./eslint": {
+      "types": "./dist/eslint-plugin.d.ts",
+      "default": "./dist/eslint-plugin.js"
+    },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./node": {
+      "types": "./dist/node-logger.d.ts",
+      "default": "./dist/node-logger.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
     },
     "./otel": {
       "types": "./dist/otel.d.ts",
       "default": "./dist/otel.js"
     },
+    "./package.json": "./package.json",
     "./prometheus": {
       "types": "./dist/prometheus.d.ts",
       "default": "./dist/prometheus.js"
@@ -105,53 +120,22 @@
       "types": "./dist/supabase-ingest.d.ts",
       "default": "./dist/supabase-ingest.js"
     },
-    "./config": {
-      "types": "./dist/config.d.ts",
-      "default": "./dist/config.js"
-    },
-    "./eslint": {
-      "types": "./dist/eslint-plugin.d.ts",
-      "default": "./dist/eslint-plugin.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.build.json && npm run postbuild",
-    "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
-    "test": "npm run build && node --test tests/*.test.mjs",
-    "test:polyglot": "node scripts/test-polyglot.mjs",
-    "test:runtimes": "node scripts/test-runtimes.mjs",
-    "test:all": "npm test && npm run test:runtimes && npm run test:polyglot",
-    "prepack": "npm test"
-  },
-  "engines": {
-    "node": ">=18"
-  },
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/ORESoftware/next-loggers.ts.git"
-  },
-  "homepage": "https://github.com/ORESoftware/next-loggers.ts#readme",
-  "bugs": {
-    "url": "https://github.com/ORESoftware/next-loggers.ts/issues"
-  },
-  "devDependencies": {
-    "eslint": "^10.7.0",
-    "typescript": "^5.9.3"
-  },
-  "peerDependencies": {
-    "eslint": ">=9 <11"
-  },
-  "peerDependenciesMeta": {
-    "eslint": {
-      "optional": true
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
     }
   },
+  "files": [
+    "dist",
+    "src",
+    "sdk",
+    "contracts",
+    "docs",
+    ".cli-flags.toml",
+    "README.md",
+    "LICENSE"
+  ],
+  "homepage": "https://github.com/ORESoftware/next-loggers.ts#readme",
   "keywords": [
     "logging",
     "opentelemetry",
@@ -162,11 +146,51 @@
     "nextjs",
     "esm",
     "supabase",
+    "wasm",
+    "rust",
+    "go",
+    "gleam",
+    "java",
+    "erlang",
+    "elixir",
+    "dart",
     "bun",
     "deno",
     "edge",
     "cloudflare-workers",
     "workerd"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "name": "@oresoftware/next-loggers",
+  "peerDependencies": {
+    "eslint": ">=9 <11"
+  },
+  "peerDependenciesMeta": {
+    "eslint": {
+      "optional": true
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ORESoftware/next-loggers.ts.git"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && npm run postbuild",
+    "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "test:contracts": "node scripts/test-observability-contracts.mjs",
+    "test:polyglot": "node scripts/test-polyglot.mjs",
+    "test:runtimes": "node scripts/test-runtimes.mjs",
+    "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
+    "prepack": "npm test"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "./dist/base-logger.d.ts",
+  "version": "0.1.0"
 }

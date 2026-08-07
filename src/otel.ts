@@ -1,5 +1,7 @@
 import type {
+  BaseLogger,
   LogContextProvider,
+  LogFields,
   LogLevel,
   LogRecord,
   LogTransport,
@@ -20,7 +22,7 @@ export const OTEL_FIELD_KEYS = Object.freeze({
 /**
  * The OpenTelemetry attribute subset accepted by every current language SDK.
  * Keeping this structural avoids importing an SDK, installing a global provider,
- * or enabling automatic instrumentation/monkey patching in application code.
+ * or enabling automatic instrumentation in application code.
  */
 export type OtelAttributeScalar = string | number | boolean;
 export type OtelAttributeValue = OtelAttributeScalar | readonly OtelAttributeScalar[];
@@ -156,6 +158,22 @@ export interface OtelSpanLike {
   addEvent(name: string, attributes?: OtelAttributes, startTime?: Date | number): void;
   recordException?(exception: Error | Record<string, unknown>, time?: Date | number): void;
   setStatus?(status: { code: number; message?: string }): unknown;
+  end?(endTime?: Date | number): void;
+}
+
+export interface OtelStartSpanOptions {
+  kind?: number;
+  attributes?: OtelAttributes;
+  startTime?: Date | number;
+  root?: boolean;
+}
+
+export interface OtelTracerLike {
+  startActiveSpan<T>(
+    name: string,
+    options: OtelStartSpanOptions,
+    callback: (span: OtelSpanLike) => T,
+  ): T;
 }
 
 export interface OtelLogRecordLike {
@@ -186,6 +204,15 @@ export interface OpenTelemetryTransportOptions extends OtelAttributeLimits {
   includeValues?: boolean;
   emitSpanEvents?: boolean;
   recordExceptions?: boolean;
+  /** Maximum string/JSON attribute length. Default 8192. */
+  maxAttributeLength?: number;
+  /** Maximum primitive array elements retained in one attribute. Default 64. */
+  maxAttributeArrayLength?: number;
+  /**
+   * Stable attribute names allowed on metrics. High-cardinality trace IDs,
+   * request fields, users and messages are excluded by default.
+   */
+  metricAttributeKeys?: readonly string[];
   /** Optional metrics hook backed by an application-owned OTEL meter. */
   recordMetric?: (name: string, value: number, attributes: OtelAttributes) => void;
   /** Optional diagnostic hook for bridge side effects other than logger.emit(). */
@@ -205,6 +232,17 @@ const SEVERITY_NUMBER: Record<LogLevel, number> = {
   WARN: 13,
   ERROR: 17,
   FATAL: 21,
+};
+
+const LEVEL_METHOD: Readonly<
+  Record<LogLevel, 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal'>
+> = {
+  TRACE: 'trace',
+  DEBUG: 'debug',
+  INFO: 'info',
+  WARN: 'warn',
+  ERROR: 'error',
+  FATAL: 'fatal',
 };
 
 const ERROR_LEVELS = new Set<LogLevel>(['ERROR', 'FATAL']);
@@ -392,6 +430,28 @@ function metricAttributes(record: LogRecord, options: OpenTelemetryTransportOpti
   return builder.values;
 }
 
+function selectMetricAttributes(
+  attributes: OtelAttributes,
+  allowed: readonly string[] | undefined,
+): OtelAttributes {
+  const selected: OtelAttributes = {};
+  for (const key of allowed ?? DEFAULT_METRIC_ATTRIBUTES) {
+    const value = attributes[key];
+    if (value !== undefined) {
+      selected[key] = value;
+    }
+  }
+  return selected;
+}
+
+function isRecording(span: OtelSpanLike): boolean {
+  try {
+    return span.isRecording?.() !== false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Reads trace correlation from an application-owned active span and exposes it
  * through next-loggers' existing context provider contract. Valid non-recording
@@ -563,4 +623,209 @@ export function createOpenTelemetryTransport(
   options: OpenTelemetryTransportOptions,
 ): OpenTelemetryTransport {
   return new OpenTelemetryTransport(options);
+}
+
+function normalizeLifecycleLevel(
+  level: Lowercase<LogLevel> | LogLevel | false | undefined,
+): LogLevel | false {
+  if (level === false) {
+    return false;
+  }
+  const normalized = String(level ?? 'DEBUG').toUpperCase() as LogLevel;
+  return normalized in LEVEL_METHOD ? normalized : 'DEBUG';
+}
+
+function spanFields(span: OtelSpanLike, extra: LogFields | undefined): LogFields {
+  let context: OtelSpanContextLike | undefined;
+  try {
+    context = span.spanContext();
+  } catch {
+    context = undefined;
+  }
+  return {
+    ...(context?.traceId ? { 'otel.trace_id': context.traceId } : {}),
+    ...(context?.spanId ? { 'otel.span_id': context.spanId } : {}),
+    ...(context ? { 'otel.trace_flags': context.traceFlags } : {}),
+    ...extra,
+  };
+}
+
+async function logSafely(
+  logger: BaseLogger,
+  level: LogLevel,
+  message: string,
+  fields: LogFields,
+  tags: readonly string[],
+  error?: unknown,
+): Promise<void> {
+  try {
+    const method = LEVEL_METHOD[level];
+    const event = error === undefined
+      ? logger[method](message)
+      : logger[method](message, error);
+    await event.addFields(fields).addTags('otel-span', ...tags).send();
+  } catch {
+    // A log sink failure cannot replace the application result.
+  }
+}
+
+async function invokeSpanSafely(
+  logger: BaseLogger,
+  operation: string,
+  callback: () => void,
+  fields: LogFields,
+  tags: readonly string[],
+): Promise<void> {
+  try {
+    callback();
+  } catch (error) {
+    await logSafely(
+      logger,
+      'WARN',
+      `OpenTelemetry ${operation} failed`,
+      { ...fields, 'otel.bridge_operation': operation },
+      ['otel-bridge-error', ...tags],
+      error,
+    );
+  }
+}
+
+/**
+ * Explicit span wrapper. Start, success and failure lifecycle records are sent
+ * through next-loggers while the application supplies the tracer and context
+ * implementation. Span cleanup failures are reported but never replace a
+ * successful callback result.
+ */
+export async function withOpenTelemetrySpan<T>(
+  logger: BaseLogger,
+  tracer: OtelTracerLike,
+  name: string,
+  callback: (span: OtelSpanLike) => T | Promise<T>,
+  options: WithOpenTelemetrySpanOptions = {},
+): Promise<T> {
+  if (!logger || typeof logger.info !== 'function') {
+    throw new TypeError('withOpenTelemetrySpan requires a next-loggers logger');
+  }
+  if (!tracer || typeof tracer.startActiveSpan !== 'function') {
+    throw new TypeError('withOpenTelemetrySpan requires an injected OTEL tracer');
+  }
+  const {
+    lifecycleLevel: rawLifecycleLevel,
+    logFields,
+    tags = [],
+    okStatusCode = 1,
+    errorStatusCode = 2,
+    failOnStartError = false,
+    ...spanOptions
+  } = options;
+  const lifecycleLevel = normalizeLifecycleLevel(rawLifecycleLevel);
+  let callbackStarted = false;
+  try {
+    return await tracer.startActiveSpan(name, spanOptions, async (span) => {
+      callbackStarted = true;
+      const startedAt = globalThis.performance?.now?.() ?? Date.now();
+      const contextFields = spanFields(span, logFields);
+      if (lifecycleLevel !== false) {
+        await logSafely(
+          logger,
+          lifecycleLevel,
+          `span started: ${name}`,
+          { ...contextFields, 'otel.span_name': name, 'otel.span_phase': 'start' },
+          tags,
+        );
+      }
+      try {
+        const result = await callback(span);
+        await invokeSpanSafely(
+          logger,
+          'set success status',
+          () => span.setStatus?.({ code: okStatusCode }),
+          contextFields,
+          tags,
+        );
+        if (lifecycleLevel !== false) {
+          await logSafely(
+            logger,
+            lifecycleLevel,
+            `span completed: ${name}`,
+            {
+              ...contextFields,
+              'otel.span_name': name,
+              'otel.span_phase': 'end',
+              'otel.duration_ms': Math.max(
+                0,
+                (globalThis.performance?.now?.() ?? Date.now()) - startedAt,
+              ),
+            },
+            tags,
+          );
+        }
+        return result;
+      } catch (error) {
+        await invokeSpanSafely(
+          logger,
+          'record exception',
+          () => {
+            span.recordException?.(
+              error instanceof Error ? error : { message: String(error) },
+            );
+          },
+          contextFields,
+          tags,
+        );
+        await invokeSpanSafely(
+          logger,
+          'set error status',
+          () => {
+            span.setStatus?.({
+              code: errorStatusCode,
+              ...(error instanceof Error && error.message ? { message: error.message } : {}),
+            });
+          },
+          contextFields,
+          tags,
+        );
+        await logSafely(
+          logger,
+          'ERROR',
+          `span failed: ${name}`,
+          {
+            ...contextFields,
+            'otel.span_name': name,
+            'otel.span_phase': 'error',
+            'otel.duration_ms': Math.max(
+              0,
+              (globalThis.performance?.now?.() ?? Date.now()) - startedAt,
+            ),
+          },
+          tags,
+          error,
+        );
+        throw error;
+      } finally {
+        await invokeSpanSafely(
+          logger,
+          'end span',
+          () => span.end?.(),
+          contextFields,
+          tags,
+        );
+      }
+    });
+  } catch (error) {
+    if (!callbackStarted) {
+      await logSafely(
+        logger,
+        'ERROR',
+        `OpenTelemetry start span failed: ${name}`,
+        { ...logFields, 'otel.span_name': name, 'otel.span_phase': 'start-error' },
+        ['otel-bridge-error', ...tags],
+        error,
+      );
+      if (!failOnStartError) {
+        return await callback(NOOP_SPAN);
+      }
+    }
+    throw error;
+  }
 }
