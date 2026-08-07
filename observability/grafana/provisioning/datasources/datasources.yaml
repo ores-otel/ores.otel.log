@@ -1,0 +1,81 @@
+apiVersion: 1
+prune: true
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo
+        - name: traceID
+          datasourceUid: tempo
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      derivedFields:
+        - name: TraceID
+          matcherType: label
+          matcherRegex: trace[_]?id
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: View trace
+
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: false
+    jsonData:
+      httpMethod: GET
+      serviceMap:
+        datasourceUid: prometheus
+      nodeGraph:
+        enabled: true
+      search:
+        hide: false
+      streamingEnabled:
+        search: true
+        metrics: true
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: -2s
+        spanEndTimeShift: 2s
+        filterByTraceID: true
+        filterBySpanID: true
+        tags:
+          - key: service.name
+            value: service_name
+          - key: service.namespace
+            value: service_namespace
+          - key: deployment.environment.name
+            value: deployment_environment_name
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: -2m
+        spanEndTimeShift: 2m
+        tags:
+          - key: service.name
+            value: service
+          - key: deployment.environment.name
+            value: deployment_environment_name
+        queries:
+          - name: Span rate
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags}[5m]))'
+          - name: Error rate
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags,status_code="STATUS_CODE_ERROR"}[5m]))'
+          - name: P95 duration
+            query: 'histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[5m])) by (le))'

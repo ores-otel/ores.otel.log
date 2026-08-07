@@ -1,0 +1,34 @@
+global:
+  scrape_interval: 5s
+  scrape_timeout: 4s
+  evaluation_interval: 5s
+  external_labels:
+    cluster: next-loggers-local
+
+storage:
+  exemplars:
+    max_exemplars: 100000
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: otel-collector-internal
+    static_configs:
+      - targets: [otel-collector:8888]
+
+  - job_name: otel-collector-exported
+    static_configs:
+      - targets: [otel-collector:9464]
+
+  - job_name: loki
+    static_configs:
+      - targets: [loki:3100]
+
+  - job_name: tempo
+    static_configs:
+      - targets: [tempo:3200]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: [prometheus:9090]

@@ -1,0 +1,88 @@
+name: Observability stack
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - observability/**
+      - scripts/observability-smoke.mjs
+      - tests/observability-config.test.mjs
+      - .github/workflows/observability.yml
+  pull_request:
+    paths:
+      - observability/**
+      - scripts/observability-smoke.mjs
+      - tests/observability-config.test.mjs
+      - .github/workflows/observability.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-smoke:
+    name: validate configs and route logs, metrics, and traces
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEPLOYMENT_ENVIRONMENT: ci
+      GRAFANA_ADMIN_USER: admin
+      GRAFANA_ADMIN_PASSWORD: ci-only-observability-password-not-for-production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: enforce repository observability invariants
+        run: node --test tests/observability-config.test.mjs
+
+      - name: validate Docker Compose rendering
+        run: docker compose -f observability/docker-compose.yml config --quiet
+
+      - name: validate OpenTelemetry Collector configuration
+        run: |
+          docker run --rm \
+            -e DEPLOYMENT_ENVIRONMENT=ci \
+            -v "$PWD/observability/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+            otel/opentelemetry-collector-contrib:0.157.0 \
+            validate --config=/etc/otelcol-contrib/config.yaml
+
+      - name: validate Tempo configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/observability/tempo.yaml:/etc/tempo.yaml:ro" \
+            grafana/tempo:2.10.5 \
+            -config.file=/etc/tempo.yaml \
+            -config.verify=true
+
+      - name: validate Prometheus configuration and alert rules
+        run: |
+          docker run --rm \
+            --entrypoint=/bin/promtool \
+            -v "$PWD/observability:/etc/prometheus:ro" \
+            prom/prometheus:v3.12.0 \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: start pinned observability stack
+        run: docker compose -f observability/docker-compose.yml up -d
+
+      - name: verify end-to-end telemetry routing and correlation
+        run: node scripts/observability-smoke.mjs
+
+      - name: show stack status and logs
+        if: always()
+        run: |
+          docker compose -f observability/docker-compose.yml ps || true
+          docker compose -f observability/docker-compose.yml logs --no-color --tail=500 || true
+
+      - name: stop stack and remove CI data
+        if: always()
+        run: docker compose -f observability/docker-compose.yml down -v --remove-orphans || true
