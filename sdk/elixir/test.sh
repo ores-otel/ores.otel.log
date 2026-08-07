@@ -2,4 +2,6 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")" && pwd)
-elixir -r "$root/lib/next_loggers.ex" "$root/test/next_loggers_test.exs"
+elixir -r "$root/lib/next_loggers.ex" \
+  "$root/test/next_loggers_test.exs" \
+  "$root/test/next_loggers_adversarial_test.exs"

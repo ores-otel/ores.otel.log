@@ -50,6 +50,19 @@ abstract interface class LogTransport {
   FutureOr<void> write(Map<String, Object?> record);
 }
 
+/// Aggregates transport failures after every configured sink has received the record.
+final class LogTransportException implements Exception {
+  LogTransportException(List<Object> errors, List<StackTrace> stackTraces)
+      : errors = List<Object>.unmodifiable(errors),
+        stackTraces = List<StackTrace>.unmodifiable(stackTraces);
+
+  final List<Object> errors;
+  final List<StackTrace> stackTraces;
+
+  @override
+  String toString() => 'LogTransportException(${errors.join(', ')})';
+}
+
 /// Application-owned OTEL sink. This package never registers a global SDK.
 final class OpenTelemetryTransport implements LogTransport {
   OpenTelemetryTransport(this.emit);
@@ -70,13 +83,13 @@ final class OpenTelemetryTransport implements LogTransport {
       if (record['traceId'] != null) 'trace.id': record['traceId'],
       for (final entry in fields.entries) 'next_logger.field.${entry.key}': entry.value,
     };
-    return emit(<String, Object?>{
+    return emit(_freezeMap(<String, Object?>{
       'body': record['message'],
       'severityText': level.wire,
       'severityNumber': level.otelSeverityNumber,
       'timestamp': record['timestamp'],
       'attributes': attributes,
-    });
+    }));
   }
 }
 
@@ -99,8 +112,8 @@ final class Logger {
     List<LogTransport> transports = const <LogTransport>[],
     String Function()? idFactory,
     String Function()? clock,
-  })  : fields = Map.unmodifiable(fields),
-        transports = List.unmodifiable(transports),
+  })  : fields = _freezeMap(fields),
+        transports = List<LogTransport>.unmodifiable(transports),
         _idFactory = idFactory ?? _randomId,
         _clock = clock ?? (() => DateTime.now().toUtc().toIso8601String());
 
@@ -146,9 +159,19 @@ final class Logger {
       if (traceId != null && traceId.isNotEmpty) 'traceIds': <String>[traceId],
       if (context != null && context.tags.isNotEmpty) 'tags': List<String>.from(context.tags),
     };
-    final immutable = _deepCopy(record);
+    final immutable = _freezeMap(record);
+    final errors = <Object>[];
+    final stackTraces = <StackTrace>[];
     for (final transport in transports) {
-      await transport.write(immutable);
+      try {
+        await transport.write(immutable);
+      } catch (error, stackTrace) {
+        errors.add(error);
+        stackTraces.add(stackTrace);
+      }
+    }
+    if (errors.isNotEmpty) {
+      throw LogTransportException(errors, stackTraces);
     }
     return immutable;
   }
@@ -172,6 +195,21 @@ final class Logger {
   }
 }
 
-Map<String, Object?> _deepCopy(Map<String, Object?> value) {
-  return (jsonDecode(jsonEncode(value)) as Map<String, Object?>);
+Map<String, Object?> _freezeMap(Map<String, Object?> value) {
+  return Map<String, Object?>.unmodifiable(
+    value.map((key, item) => MapEntry(key, _freeze(item))),
+  );
+}
+
+Object? _freeze(Object? value) {
+  if (value is Map<String, Object?>) return _freezeMap(value);
+  if (value is Map) {
+    return Map<String, Object?>.unmodifiable(
+      value.map((key, item) => MapEntry(key.toString(), _freeze(item))),
+    );
+  }
+  if (value is Iterable) {
+    return List<Object?>.unmodifiable(value.map(_freeze));
+  }
+  return value;
 }

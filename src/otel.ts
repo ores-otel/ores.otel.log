@@ -452,6 +452,28 @@ function isRecording(span: OtelSpanLike): boolean {
   }
 }
 
+function selectMetricAttributes(
+  attributes: OtelAttributes,
+  allowed: readonly string[] | undefined,
+): OtelAttributes {
+  const selected: OtelAttributes = {};
+  for (const key of allowed ?? DEFAULT_METRIC_ATTRIBUTES) {
+    const value = attributes[key];
+    if (value !== undefined) {
+      selected[key] = value;
+    }
+  }
+  return selected;
+}
+
+function isRecording(span: OtelSpanLike): boolean {
+  try {
+    return span.isRecording?.() !== false;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Reads trace correlation from an application-owned active span and exposes it
  * through next-loggers' existing context provider contract. Valid non-recording

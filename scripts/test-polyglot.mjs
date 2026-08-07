@@ -27,6 +27,12 @@ const suites = [
     cwd: path.join(root, 'sdk', 'rust'),
   },
   {
+    name: 'Rust OpenTelemetry companion',
+    command: 'cargo',
+    args: ['test'],
+    cwd: path.join(root, 'sdk', 'rust-otel'),
+  },
+  {
     name: 'Gleam',
     command: 'gleam',
     args: ['test'],
@@ -39,7 +45,7 @@ const suites = [
     cwd: path.join(root, 'sdk', 'java'),
   },
   {
-    name: 'Dart/Flutter',
+    name: 'Dart/Flutter conformance',
     command: 'dart',
     args: ['run', 'test/conformance.dart'],
     cwd: path.join(root, 'sdk', 'dart'),
