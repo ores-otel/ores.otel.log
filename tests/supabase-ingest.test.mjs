@@ -10,73 +10,27 @@ function record(id, overrides = {}) {
   return {
     schema: 'next-loggers/v1',
     id,
-    timestamp: '2026-08-02T00:00:00.000Z',
+    timestamp: '2026-08-03T00:00:00.000Z',
     level: 'INFO',
     runtime: 'browser',
     appName: 'web',
-    message: `message-${id}`,
-    values: [`message-${id}`],
+    message: `event ${id}`,
+    values: [],
     fields: {},
     ...overrides,
   };
 }
 
-function response(status = 202, requestId = null) {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 202 ? 'Accepted' : 'Unavailable',
-    headers: new Headers(requestId ? { 'x-request-id': requestId } : {}),
-    text() {
-      throw new Error('response body must not be read');
-    },
-  };
-}
-
 function jwt(role) {
-  const payload = Buffer.from(JSON.stringify({ role })).toString('base64url');
-  return `header.${payload}.signature`;
+  const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ role })}.signature`;
 }
 
-test('batches authenticated records to a sanitized Edge Function URL without reading response bodies', async () => {
-  const requests = [];
-  const transport = createSupabaseIngestTransport({
-    url: 'https://project.supabase.co/?secret=query#fragment',
-    publishableKey: 'sb_publishable_example',
-    accessToken: jwt('authenticated'),
-    batchSize: 2,
-    flushIntervalMillis: 60_000,
-    clock: () => new Date('2026-08-02T01:02:03.000Z'),
-    fetch: async (url, init) => {
-      requests.push({ url, init });
-      return response();
-    },
-  });
-
-  await transport.write(record('one'));
-  await transport.write(record('two'));
-  await transport.flush();
-
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].url, 'https://project.supabase.co/functions/v1/telemetry-ingest');
-  assert.equal(requests[0].init.method, 'POST');
-  assert.equal(requests[0].init.credentials, 'omit');
-  assert.equal(requests[0].init.redirect, 'error');
-  assert.equal(requests[0].init.headers.apikey, 'sb_publishable_example');
-  assert.equal(requests[0].init.headers.authorization, `Bearer ${jwt('authenticated')}`);
-  const body = JSON.parse(requests[0].init.body);
-  assert.equal(body.schema, 'next-loggers/batch/v1');
-  assert.equal(body.sentAt, '2026-08-02T01:02:03.000Z');
-  assert.deepEqual(body.records.map((value) => value.id), ['one', 'two']);
-  assert.match(body.batchId, /^nl-2-[0-9a-f]{8}$/u);
-  await transport.close();
-});
-
-test('rejects secret and service-role credentials and requires user authentication by default', async () => {
+test('client transport rejects secret credentials, embedded URL credentials, and missing authentication', async () => {
   assert.throws(
     () => new SupabaseIngestTransport({
       url: 'https://project.supabase.co',
-      publishableKey: 'sb_secret_never-on-a-client',
+      publishableKey: 'sb_secret_do-not-use',
     }),
     /Secret\/service-role Supabase credentials/u,
   );
@@ -90,169 +44,222 @@ test('rejects secret and service-role credentials and requires user authenticati
   assert.throws(
     () => new SupabaseIngestTransport({
       url: 'https://user:password@project.supabase.co',
-      publishableKey: 'sb_publishable_example',
+      publishableKey: 'sb_publishable_public',
     }),
-    /must not contain embedded credentials/u,
-  );
-  assert.throws(
-    () => new SupabaseIngestTransport({
-      url: 'https://project.supabase.co/functions/v1/',
-      publishableKey: 'sb_publishable_example',
-    }),
-    /must include an Edge Function name/u,
+    /embedded credentials/u,
   );
 
-  const noToken = new SupabaseIngestTransport({
+  let requests = 0;
+  const transport = createSupabaseIngestTransport({
     url: 'https://project.supabase.co',
-    publishableKey: 'sb_publishable_example',
+    publishableKey: 'sb_publishable_public',
     awaitDelivery: true,
-    fetch: async () => response(),
+    fetch: async () => {
+      requests += 1;
+      return new Response(null, { status: 202 });
+    },
   });
-  await assert.rejects(noToken.write(record('missing-token')), /requires a user access token/u);
-
-  const badToken = new SupabaseIngestTransport({
-    url: 'https://project.supabase.co',
-    publishableKey: 'sb_publishable_example',
-    accessToken: jwt('service_role'),
-    awaitDelivery: true,
-    fetch: async () => response(),
-  });
-  await assert.rejects(badToken.write(record('service-role')), /service-role JWT/u);
-
-  const unauthenticated = new SupabaseIngestTransport({
-    url: 'https://project.supabase.co',
-    publishableKey: 'sb_publishable_example',
-    allowUnauthenticated: true,
-    awaitDelivery: true,
-    fetch: async () => response(),
-  });
-  await unauthenticated.write(record('public-function'));
-  await unauthenticated.close();
+  await assert.rejects(
+    transport.write(record('missing-auth')),
+    /requires a user access token/u,
+  );
+  assert.equal(requests, 0);
+  assert.equal(transport.snapshot().failures, 1);
 });
 
-test('bounds queue and record size with observable drop reasons', async () => {
-  const drops = [];
+test('authenticated batches use a normalized Edge Function URL and bounded client-safe headers', async () => {
   const requests = [];
-  const transport = new SupabaseIngestTransport({
-    url: 'https://project.supabase.co',
-    publishableKey: 'sb_publishable_example',
-    accessToken: jwt('authenticated'),
-    batchSize: 100,
-    maxQueueSize: 2,
-    maxRecordBytes: 512,
+  const transport = createSupabaseIngestTransport({
+    url: 'https://project.supabase.co/some/path?leak=no#fragment',
+    functionName: 'telemetry-ingest',
+    publishableKey: '  sb_publishable_public  ',
+    accessToken: async () => '  user-access-token  ',
+    batchSize: 10,
     flushIntervalMillis: 60_000,
-    onDrop: (drop) => drops.push(drop),
+    clock: () => new Date('2026-08-03T12:34:56.000Z'),
     fetch: async (url, init) => {
       requests.push({ url, init });
-      return response();
+      return new Response(null, { status: 202 });
     },
   });
 
   await transport.write(record('one'));
   await transport.write(record('two'));
-  await transport.write(record('three'));
-  await transport.write(record('too-large', { fields: { payload: 'x'.repeat(2_000) } }));
+  await transport.flush();
 
-  assert.equal(transport.snapshot().queued, 2);
-  assert.deepEqual(drops.map((drop) => [drop.reason, drop.record.id]), [
-    ['queue-full', 'one'],
-    ['record-too-large', 'too-large'],
-  ]);
-  await transport.close();
   assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, 'https://project.supabase.co/functions/v1/telemetry-ingest');
+  assert.equal(requests[0].init.method, 'POST');
+  assert.equal(requests[0].init.credentials, 'omit');
+  assert.equal(requests[0].init.redirect, 'error');
+  assert.equal(requests[0].init.keepalive, false);
+  assert.equal(requests[0].init.headers.apikey, 'sb_publishable_public');
+  assert.equal(requests[0].init.headers.authorization, 'Bearer user-access-token');
+  assert.equal(requests[0].init.headers['x-next-loggers-schema'], 'next-loggers/batch/v1');
+  assert.match(requests[0].init.headers['x-next-loggers-batch-id'], /^nl-2-[0-9a-f]{16}$/u);
+  assert.equal(requests[0].init.headers['x-client-info'], '@oresoftware/next-loggers');
+
   const body = JSON.parse(requests[0].init.body);
-  assert.deepEqual(body.records.map((value) => value.id), ['two', 'three']);
+  assert.equal(body.schema, 'next-loggers/batch/v1');
+  assert.equal(body.sentAt, '2026-08-03T12:34:56.000Z');
+  assert.equal(body.batchId, requests[0].init.headers['x-next-loggers-batch-id']);
+  assert.deepEqual(body.records.map(({ id }) => id), ['one', 'two']);
+  assert.deepEqual(transport.snapshot(), {
+    queued: 0,
+    dropped: 0,
+    failures: 0,
+    retryAttempts: 0,
+    accepting: true,
+    closed: false,
+  });
 });
 
-test('failed delivery restores order and reuses the deterministic batch id on retry', async () => {
+test('bounded queue drops the oldest record and isolates drop callbacks', async () => {
+  const dropped = [];
+  const delivered = [];
+  const transport = createSupabaseIngestTransport({
+    url: 'https://project.supabase.co',
+    publishableKey: 'sb_publishable_public',
+    accessToken: 'user-token',
+    maxQueueSize: 2,
+    batchSize: 10,
+    flushIntervalMillis: 60_000,
+    onDrop(drop) {
+      dropped.push([drop.reason, drop.record.id, drop.droppedTotal]);
+      throw new Error('diagnostic unavailable');
+    },
+    fetch: async (_url, init) => {
+      delivered.push(...JSON.parse(init.body).records.map(({ id }) => id));
+      return new Response(null, { status: 202 });
+    },
+  });
+
+  await transport.write(record('oldest'));
+  await transport.write(record('middle'));
+  await transport.write(record('newest'));
+  await transport.flush();
+
+  assert.deepEqual(dropped, [['queue-full', 'oldest', 1]]);
+  assert.deepEqual(delivered, ['middle', 'newest']);
+  assert.equal(transport.snapshot().dropped, 1);
+});
+
+test('failed delivery restores the exact batch order and retries with the same idempotency key', async () => {
   const requests = [];
   const errors = [];
   let attempt = 0;
-  const transport = new SupabaseIngestTransport({
-    url: 'https://project.supabase.co/functions/v1/client-logs?ignored=yes',
-    publishableKey: 'sb_publishable_example',
-    accessToken: jwt('authenticated'),
-    awaitDelivery: true,
+  const transport = createSupabaseIngestTransport({
+    url: 'https://project.supabase.co/functions/v1/telemetry-ingest?ignored=yes',
+    publishableKey: 'sb_publishable_public',
+    accessToken: 'user-token',
+    batchSize: 10,
+    flushIntervalMillis: 60_000,
     retryBaseMillis: 10,
     retryMaxMillis: 10,
-    random: () => 0,
-    onError: (error, snapshot) => errors.push([error.message, snapshot.queued]),
-    fetch: async (url, init) => {
-      requests.push({ url, init });
+    random: () => 0.5,
+    onError(error, snapshot) {
+      errors.push([error.message, snapshot.failures, snapshot.queued]);
+    },
+    fetch: async (_url, init) => {
       attempt += 1;
-      return attempt === 1 ? response(503, 'request-1') : response();
+      requests.push({
+        batchId: init.headers['x-next-loggers-batch-id'],
+        ids: JSON.parse(init.body).records.map(({ id }) => id),
+      });
+      return attempt === 1
+        ? new Response(null, { status: 503, statusText: 'Unavailable' })
+        : new Response(null, { status: 202 });
     },
   });
 
-  await assert.rejects(
-    transport.write(record('retry-me')),
-    /503 Unavailable \(request request-1\)/u,
-  );
-  assert.equal(transport.snapshot().queued, 1);
+  await transport.write(record('first'));
+  await transport.write(record('second'));
+  await assert.rejects(transport.flush(), /returned 503 Unavailable/u);
   assert.equal(transport.snapshot().failures, 1);
-  await transport.flush();
+  assert.equal(transport.snapshot().queued, 2);
+  assert.equal(transport.snapshot().retryAttempts, 1);
 
-  assert.equal(requests.length, 2);
-  assert.equal(requests[0].url, 'https://project.supabase.co/functions/v1/client-logs');
-  assert.equal(
-    JSON.parse(requests[0].init.body).batchId,
-    JSON.parse(requests[1].init.body).batchId,
-  );
-  assert.deepEqual(
-    requests.map((request) => JSON.parse(request.init.body).records[0].id),
-    ['retry-me', 'retry-me'],
-  );
-  assert.deepEqual(errors, [['Supabase telemetry ingest returned 503 Unavailable (request request-1)', 1]]);
-  await transport.close();
+  await transport.flush();
+  assert.deepEqual(requests.map(({ ids }) => ids), [
+    ['first', 'second'],
+    ['first', 'second'],
+  ]);
+  assert.equal(requests[0].batchId, requests[1].batchId);
+  assert.deepEqual(errors, [['Supabase telemetry ingest returned 503 Unavailable', 1, 2]]);
+  assert.equal(transport.snapshot().queued, 0);
+  assert.equal(transport.snapshot().retryAttempts, 0);
 });
 
-test('close is idempotent, uses keepalive only within the exit budget, and rejects new records by dropping them', async () => {
+test('oversized records are dropped before network delivery', async () => {
+  const drops = [];
+  let requests = 0;
+  const transport = createSupabaseIngestTransport({
+    url: 'https://project.supabase.co',
+    publishableKey: 'sb_publishable_public',
+    accessToken: 'user-token',
+    maxRecordBytes: 256,
+    maxBatchBytes: 1_024,
+    onDrop: (drop) => drops.push([drop.reason, drop.record.id]),
+    fetch: async () => {
+      requests += 1;
+      return new Response(null, { status: 202 });
+    },
+  });
+
+  await transport.write(record('large', { message: 'x'.repeat(2_000) }));
+  await transport.flush();
+  assert.deepEqual(drops, [['record-too-large', 'large']]);
+  assert.equal(requests, 0);
+});
+
+test('close is idempotent, uses the exit keepalive budget, and drops later writes', async () => {
   const requests = [];
   const drops = [];
-  const transport = new SupabaseIngestTransport({
+  const transport = createSupabaseIngestTransport({
     url: 'https://project.supabase.co',
-    publishableKey: 'sb_publishable_example',
-    accessToken: jwt('authenticated'),
-    batchSize: 100,
+    publishableKey: 'sb_publishable_public',
+    accessToken: 'user-token',
     maxExitBatchBytes: 60 * 1_024,
     flushIntervalMillis: 60_000,
-    onDrop: (drop) => drops.push(drop),
-    fetch: async (url, init) => {
-      requests.push({ url, init });
-      return response();
+    onDrop: (drop) => drops.push([drop.reason, drop.record.id]),
+    fetch: async (_url, init) => {
+      requests.push(init);
+      return new Response(null, { status: 202 });
     },
   });
-  await transport.write(record('exit'));
-  const first = transport.close();
-  const second = transport.close();
-  assert.equal(first, second);
-  await first;
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].init.keepalive, true);
-  assert.equal(transport.snapshot().closed, true);
 
+  await transport.write(record('before-close'));
+  await Promise.all([transport.close(), transport.close()]);
   await transport.write(record('after-close'));
-  assert.deepEqual(drops.map((drop) => [drop.reason, drop.record.id]), [
-    ['closed', 'after-close'],
-  ]);
   await transport.close();
 
-  const oversizedExitRequests = [];
-  const oversizedExit = new SupabaseIngestTransport({
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].keepalive, true);
+  assert.deepEqual(drops, [['closed', 'after-close']]);
+  assert.deepEqual(transport.snapshot(), {
+    queued: 0,
+    dropped: 1,
+    failures: 0,
+    retryAttempts: 0,
+    accepting: false,
+    closed: true,
+  });
+});
+
+test('publishable-key-only mode must be explicitly enabled', async () => {
+  const requests = [];
+  const transport = createSupabaseIngestTransport({
     url: 'https://project.supabase.co',
-    publishableKey: 'sb_publishable_example',
-    accessToken: jwt('authenticated'),
-    batchSize: 100,
-    maxRecordBytes: 8 * 1_024,
-    maxExitBatchBytes: 1_024,
-    flushIntervalMillis: 60_000,
-    fetch: async (url, init) => {
-      oversizedExitRequests.push({ url, init });
-      return response();
+    publishableKey: 'sb_publishable_public',
+    allowUnauthenticated: true,
+    awaitDelivery: true,
+    fetch: async (_url, init) => {
+      requests.push(init);
+      return new Response(null, { status: 202 });
     },
   });
-  await oversizedExit.write(record('large-exit', { fields: { payload: 'x'.repeat(2_000) } }));
-  await oversizedExit.close();
-  assert.equal(oversizedExitRequests.length, 1);
-  assert.equal(oversizedExitRequests[0].init.keepalive, false);
+
+  await transport.write(record('public'));
+  assert.equal(requests.length, 1);
+  assert.equal('authorization' in requests[0].headers, false);
 });

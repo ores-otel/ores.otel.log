@@ -77,6 +77,12 @@ export function buildSuites({ rootDir = defaultRoot, fileExists = existsSync } =
       cwd: path.join(rootDir, 'sdk', 'rust'),
     },
     {
+      name: 'Rust OpenTelemetry companion',
+      command: 'cargo',
+      args: ['test'],
+      cwd: path.join(rootDir, 'sdk', 'rust-otel'),
+    },
+    {
       name: 'Gleam',
       command: 'gleam',
       args: ['test'],

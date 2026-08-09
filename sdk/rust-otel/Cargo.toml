@@ -1,0 +1,10 @@
+[package]
+name = "oresoftware-next-loggers-otel"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Explicit context and OpenTelemetry adapters for oresoftware-next-loggers"
+repository = "https://github.com/ORESoftware/next-loggers.ts"
+
+[dependencies]
+next_loggers = { package = "oresoftware-next-loggers", path = "../rust" }

@@ -1,0 +1,163 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 5 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 5, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(up{job=~\"prometheus|otel-collector-internal|otel-collector-exported-metrics|loki|tempo\"})", "instant": true, "legendFormat": "healthy targets", "range": false, "refId": "A" }
+      ],
+      "title": "Healthy stack targets",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [], "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 10, "x": 4, "y": 0 },
+      "id": 2,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (level) (rate(next_loggers_records_total[$__rate_interval]))", "legendFormat": "{{level}}", "range": true, "refId": "A" }
+      ],
+      "title": "Logger records by level",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [], "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 0 },
+      "id": 3,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (transport, outcome) (rate(next_loggers_transport_writes_total[$__rate_interval]))", "legendFormat": "{{transport}} / {{outcome}}", "range": true, "refId": "A" }
+      ],
+      "title": "Transport writes by outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [], "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "id": 4,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, transport) (rate(next_loggers_transport_write_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95 {{transport}}", "range": true, "refId": "A" }
+      ],
+      "title": "Transport write latency (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [], "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "id": 5,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (transport, reason) (increase(next_loggers_transport_dropped_total[$__range]))", "legendFormat": "{{transport}} / {{reason}}", "range": true, "refId": "A" }
+      ],
+      "title": "Dropped records",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "mappings": [], "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "id": 6,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "right", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "editorMode": "code", "expr": "max(next_loggers_pending_writes)", "legendFormat": "pending", "range": true, "refId": "A" }
+      ],
+      "title": "Pending logger writes",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "id": 7,
+      "options": {
+        "dedupStrategy": "none",
+        "enableInfiniteScrolling": false,
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        { "direction": "backward", "editorMode": "code", "expr": "{service_name=~\".+\"} |~ \"(?i)(error|fatal)\"", "queryType": "range", "refId": "A" }
+      ],
+      "title": "Recent error and fatal logs",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["next-loggers", "otel", "loki", "prometheus"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Next Loggers / Observability Health",
+  "uid": "next-loggers-health",
+  "version": 1,
+  "weekStart": ""
+}

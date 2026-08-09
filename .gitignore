@@ -71,3 +71,7 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+tmp
+temp
+tmp/worktrees
+temp/worktrees
