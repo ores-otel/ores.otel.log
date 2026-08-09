@@ -17,15 +17,17 @@ fn matches_shared_record_fixture() {
     .expect("valid shared fixture");
 
     let transport = Arc::new(MemoryTransport::default());
-    let mut options = Options::default();
-    options.app_name = "payments".into();
-    options.name = Some("audit".into());
-    options.runtime = "contract-test".into();
-    options.fields = object(json!({"environment": "test"}));
-    options.console = false;
-    options.transports = vec![transport.clone() as Arc<dyn Transport>];
-    options.id_factory = Arc::new(|| "contract-record-1".into());
-    options.clock = Arc::new(|| "2026-01-02T03:04:05.000Z".into());
+    let options = Options {
+        app_name: "payments".into(),
+        name: Some("audit".into()),
+        runtime: "contract-test".into(),
+        fields: object(json!({"environment": "test"})),
+        console: false,
+        transports: vec![transport.clone() as Arc<dyn Transport>],
+        id_factory: Arc::new(|| "contract-record-1".into()),
+        clock: Arc::new(|| "2026-01-02T03:04:05.000Z".into()),
+        ..Options::default()
+    };
     let logger = Logger::new(options);
 
     let event = logger
@@ -80,9 +82,12 @@ impl AuditEventExt for Event {
 #[test]
 fn levels_send_false_and_extension_traits_work() {
     let transport = Arc::new(MemoryTransport::default());
-    let mut options = Options::default().with_transport(transport.clone());
-    options.max_level = LogLevel::Warn;
-    options.console = false;
+    let options = Options {
+        max_level: LogLevel::Warn,
+        console: false,
+        transports: vec![transport.clone() as Arc<dyn Transport>],
+        ..Options::default()
+    };
     let logger = Logger::new(options);
 
     logger.info(vec![json!("filtered")]).send().unwrap();
@@ -109,22 +114,24 @@ fn explicit_opentelemetry_and_supabase_transports_work() {
     let otel_sink = otel.clone();
     let supabase_sink = supabase.clone();
 
-    let mut options = Options::default();
-    options.app_name = "checkout".into();
-    options.runtime = "rust".into();
-    options.console = false;
-    options.id_factory = Arc::new(|| "otel-record-1".into());
-    options.clock = Arc::new(|| "2026-01-02T03:04:05.000Z".into());
-    options.transports = vec![
-        Arc::new(OpenTelemetryTransport::new(move |record| {
-            otel_sink.lock().unwrap().push(record);
-            Ok(())
-        })) as Arc<dyn Transport>,
-        Arc::new(SupabaseTransport::new(move |record| {
-            supabase_sink.lock().unwrap().push(record);
-            Ok(())
-        })) as Arc<dyn Transport>,
-    ];
+    let options = Options {
+        app_name: "checkout".into(),
+        runtime: "rust".into(),
+        console: false,
+        id_factory: Arc::new(|| "otel-record-1".into()),
+        clock: Arc::new(|| "2026-01-02T03:04:05.000Z".into()),
+        transports: vec![
+            Arc::new(OpenTelemetryTransport::new(move |record| {
+                otel_sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+            Arc::new(SupabaseTransport::new(move |record| {
+                supabase_sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+        ],
+        ..Options::default()
+    };
     let logger = Logger::new(options);
 
     logger
