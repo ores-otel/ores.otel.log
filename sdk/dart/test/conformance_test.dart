@@ -50,7 +50,8 @@ void main() {
       expect(currentLogContext, isNull);
     });
 
-    test('Zone context isolates concurrent Futures and restores the caller', () async {
+    test('Zone context isolates concurrent Futures and restores the caller',
+        () async {
       final logger = Logger(
         appName: 'zone-test',
         idFactory: () => 'zone-record',

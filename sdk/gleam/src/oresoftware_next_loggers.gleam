@@ -354,10 +354,7 @@ pub fn send(event: LogEvent) -> Result(LogEvent, String) {
   send_with_store(event, True)
 }
 
-pub fn send_with_store(
-  event: LogEvent,
-  store: Bool,
-) -> Result(LogEvent, String) {
+pub fn send_with_store(event: LogEvent, store: Bool) -> Result(LogEvent, String) {
   let LogEvent(subject:, record:, sent:) = event
   case sent {
     True -> Ok(event)
@@ -461,10 +458,7 @@ fn otel_field_attributes(
   }
 }
 
-fn handle_message(
-  state: State,
-  message: Message,
-) -> actor.Next(State, Message) {
+fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {
   let State(transport:, pending:, closed:, minimum_level:) = state
   case message {
     Track(record) ->
@@ -530,10 +524,7 @@ fn handle_message(
   }
 }
 
-fn drain(
-  transport: Transport,
-  records: List(LogRecord),
-) -> Result(Nil, String) {
+fn drain(transport: Transport, records: List(LogRecord)) -> Result(Nil, String) {
   case write_all(transport, list.reverse(records)) {
     Error(reason) -> Error(reason)
     Ok(Nil) -> {
