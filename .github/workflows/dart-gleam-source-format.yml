@@ -1,0 +1,65 @@
+name: Dart and Gleam source formatter
+
+on:
+  push:
+    branches:
+      - agent/dart-gleam-source-hardening
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dart-gleam-source-format-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '28'
+          gleam-version: '1.15.0'
+
+      - name: Format and test Dart
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sdk/dart
+          dart pub get
+          dart format .
+          dart analyze
+          dart test
+
+      - name: Format and test Gleam
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd sdk/gleam
+          gleam format src test
+          gleam test
+
+      - name: Commit formatter output to this branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          if git diff --quiet -- sdk/dart sdk/gleam; then
+            echo 'Sources are already formatted.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sdk/dart sdk/gleam
+          git commit -m 'style: format Dart and Gleam SDKs'
+          git push origin HEAD:agent/dart-gleam-source-hardening
