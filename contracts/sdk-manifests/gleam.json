@@ -86,7 +86,7 @@
     }
   },
   "conformance": {
-    "command": "cd sdk/gleam && gleam test",
+    "command": "cd sdk/gleam && gleam format --check src test && gleam test",
     "recordFixture": "contracts/fixtures/conformance-record.json",
     "sourceFiles": [
       "sdk/gleam/src/oresoftware_next_loggers.gleam",
@@ -100,7 +100,9 @@
     "ready": false,
     "blockers": [
       "Add scoped BEAM process-local context through a small Erlang FFI boundary.",
-      "Add process isolation and restoration tests."
+      "Add process isolation and restoration tests.",
+      "Add explicit application-owned span lifecycle and sampled-out correlation tests.",
+      "Validate Gleam-emitted records directly against the canonical JSON Schema."
     ]
   }
 }

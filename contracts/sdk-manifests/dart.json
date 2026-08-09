@@ -1,1 +1,108 @@
-{"manifestVersion":"ores.otel.sdk-manifest/v1","language":"dart","ecosystem":"pub.dev","runtime":"Dart and Flutter","sourceRoot":"sdk/dart","package":{"legacyName":"oresoftware_next_loggers","canonicalName":"ores_otel_log","nativeModule":"ores_otel_log"},"repositories":{"canonical":"ores-otel/ores.otel.log","legacy":"ORESoftware/next-loggers.ts"},"wire":{"recordVersion":"next-loggers/v1","recordSchema":"contracts/log-record.schema.json","contextSchema":"contracts/schemas/log-context.schema.json","otelLogSchema":"contracts/schemas/otel-log-record.schema.json","batchSchema":"contracts/schemas/transport-batch.schema.json"},"api":{"logger":{"trace":["trace"],"debug":["debug"],"info":["info","log"],"warn":["warn"],"error":["error"],"fatal":["fatal"],"flush":["flush"],"flushOnExit":["flushOnExit"],"close":["close"]},"event":{"addFields":["addFields"],"addTrace":["addTrace","addTraceId"],"addRoutineId":["addRoutineId"],"addTags":["addTags"],"addContext":["addContext"],"addMeta":["addMeta"],"addUser":["addUserInfo","addLoggedInUserInfo"],"send":["send"]},"transport":{"write":["write"],"flush":["flush"],"flushOnExit":["flushOnExit"],"close":["close"]}},"context":{"status":"partial","strategy":"zone","propagation":"zone","isolation":"concurrent-safe","symbols":{"run":["runWithLogContext"],"current":["currentLogContext"],"update":["updateLogContext"],"apply":["LogEvent.applyContext"],"withSpan":["withSpan"]},"mergesLoggedInUser":true,"mergesFields":true,"deduplicatesTraceIds":true,"restoresAfterFailure":true},"telemetry":{"opentelemetry":{"adapterSymbols":["OpenTelemetryTransport"],"explicit":true,"automaticInstrumentation":false,"monkeyPatching":false,"ownsProvider":false,"wrapsLoggerCalls":true,"sampledOutCorrelation":false,"recordingSpanEventsOnly":false},"supabase":{"adapterSymbols":["SupabaseTransport"],"authenticatedSender":true,"durableBatchSchema":"next-loggers/batch/v1","allowsDistributedSecrets":false,"realtimeIsDurable":false}},"conformance":{"command":"cd sdk/dart && dart test","recordFixture":"contracts/fixtures/conformance-record.json","sourceFiles":["sdk/dart/lib/next_loggers.dart","sdk/dart/test/conformance.dart"],"validatesJsonSchema":false,"testsContextIsolation":false,"testsNoMonkeyPatching":false},"promotion":{"ready":false,"blockers":["Add Zone-backed context API and Future concurrency tests.","Add durable authenticated Supabase batch transport parity."]}}
+{
+  "manifestVersion": "ores.otel.sdk-manifest/v1",
+  "language": "dart",
+  "ecosystem": "pub.dev",
+  "runtime": "Dart and Flutter",
+  "sourceRoot": "sdk/dart",
+  "package": {
+    "legacyName": "oresoftware_next_loggers",
+    "canonicalName": "ores_otel_log",
+    "nativeModule": "ores_otel_log"
+  },
+  "repositories": {
+    "canonical": "ores-otel/ores.otel.log",
+    "legacy": "ORESoftware/next-loggers.ts"
+  },
+  "wire": {
+    "recordVersion": "next-loggers/v1",
+    "recordSchema": "contracts/log-record.schema.json",
+    "contextSchema": "contracts/schemas/log-context.schema.json",
+    "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
+    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+  },
+  "api": {
+    "logger": {
+      "trace": ["trace"],
+      "debug": ["debug"],
+      "info": ["info", "log"],
+      "warn": ["warn"],
+      "error": ["error"],
+      "fatal": ["fatal"],
+      "flush": ["flush"],
+      "flushOnExit": ["flushOnExit"],
+      "close": ["close"]
+    },
+    "event": {
+      "addFields": ["addFields"],
+      "addTrace": ["addTrace", "addTraceId"],
+      "addRoutineId": ["addRoutineId"],
+      "addTags": ["addTags"],
+      "addContext": ["addContext"],
+      "addMeta": ["addMeta"],
+      "addUser": ["addUserInfo", "addLoggedInUserInfo"],
+      "send": ["send"]
+    },
+    "transport": {
+      "write": ["write"],
+      "flush": ["flush"],
+      "flushOnExit": ["flushOnExit"],
+      "close": ["close"]
+    }
+  },
+  "context": {
+    "status": "partial",
+    "strategy": "zone",
+    "propagation": "zone",
+    "isolation": "concurrent-safe",
+    "symbols": {
+      "run": ["withLogContext"],
+      "current": ["currentLogContext"],
+      "update": ["updateLogContext"],
+      "apply": ["LogEvent.applyContext"],
+      "withSpan": ["withSpan"]
+    },
+    "mergesLoggedInUser": true,
+    "mergesFields": true,
+    "deduplicatesTraceIds": true,
+    "restoresAfterFailure": true
+  },
+  "telemetry": {
+    "opentelemetry": {
+      "adapterSymbols": ["OpenTelemetryTransport"],
+      "explicit": true,
+      "automaticInstrumentation": false,
+      "monkeyPatching": false,
+      "ownsProvider": false,
+      "wrapsLoggerCalls": true,
+      "sampledOutCorrelation": false,
+      "recordingSpanEventsOnly": false
+    },
+    "supabase": {
+      "adapterSymbols": ["SupabaseTransport"],
+      "authenticatedSender": true,
+      "durableBatchSchema": "next-loggers/batch/v1",
+      "allowsDistributedSecrets": false,
+      "realtimeIsDurable": false
+    }
+  },
+  "conformance": {
+    "command": "cd sdk/dart && dart pub get && dart analyze && dart test",
+    "recordFixture": "contracts/fixtures/conformance-record.json",
+    "sourceFiles": [
+      "sdk/dart/lib/next_loggers.dart",
+      "sdk/dart/test/conformance_test.dart"
+    ],
+    "validatesJsonSchema": false,
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": false
+  },
+  "promotion": {
+    "ready": false,
+    "blockers": [
+      "Expand Zone context to the complete canonical user, baggage, map-merge, and trace-ID merge contract.",
+      "Add an explicit application-owned span wrapper with sampled-out correlation and recording-only mutations.",
+      "Add durable authenticated Supabase batch, retry, flush-on-exit, and close lifecycle parity.",
+      "Validate Dart-emitted records directly against the canonical JSON Schema."
+    ]
+  }
+}
