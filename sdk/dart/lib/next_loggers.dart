@@ -38,10 +38,12 @@ class LogContext {
   final List<String> tags;
 }
 
-LogContext? get currentLogContext => Zone.current[_contextZoneKey] as LogContext?;
+LogContext? get currentLogContext =>
+    Zone.current[_contextZoneKey] as LogContext?;
 
 R withLogContext<R>(LogContext context, R Function() callback) {
-  return runZoned(callback, zoneValues: <Object, Object?>{_contextZoneKey: context});
+  return runZoned(callback,
+      zoneValues: <Object, Object?>{_contextZoneKey: context});
 }
 
 typedef RecordSender = FutureOr<void> Function(Map<String, Object?> record);
@@ -68,7 +70,8 @@ final class OpenTelemetryTransport implements LogTransport {
       'next_logger.runtime': record['runtime'],
       'log.record.uid': record['id'],
       if (record['traceId'] != null) 'trace.id': record['traceId'],
-      for (final entry in fields.entries) 'next_logger.field.${entry.key}': entry.value,
+      for (final entry in fields.entries)
+        'next_logger.field.${entry.key}': entry.value,
     };
     return emit(<String, Object?>{
       'body': record['message'],
@@ -140,11 +143,13 @@ final class Logger {
       'appName': appName,
       if (name != null && name!.isNotEmpty) 'name': name,
       'message': message,
-      'values': values.isEmpty ? <Object?>[message] : List<Object?>.from(values),
+      'values':
+          values.isEmpty ? <Object?>[message] : List<Object?>.from(values),
       'fields': mergedFields,
       if (traceId != null && traceId.isNotEmpty) 'traceId': traceId,
       if (traceId != null && traceId.isNotEmpty) 'traceIds': <String>[traceId],
-      if (context != null && context.tags.isNotEmpty) 'tags': List<String>.from(context.tags),
+      if (context != null && context.tags.isNotEmpty)
+        'tags': List<String>.from(context.tags),
     };
     final immutable = _deepCopy(record);
     for (final transport in transports) {

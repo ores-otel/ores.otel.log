@@ -51,7 +51,7 @@ const contracts = [
   {
     name: 'Dart/Flutter',
     sources: ['sdk/dart/lib/next_loggers.dart'],
-    tests: ['sdk/dart/test/conformance.dart'],
+    tests: ['sdk/dart/test/conformance_test.dart'],
     markers: ['OpenTelemetryTransport', 'SupabaseTransport'],
   },
   {
