@@ -129,8 +129,8 @@ class ProcessShutdownOptions {
 
 class ProcessShutdownController {
   ProcessShutdownController._(this._options, this._interactive)
-    : state = ShutdownStateMachine(interactive: _interactive),
-      _clock = _options.clock ?? DateTime.now;
+      : state = ShutdownStateMachine(interactive: _interactive),
+        _clock = _options.clock ?? DateTime.now;
 
   final ProcessShutdownOptions _options;
   final bool _interactive;
@@ -399,9 +399,9 @@ ProcessShutdownController installProcessShutdown(
   } else if (interactive && options.watchStdinEof) {
     controller._subscriptions.add(
       stdin.cast<Object?>().listen(
-        (_) {},
-        onDone: () => controller.trigger(ShutdownCause.stdinEof),
-      ),
+            (_) {},
+            onDone: () => controller.trigger(ShutdownCause.stdinEof),
+          ),
     );
   }
 
