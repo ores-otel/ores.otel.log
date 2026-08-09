@@ -1,0 +1,44 @@
+name: Temporary legacy-main importer
+
+on:
+  push:
+    branches:
+      - agent/import-legacy-main-20260809
+    paths:
+      - .github/workflows/temporary-import-legacy-main.yml
+
+permissions:
+  contents: write
+
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_REPOSITORY: ORESoftware/next-loggers.ts
+      TARGET_REPOSITORY: ores-otel/ores.otel.log
+      TARGET_BRANCH: sync/legacy-main-20260809
+    steps:
+      - name: Import the exact legacy main history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          work="$(mktemp -d)"
+          trap 'rm -rf "$work"' EXIT
+
+          git clone --no-tags --single-branch --branch main \
+            "https://github.com/${SOURCE_REPOSITORY}.git" "$work/source"
+          source_sha="$(git -C "$work/source" rev-parse HEAD)"
+
+          git -C "$work/source" remote add canonical \
+            "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git"
+          git -C "$work/source" push canonical \
+            "HEAD:refs/heads/${TARGET_BRANCH}"
+
+          imported_sha="$(git ls-remote \
+            "https://x-access-token:${GH_TOKEN}@github.com/${TARGET_REPOSITORY}.git" \
+            "refs/heads/${TARGET_BRANCH}" | awk '{print $1}')"
+          test "$imported_sha" = "$source_sha"
+          echo "IMPORTED ${SOURCE_REPOSITORY}@${source_sha} AS ${TARGET_REPOSITORY}:${TARGET_BRANCH}"
