@@ -92,7 +92,7 @@ jobs:
               "        or os.environ.get(\"GITHUB_REPOSITORY\")",
               "        or CANONICAL",
               "    )",
-              "    package_names = go_manifest[\"packages\"]",
+              "    package_names = go_manifest[\"package\"]",
               "    expected = (",
               "        package_names[\"legacyName\"]",
               "        if repository_context == LEGACY",
@@ -125,10 +125,10 @@ jobs:
           from pathlib import Path
 
           manifest = json.loads(Path("contracts/sdk-manifests/go.json").read_text(encoding="utf-8"))
-          expected = manifest["packages"]["canonicalName"]
+          expected = manifest["package"]["canonicalName"]
           observed = Path("sdk/go/go.mod").read_text(encoding="utf-8").splitlines()[0].removeprefix("module ")
           assert observed == expected, (observed, expected)
-          assert manifest["packages"]["legacyName"] == "github.com/ORESoftware/next-loggers.ts/sdk/go"
+          assert manifest["package"]["legacyName"] == "github.com/ORESoftware/next-loggers.ts/sdk/go"
           PY
 
           ! grep -RFn --exclude=go.json 'github.com/ORESoftware/next-loggers.ts/sdk/go' \
