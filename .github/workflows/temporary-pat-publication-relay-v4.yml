@@ -1,0 +1,235 @@
+name: Temporary encrypted PAT publication relay v4
+
+on:
+  push:
+    branches:
+      - agent/pat-publication-relay-20260809
+    paths:
+      - .github/workflows/temporary-pat-publication-relay-v4.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      RELAY_REPOSITORY: ORESoftware/next-loggers.ts
+      RELAY_BRANCH: agent/pat-publication-relay-20260809
+      PUBLIC_KEY_PATH: .github/relay/public-key-v4.pem
+      PAYLOAD_PATH: .github/relay/encrypted-token-v4.b64
+      LEGACY_REPOSITORY: ORESoftware/next-loggers.ts
+      CANONICAL_REPOSITORY: ores-otel/ores.otel.log
+    steps:
+      - name: Idempotently publish canonical and test repositories
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          relay_token="$GH_TOKEN"
+          work="$(mktemp -d)"
+          cleanup_local() {
+            if command -v shred >/dev/null 2>&1; then
+              find "$work" -type f -exec shred -u {} + 2>/dev/null || true
+            fi
+            rm -rf "$work"
+          }
+          trap cleanup_local EXIT
+
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out "$work/private.pem" >/dev/null 2>&1
+          openssl pkey -in "$work/private.pem" -pubout -out "$work/public.pem" >/dev/null 2>&1
+          gh api --method PUT "repos/${RELAY_REPOSITORY}/contents/${PUBLIC_KEY_PATH}" \
+            -f message='Publish idempotent relay public key' \
+            -f content="$(base64 -w0 "$work/public.pem")" \
+            -f branch="$RELAY_BRANCH" >/dev/null
+          echo 'RELAY_V4_READY_FOR_ENCRYPTED_TOKEN'
+
+          payload_ready=false
+          for _ in $(seq 1 600); do
+            if gh api -H 'Accept: application/vnd.github.raw+json' \
+              "repos/${RELAY_REPOSITORY}/contents/${PAYLOAD_PATH}?ref=${RELAY_BRANCH}" \
+              > "$work/encrypted-token.b64" 2>/dev/null; then
+              payload_ready=true
+              break
+            fi
+            sleep 3
+          done
+          [[ "$payload_ready" == true && -s "$work/encrypted-token.b64" ]] || {
+            echo '::error::The encrypted PAT payload was not supplied.'
+            exit 1
+          }
+
+          tr -d '\r\n' < "$work/encrypted-token.b64" | base64 -d > "$work/token.enc"
+          openssl pkeyutl -decrypt -inkey "$work/private.pem" \
+            -in "$work/token.enc" -out "$work/token.txt" \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          user_token="$(tr -d '\r\n' < "$work/token.txt")"
+          case "$user_token" in ghp_*) ;; *) echo '::error::Invalid PAT payload.'; exit 1 ;; esac
+          echo "::add-mask::$user_token"
+          export GH_TOKEN="$user_token"
+          rm -f "$work/token.txt" "$work/token.enc" "$work/encrypted-token.b64" "$work/private.pem"
+
+          echo "Authenticated GitHub login: $(gh api user --jq .login)"
+          gh auth setup-git >/dev/null
+
+          if ! gh repo view "$CANONICAL_REPOSITORY" >/dev/null 2>&1; then
+            gh repo create "$CANONICAL_REPOSITORY" --public --disable-wiki \
+              --description 'Canonical polyglot structured logging, OpenTelemetry, Loki, Prometheus, Grafana, and Supabase contracts'
+          fi
+
+          git clone --depth 1 --branch main "https://github.com/${LEGACY_REPOSITORY}.git" "$work/source"
+          python3 - "$work/source" <<'PY'
+          from __future__ import annotations
+          import base64
+          import importlib.util
+          import subprocess
+          import sys
+          from pathlib import Path
+          from urllib.parse import quote
+
+          source = Path(sys.argv[1])
+          planner_path = source / "scripts" / "plan-ores-otel-repositories.py"
+          spec = importlib.util.spec_from_file_location("ores_otel_planner", planner_path)
+          if spec is None or spec.loader is None:
+              raise SystemExit("could not load repository planner")
+          planner = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(planner)
+
+          def run(command: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+              print("+ " + " ".join(command))
+              return subprocess.run(command, check=check, text=True, capture_output=not check)
+
+          def put_file(repository: str, path: str, content: str, message: str, *, apply: bool) -> None:
+              if not apply:
+                  print(f"DRY-RUN put {repository}:{path}")
+                  return
+              existing = subprocess.run(
+                  ["gh", "api", f"repos/{repository}/contents/{path}", "--jq", ".sha"],
+                  text=True,
+                  capture_output=True,
+              )
+              command = [
+                  "gh", "api", "--method", "PUT",
+                  f"repos/{repository}/contents/{path}",
+                  "-f", f"message={message}",
+                  "-f", f"content={base64.b64encode(content.encode('utf-8')).decode('ascii')}",
+              ]
+              sha = existing.stdout.strip() if existing.returncode == 0 else ""
+              if sha:
+                  command.extend(["-f", f"sha={sha}"])
+              run(command)
+
+          planner.put_file = put_file
+          matrix = planner.load_matrix()
+          for repository in matrix["repositories"]:
+              full_name = f"{planner.TEST_ORG}/{repository['name']}"
+              planner.ensure_repo(
+                  full_name,
+                  f"{repository['language']} conformance for canonical and legacy ores.otel.log sources",
+                  "private",
+                  apply=True,
+                  add_readme=False,
+              )
+              planner.seed_test_repo(repository, apply=True)
+              default_branch = subprocess.run(
+                  ["gh", "repo", "view", full_name, "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+                  text=True,
+                  capture_output=True,
+                  check=True,
+              ).stdout.strip()
+              if default_branch and default_branch != "main":
+                  run([
+                      "gh", "api", "--method", "POST",
+                      f"repos/{full_name}/branches/{quote(default_branch, safe='')}/rename",
+                      "-f", "new_name=main",
+                  ])
+          PY
+
+          git clone --mirror "https://github.com/${LEGACY_REPOSITORY}.git" "$work/legacy.git"
+          git --git-dir="$work/legacy.git" update-ref -d "refs/heads/${RELAY_BRANCH}" || true
+          while IFS= read -r ref; do
+            [[ -n "$ref" ]] && git --git-dir="$work/legacy.git" update-ref -d "$ref"
+          done < <(git --git-dir="$work/legacy.git" for-each-ref --format='%(refname)' refs/pull refs/remotes refs/merge-requests)
+          git --git-dir="$work/legacy.git" remote set-url origin "https://github.com/${CANONICAL_REPOSITORY}.git"
+          git --git-dir="$work/legacy.git" push --mirror origin
+          gh api --method PATCH "repos/${CANONICAL_REPOSITORY}" -f default_branch=main -F has_wiki=false >/dev/null
+
+          legacy_main="$(gh api "repos/${LEGACY_REPOSITORY}/commits/main" --jq .sha)"
+          canonical_main="$(gh api "repos/${CANONICAL_REPOSITORY}/commits/main" --jq .sha)"
+          [[ "$legacy_main" == "$canonical_main" ]] || {
+            echo "::error::SHA mismatch: legacy=$legacy_main canonical=$canonical_main"
+            exit 1
+          }
+          echo "MIRROR_VERIFIED $canonical_main"
+
+          mapfile -t repositories < <(python3 - "$work/source/contracts/migration/test-repository-matrix.json" <<'PY'
+          import json, sys
+          for item in json.load(open(sys.argv[1], encoding='utf-8'))['repositories']:
+              print(f"ores-otel-test/{item['name']}")
+          PY
+          )
+
+          declare -A dispatched
+          for repository in "${repositories[@]}"; do
+            gh api --method PUT "repos/${repository}/actions/permissions" \
+              -F enabled=true -f allowed_actions=all >/dev/null 2>&1 || true
+            ok=false
+            for _ in $(seq 1 20); do
+              if gh workflow run conformance.yml -R "$repository" --ref main \
+                -f canonical_sha="$canonical_main" -f legacy_sha="$legacy_main" >/dev/null 2>&1; then
+                ok=true
+                break
+              fi
+              sleep 3
+            done
+            if [[ "$ok" == true ]]; then
+              dispatched["$repository"]=true
+              echo "DISPATCHED $repository"
+            else
+              dispatched["$repository"]=false
+              echo "DISPATCH_FAILED $repository"
+            fi
+          done
+
+          deadline=$((SECONDS + 1500))
+          declare -A results
+          while (( SECONDS < deadline )); do
+            pending=0
+            for repository in "${repositories[@]}"; do
+              if [[ "${dispatched[$repository]}" != true ]]; then
+                results["$repository"]='dispatch-failed'
+                continue
+              fi
+              row="$(gh run list -R "$repository" --workflow conformance.yml --event workflow_dispatch --limit 1 \
+                --json databaseId,status,conclusion \
+                --jq 'if length == 0 then "missing" else .[0] | "\(.databaseId) \(.status) \(.conclusion // "")" end' 2>/dev/null || echo missing)"
+              if [[ "$row" == missing ]]; then pending=$((pending + 1)); continue; fi
+              read -r run_id status conclusion <<< "$row"
+              if [[ "$status" == completed ]]; then
+                results["$repository"]="${conclusion:-unknown}:$run_id"
+              else
+                pending=$((pending + 1))
+              fi
+            done
+            (( pending == 0 )) && break
+            sleep 10
+          done
+
+          echo 'PUBLICATION_SUMMARY_BEGIN'
+          echo "CANONICAL $CANONICAL_REPOSITORY $canonical_main"
+          for repository in "${repositories[@]}"; do
+            echo "TEST_REPOSITORY $repository ${results[$repository]:-timeout}"
+          done
+          echo 'PUBLICATION_SUMMARY_END'
+          echo 'ORES_OTEL_REPOSITORIES_BEGIN'
+          gh repo list ores-otel --limit 100 --json nameWithOwner,visibility,defaultBranchRef \
+            --jq '.[] | "REPOSITORY \(.nameWithOwner) \(.visibility) \(.defaultBranchRef.name // "")"'
+          gh repo list ores-otel-test --limit 100 --json nameWithOwner,visibility,defaultBranchRef \
+            --jq '.[] | "REPOSITORY \(.nameWithOwner) \(.visibility) \(.defaultBranchRef.name // "")"'
+          echo 'ORES_OTEL_REPOSITORIES_END'
+
+          GH_TOKEN="$relay_token" gh api --method DELETE \
+            "repos/${RELAY_REPOSITORY}/git/refs/heads/${RELAY_BRANCH}" >/dev/null 2>&1 || true
