@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "1.0.0",
+  "canonicalRepository": "ORESoftware/next-loggers.ts",
+  "canonicalBranch": "agent/polyglot-context-shutdown-20260808",
+  "stateMeaning": {
+    "draft-pr": "Template branch and draft review exist; no repository-level server evidence is implied.",
+    "available": "Template was reviewed and merged in the test organization.",
+    "retired": "Template was superseded by a tagged canonical release or organization ruleset."
+  },
+  "templates": [
+    {
+      "repository": "ores-otel-test/.github",
+      "branch": "agent/lifecycle-workflow-template-20260808",
+      "state": "draft-pr",
+      "strictDefault": true,
+      "productionPromotionAllowed": false
+    },
+    {
+      "repository": "canonical-cloud-test/.github",
+      "branch": "agent/lifecycle-template-20260808",
+      "state": "draft-pr",
+      "strictDefault": true,
+      "productionPromotionAllowed": false
+    },
+    {
+      "repository": "networking-components-test/.github",
+      "branch": "agent/lifecycle-template-20260808",
+      "state": "draft-pr",
+      "strictDefault": true,
+      "productionPromotionAllowed": false
+    },
+    {
+      "repository": "fiducia-cloud-test/.github",
+      "branch": "agent/lifecycle-template-20260808",
+      "state": "draft-pr",
+      "strictDefault": true,
+      "productionPromotionAllowed": false
+    },
+    {
+      "repository": "zed-pkg-test/.github",
+      "branch": "agent/lifecycle-template-20260808",
+      "state": "draft-pr",
+      "strictDefault": true,
+      "productionPromotionAllowed": false
+    },
+    {
+      "repository": "hacker-house-medellin-test/.github",
+      "branch": "agent/lifecycle-template-20260808",
+      "state": "draft-pr",
+      "strictDefault": true,
+      "productionPromotionAllowed": false
+    },
+    {
+      "repository": "discrete-event-systems-test/.github",
+      "branch": "agent/lifecycle-template-20260808",
+      "state": "draft-pr",
+      "strictDefault": true,
+      "productionPromotionAllowed": false
+    }
+  ]
+}

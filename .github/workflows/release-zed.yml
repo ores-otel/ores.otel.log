@@ -1,0 +1,46 @@
+name: Release Zed packages
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zed-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish every language slice to Zed
+    if: startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    environment: zed-pkg
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/verify-release-tag.mjs zed
+      - name: Install the pinned Zed CLI
+        run: >-
+          cargo install
+          --git https://github.com/zed-pkg/zed-cli
+          --rev 822bbdef7ebb9218a83ad7d3b3dca78ade1add79
+          --locked zed-cli
+      - run: zed release plan
+      - run: zed pack
+      - run: zed r2g --clean
+      - run: zed publish
+        env:
+          ZED_PKG_TOKEN: ${{ secrets.ZED_PKG_TOKEN }}

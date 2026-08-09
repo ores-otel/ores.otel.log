@@ -1,0 +1,14 @@
+name: oresoftware_next_loggers
+description: Flutter-compatible next-loggers/v1 records with Zone context and explicit telemetry sinks.
+version: 0.1.0
+repository: https://github.com/ORESoftware/next-loggers.ts/tree/main/sdk/dart
+issue_tracker: https://github.com/ORESoftware/next-loggers.ts/issues
+homepage: https://github.com/ORESoftware/next-loggers.ts
+topics:
+  - logging
+  - opentelemetry
+  - observability
+  - flutter
+  - supabase
+environment:
+  sdk: '>=3.3.0 <4.0.0'

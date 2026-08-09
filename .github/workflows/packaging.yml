@@ -1,0 +1,137 @@
+name: Polyglot packaging
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-preflight:
+    name: Zed and native package preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out immutable flags-2-env contract tooling
+        uses: actions/checkout@v7
+        with:
+          repository: ORESoftware/flags-2-env
+          ref: 611bba8f344cda4658de79c44d8954bef30cb6e5
+          path: .flags2env
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.24.x"
+          cache: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19.0"
+          gleam-version: "1.17.0"
+          rebar3-version: "3.27.0"
+
+      - name: Install real shell-completion runtimes
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes zsh
+
+      - name: Audit the portable flags-2-env contract
+        run: |
+          make -C .flags2env cli
+          .flags2env/build/flags2env audit .cli-flags.toml
+
+      - name: Exercise canonical help and Bash/Zsh completion
+        run: |
+          python3 .flags2env/scripts/verify-shell-contract.py \
+            --cli .flags2env/build/flags2env \
+            --contract .cli-flags.toml \
+            --command next-loggers \
+            --install
+
+      - name: Install JavaScript and Python packaging tools
+        run: |
+          npm ci
+          python -m pip install --upgrade "setuptools>=77" build twine
+
+      - name: Build and validate synchronized release metadata
+        run: npm run release:check
+
+      - name: Validate CLI, flags-2-env, and release-catalog documentation
+        run: >-
+          node --test
+          tests/cli-flags.test.mjs
+          tests/cli-packages.test.mjs
+          tests/cli-packages-hardening.test.mjs
+
+      - name: Install the pinned Zed CLI
+        run: >-
+          cargo install
+          --git https://github.com/zed-pkg/zed-cli
+          --rev 822bbdef7ebb9218a83ad7d3b3dca78ade1add79
+          --locked zed-cli
+
+      - name: Inspect the deterministic Zed/native release plan
+        run: zed release plan --json | tee zed-release-plan.json
+
+      - name: Run Zed native-registry preflight adapters
+        run: zed release preflight
+
+      - name: Validate Gleam Hex package
+        run: gleam export hex-tarball
+        working-directory: sdk/gleam
+
+      - name: Validate Erlang Hex package
+        run: rebar3 hex build package
+        working-directory: sdk/erlang
+
+      - name: Validate Elixir Hex package
+        run: |
+          mix local.hex --force
+          mix hex.build
+        working-directory: sdk/elixir
+
+      - name: Validate Ruby package and concurrency contract
+        run: |
+          ruby test/next_loggers_test.rb
+          gem build --strict oresoftware-next-loggers.gemspec --output package.gem
+        working-directory: sdk/ruby
+
+      - name: Roundtrip the complete Zed artifact
+        run: |
+          zed pack
+          zed r2g --clean

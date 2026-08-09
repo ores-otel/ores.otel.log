@@ -1,0 +1,319 @@
+name: Release native package
+
+on:
+  push:
+    tags:
+      - "sdk/nodejs/v*"
+      - "sdk/python/v*"
+      - "sdk/go/v*"
+      - "sdk/rust/v*"
+      - "sdk/wasm/v*"
+      - "sdk/java/v*"
+      - "sdk/dart/v*"
+      - "sdk/ruby/v*"
+      - "sdk/gleam/v*"
+      - "sdk/erlang/v*"
+      - "sdk/elixir/v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  npm:
+    if: startsWith(github.ref_name, 'sdk/nodejs/v')
+    name: npm / @oresoftware/next-loggers
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.5.1
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/verify-release-tag.mjs nodejs
+      - run: npm pack --dry-run --json
+        working-directory: sdk/nodejs
+      - run: npm publish --access public --provenance
+        working-directory: sdk/nodejs
+
+  pypi:
+    if: startsWith(github.ref_name, 'sdk/python/v')
+    name: PyPI / oresoftware-next-loggers
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: node scripts/verify-release-tag.mjs python
+      - run: python -m pip install --upgrade build twine
+      - run: python -m build sdk/python
+      - run: python -m twine check sdk/python/dist/*
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist/
+
+  go:
+    if: startsWith(github.ref_name, 'sdk/go/v')
+    name: Go module / sdk/go
+    runs-on: ubuntu-latest
+    environment: go-modules
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.24.x"
+          cache: false
+      - run: node scripts/verify-release-tag.mjs golang
+      - run: go test ./...
+        working-directory: sdk/go
+      - run: go list -m
+        working-directory: sdk/go
+      - name: Confirm tag-driven publication
+        run: echo "${GITHUB_REF_NAME} publishes github.com/ORESoftware/next-loggers.ts/sdk/go through the Go module proxy"
+
+  rust:
+    if: startsWith(github.ref_name, 'sdk/rust/v')
+    name: crates.io / oresoftware-next-loggers
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - run: node scripts/verify-release-tag.mjs rust
+      - run: cargo test --manifest-path sdk/rust/Cargo.toml --locked
+      - run: cargo publish --manifest-path sdk/rust/Cargo.toml --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  wasm:
+    if: startsWith(github.ref_name, 'sdk/wasm/v')
+    name: crates.io / oresoftware-next-loggers-wasm
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - run: node scripts/verify-release-tag.mjs wasm
+      - run: cargo test --manifest-path sdk/wasm/Cargo.toml --locked
+      - run: cargo build --manifest-path sdk/wasm/Cargo.toml --locked --target wasm32-unknown-unknown
+      - run: cargo publish --manifest-path sdk/wasm/Cargo.toml --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  maven:
+    if: startsWith(github.ref_name, 'sdk/java/v')
+    name: Maven Central / io.github.oresoftware:next-loggers
+    runs-on: ubuntu-latest
+    environment: maven-central
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          server-id: central
+          server-username: CENTRAL_TOKEN_USERNAME
+          server-password: CENTRAL_TOKEN_PASSWORD
+          gpg-private-key: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          gpg-passphrase: MAVEN_GPG_PASSPHRASE
+      - run: node scripts/verify-release-tag.mjs java
+      - run: bash test.sh
+        working-directory: sdk/java
+      - run: mvn -B -ntp deploy -Dgpg.passphrase="$MAVEN_GPG_PASSPHRASE"
+        working-directory: sdk/java
+        env:
+          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
+          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+
+  dart:
+    if: startsWith(github.ref_name, 'sdk/dart/v')
+    name: pub.dev / oresoftware_next_loggers
+    runs-on: ubuntu-latest
+    environment: pub.dev
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: node scripts/verify-release-tag.mjs dart
+      - run: dart pub get
+        working-directory: sdk/dart
+      - run: dart analyze
+        working-directory: sdk/dart
+      - run: dart run test/conformance.dart
+        working-directory: sdk/dart
+      - run: dart pub publish --force
+        working-directory: sdk/dart
+
+  ruby:
+    if: startsWith(github.ref_name, 'sdk/ruby/v')
+    name: RubyGems / oresoftware-next-loggers
+    runs-on: ubuntu-latest
+    environment: rubygems
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      - run: node scripts/verify-release-tag.mjs ruby
+      - run: ruby test/next_loggers_test.rb
+        working-directory: sdk/ruby
+      - run: gem build --strict oresoftware-next-loggers.gemspec --output package.gem
+        working-directory: sdk/ruby
+      - uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a
+      - run: gem push package.gem
+        working-directory: sdk/ruby
+
+  gleam:
+    if: startsWith(github.ref_name, 'sdk/gleam/v')
+    name: Hex / oresoftware_next_loggers
+    runs-on: ubuntu-latest
+    environment: hex
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          gleam-version: "1.17.0"
+      - run: node scripts/verify-release-tag.mjs gleam
+      - run: gleam test
+        working-directory: sdk/gleam
+      - run: gleam export hex-tarball
+        working-directory: sdk/gleam
+      - run: gleam publish --yes
+        working-directory: sdk/gleam
+        env:
+          HEXPM_API_KEY: ${{ secrets.HEX_PUBLISH_KEY }}
+
+  erlang:
+    if: startsWith(github.ref_name, 'sdk/erlang/v')
+    name: Hex / oresoftware_next_loggers_erlang
+    runs-on: ubuntu-latest
+    environment: hex
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          rebar3-version: "3.27.0"
+      - run: node scripts/verify-release-tag.mjs erlang
+      - run: bash test.sh
+        working-directory: sdk/erlang
+      - run: rebar3 hex build package
+        working-directory: sdk/erlang
+      - run: rebar3 hex publish package --yes
+        working-directory: sdk/erlang
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_PUBLISH_KEY }}
+
+  elixir:
+    if: startsWith(github.ref_name, 'sdk/elixir/v')
+    name: Hex / oresoftware_next_loggers_elixir
+    runs-on: ubuntu-latest
+    environment: hex
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19.0"
+      - run: node scripts/verify-release-tag.mjs elixir
+      - run: mix local.hex --force
+        working-directory: sdk/elixir
+      - run: bash test.sh
+        working-directory: sdk/elixir
+      - run: mix hex.build
+        working-directory: sdk/elixir
+      - run: mix hex.publish package --yes
+        working-directory: sdk/elixir
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_PUBLISH_KEY }}

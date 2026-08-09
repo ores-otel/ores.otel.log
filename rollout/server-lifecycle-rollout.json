@@ -1,0 +1,196 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "1.0.0",
+  "canonical": {
+    "repository": "ORESoftware/next-loggers.ts",
+    "branch": "agent/polyglot-context-shutdown-20260808",
+    "state": "draft-pr",
+    "productionMergeAllowed": false
+  },
+  "states": {
+    "unscanned": "No repository-level evidence has been collected.",
+    "discovered": "Server entry points and current lifecycle/context evidence have been recorded.",
+    "canary-pending": "A matching test-organization change exists but has not passed all gates.",
+    "canary-green": "The matching test-organization exact commit passed behavioral and audit gates.",
+    "production-pr": "A production pull request is open and references green canary evidence.",
+    "promoted": "The production exact commit passed required checks and was merged.",
+    "exception": "A reviewed runtime/framework exception is documented with compensating controls."
+  },
+  "organizations": [
+    {
+      "production": "ORESoftware",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "discovered",
+      "notes": "Canonical library is under review; individual ORESoftware server repositories remain unscanned unless listed below."
+    },
+    {
+      "production": "ores-otel",
+      "test": "ores-otel-test",
+      "testOrganizationConfirmed": true,
+      "state": "canary-pending"
+    },
+    {
+      "production": "canonical-cloud",
+      "test": "canonical-cloud-test",
+      "testOrganizationConfirmed": true,
+      "state": "unscanned"
+    },
+    {
+      "production": "networking-components",
+      "test": "networking-components-test",
+      "testOrganizationConfirmed": true,
+      "state": "unscanned"
+    },
+    {
+      "production": "fiducia-cloud",
+      "test": "fiducia-cloud-test",
+      "testOrganizationConfirmed": true,
+      "state": "unscanned"
+    },
+    {
+      "production": "zed-pkg",
+      "test": "zed-pkg-test",
+      "testOrganizationConfirmed": true,
+      "state": "unscanned"
+    },
+    {
+      "production": "hacker-house-medellin",
+      "test": "hacker-house-medellin-test",
+      "testOrganizationConfirmed": true,
+      "state": "unscanned"
+    },
+    {
+      "production": "discrete-event-systems",
+      "test": "discrete-event-systems-test",
+      "testOrganizationConfirmed": true,
+      "state": "unscanned"
+    },
+    {
+      "production": "shared-auth",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "messaging-intel",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "3FA-app",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "memebank",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "hypesiege",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "StreemPilot",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "file-tunnel",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "led-dynamo",
+      "test": "led-dynamo-test",
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "meta-agents-demo",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "claritas-viz",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "opto-sync",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "quaestor-ledger",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "sonus-auris",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "voxletra",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "embedded-alerts",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "evento-globolo",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "apostille-me",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    },
+    {
+      "production": "benefactor-cc",
+      "test": null,
+      "testOrganizationConfirmed": false,
+      "state": "unscanned"
+    }
+  ],
+  "repositories": [
+    {
+      "repository": "ORESoftware/next-loggers.ts",
+      "role": "canonical-library",
+      "languages": ["node", "go", "rust", "dart", "gleam"],
+      "state": "production-pr",
+      "canary": null,
+      "productionMergeAllowed": false
+    },
+    {
+      "repository": "ORESoftware/k8s-cluster",
+      "role": "server-and-deployment-inventory",
+      "languages": ["node", "go", "rust", "gleam"],
+      "state": "unscanned",
+      "canary": null,
+      "productionMergeAllowed": false
+    }
+  ]
+}

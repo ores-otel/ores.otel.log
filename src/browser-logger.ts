@@ -4,54 +4,41 @@ import {
   type LogFields,
   type LoggerOptions,
 } from './base-logger.js';
+import {
+  BrowserStreamTransport,
+  type BrowserStreamOptions,
+} from './browser-stream.js';
 
-// Explicit named re-exports (no `export *`): keeps the shared surface identical
-// and statically analyzable across Node, Bun, Deno, and bundler ESM resolvers.
 export {
-  BaseLogger,
-  createLogger,
-  DEFAULT_REDACTED_KEY_PATTERNS,
-  getLogContextProvider,
-  getPendingLogCount,
-  HttpTransport,
-  LOG_LEVELS,
-  LogEvent,
-  pendingLogPromises,
-  r2gSmokeTest,
-  serializeLogValue,
-  serializeLogValueRedacted,
-  setLogContextProvider,
-  SupabaseRealtimeTransport,
-  waitForPendingLogs,
-} from './base-logger.js';
-export type {
-  AsyncLocalStorageLike,
-  BuiltInLoggerRuntime,
-  ErrorTrackingOptions,
-  FlushOptions,
-  HttpTransportOptions,
-  LogArgument,
-  LogContext,
-  LogContextProvider,
-  LogFields,
-  LoggerOptions,
-  LoggerRuntime,
-  LogLevel,
-  LogRecord,
-  LogTransport,
-  LogUser,
-  SerializedValue,
-  SupabaseRealtimeOptions,
-  WebSocketFactory,
-  WebSocketLike,
-} from './base-logger.js';
+  BrowserStreamTransport,
+  createBrowserStreamTransport,
+  type BrowserStreamOptions,
+  type StreamSocketLike,
+} from './browser-stream.js';
+
+// Namespaced re-export: the whole shared surface is reachable as `base.*` from
+// every runtime entrypoint, without flattening it into this module's own
+// exports (so runtime-specific names can never collide with shared ones).
+// A namespace re-export carries types as well as values, so `base.LogLevel`
+// works in type position and `base.createLogger` in value position.
+export * as base from './base-logger.js';
 
 export interface BrowserLoggerOptions extends LoggerOptions {
   includePageContext?: boolean;
+  /** Adds screen, viewport, timezone and connection fields to every record. */
+  includeDeviceContext?: boolean;
   captureGlobalErrors?: boolean;
   captureUnhandledRejections?: boolean;
+  /** Also report CSP violations (securitypolicyviolation) as WARN records. */
+  captureCspViolations?: boolean;
   flushOnUnload?: boolean;
   shutdownTimeoutMillis?: number;
+  /**
+   * Streams records out over a batched, buffered WebSocket. Point it at a
+   * Supabase Realtime socket, your own collector, or wrap an existing
+   * transport — see BrowserStreamOptions.
+   */
+  stream?: BrowserStreamOptions;
 }
 
 const registeredBrowserLoggers = new Set<BrowserLogger>();
@@ -100,10 +87,19 @@ export class BrowserLogger extends BaseLogger {
 
   private removeGlobalHandlers: (() => void) | null = null;
   private unloadRegistered = false;
+  readonly streamTransport: BrowserStreamTransport | null;
 
   constructor(options: BrowserLoggerOptions = {}) {
     super(options, 'browser');
-    if (options.captureGlobalErrors || options.captureUnhandledRejections) {
+    this.streamTransport = options.stream ? new BrowserStreamTransport(options.stream) : null;
+    if (this.streamTransport) {
+      this.transports.push(this.streamTransport);
+    }
+    if (
+      options.captureGlobalErrors ||
+      options.captureUnhandledRejections ||
+      options.captureCspViolations
+    ) {
       this.installGlobalHandlers();
     }
     if (options.flushOnUnload !== false) {
@@ -117,9 +113,13 @@ export class BrowserLogger extends BaseLogger {
   }
 
   override getRuntimeFields(): LogFields {
-    if (this.options.includePageContext === false) {
-      return {};
-    }
+    return {
+      ...(this.options.includePageContext === false ? {} : this.getPageFields()),
+      ...(this.options.includeDeviceContext ? this.getDeviceFields() : {}),
+    };
+  }
+
+  private getPageFields(): LogFields {
     return {
       ...(typeof location !== 'undefined'
         ? {
@@ -137,6 +137,38 @@ export class BrowserLogger extends BaseLogger {
         : {}),
       ...(typeof document !== 'undefined' ? { referrer: document.referrer } : {}),
     };
+  }
+
+  /**
+   * Device shape, for correlating incidents with a viewport or a slow radio.
+   * Every read is guarded: privacy extensions throw on some of these getters.
+   */
+  private getDeviceFields(): LogFields {
+    const fields: LogFields = {};
+    try {
+      if (typeof screen !== 'undefined') {
+        fields.screenWidth = screen.width;
+        fields.screenHeight = screen.height;
+        fields.orientation = screen.orientation?.type;
+      }
+      if (typeof window !== 'undefined') {
+        fields.windowWidth = window.innerWidth;
+        fields.windowHeight = window.innerHeight;
+        fields.pixelRatio = window.devicePixelRatio;
+      }
+      if (typeof Intl !== 'undefined') {
+        fields.timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      }
+      const connection = (
+        globalThis as { navigator?: { connection?: { effectiveType?: string } } }
+      ).navigator?.connection;
+      if (connection?.effectiveType) {
+        fields.connectionType = connection.effectiveType;
+      }
+    } catch {
+      // Partial device context beats losing the record.
+    }
+    return fields;
   }
 
   override anew(options: BrowserLoggerOptions = {}): BrowserLogger {
@@ -174,11 +206,26 @@ export class BrowserLogger extends BaseLogger {
         .send();
     };
 
+    const cspHandler = (event: Event): void => {
+      const violation = event as SecurityPolicyViolationEvent;
+      void this.warn('Content Security Policy violation', violation.violatedDirective)
+        .addFields({
+          blockedURI: violation.blockedURI,
+          sourceFile: violation.sourceFile,
+          line: violation.lineNumber,
+        })
+        .addTags('browser', 'csp-violation')
+        .send();
+    };
+
     if (this.options.captureGlobalErrors) {
       globalThis.addEventListener('error', errorHandler);
     }
     if (this.options.captureUnhandledRejections) {
       globalThis.addEventListener('unhandledrejection', rejectionHandler);
+    }
+    if (this.options.captureCspViolations) {
+      globalThis.addEventListener('securitypolicyviolation', cspHandler);
     }
 
     this.removeGlobalHandlers = () => {
@@ -187,6 +234,9 @@ export class BrowserLogger extends BaseLogger {
       }
       if (this.options.captureUnhandledRejections) {
         globalThis.removeEventListener('unhandledrejection', rejectionHandler);
+      }
+      if (this.options.captureCspViolations) {
+        globalThis.removeEventListener('securitypolicyviolation', cspHandler);
       }
       this.removeGlobalHandlers = null;
     };

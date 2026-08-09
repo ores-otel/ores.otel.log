@@ -1,95 +1,33 @@
+import type { LogContext, LogContextProvider } from './base-logger.js';
 import {
-  setLogContextProvider,
-  type LogContext,
-  type LogContextProvider,
-  type LogUser,
-} from './base-logger.js';
+  createLogContextApi,
+  SingleFrameLogContextStorage,
+  type LogContextStorage,
+} from './context-shared.js';
 
-export type { LogContext, LogContextProvider };
+export type { LogContext, LogContextProvider, LogContextStorage };
 
 /**
- * Browser fallback for `@oresoftware/next-loggers/context`: browsers have no
- * AsyncLocalStorage, so this keeps one module-scoped frame. runWithLogContext
- * restores the previous frame when its callback (or the promise it returns)
- * settles, which is reliable for a single user session but cannot isolate
- * overlapping async flows. Apps needing true zone tracking (e.g. Angular
- * zones) can attach their own store via logger.setALS or setLogContextProvider.
+ * Browser build of `@oresoftware/next-loggers/context`, selected by the package's
+ * `browser` export condition.
+ *
+ * Browsers have no AsyncLocalStorage, so this keeps a single module-scoped
+ * frame: correct for sequential work, but it cannot isolate overlapping async
+ * flows — see SingleFrameLogContextStorage. isAsyncContextTracked() returns
+ * false here so callers can detect the degradation instead of assuming
+ * per-request isolation. Apps with real zone tracking (e.g. Angular zones) can
+ * attach their own store via logger.setALS() or setLogContextProvider().
  */
-let currentContext: LogContext | undefined;
+export const logContextStorage: LogContextStorage = new SingleFrameLogContextStorage();
 
-function isThenable(value: unknown): value is Promise<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === 'function'
-  );
-}
+const api = createLogContextApi(logContextStorage, false);
 
-export function runWithLogContext<T>(context: LogContext, callback: () => T): T {
-  const previous = currentContext;
-  currentContext = { ...context };
-  let result: T;
-  try {
-    result = callback();
-  } catch (error) {
-    currentContext = previous;
-    throw error;
-  }
-  if (isThenable(result)) {
-    return (result as Promise<unknown>).finally(() => {
-      currentContext = previous;
-    }) as T;
-  }
-  currentContext = previous;
-  return result;
-}
+/** Always false in browsers: the fallback storage cannot isolate concurrent flows. */
+export const isAsyncContextTracked = api.isAsyncContextTracked;
 
-export function getLogContext(): LogContext | undefined {
-  return currentContext;
-}
-
-export function updateLogContext(patch: LogContext): boolean {
-  const current = currentContext;
-  if (!current) {
-    return false;
-  }
-  if (patch.loggedInUser) {
-    current.loggedInUser = { ...current.loggedInUser, ...patch.loggedInUser };
-  }
-  if (patch.users && patch.users.length > 0) {
-    current.users = [...(current.users ?? []), ...patch.users];
-  }
-  if (patch.fields) {
-    current.fields = { ...current.fields, ...patch.fields };
-  }
-  const existingTraces = current.traceIds ?? (current.traceId ? [current.traceId] : []);
-  if (patch.traceId) {
-    current.traceId = patch.traceId;
-    current.traceIds = Array.from(new Set([...existingTraces, patch.traceId]));
-  }
-  if (patch.traceIds && patch.traceIds.length > 0) {
-    current.traceIds = Array.from(
-      new Set([...(current.traceIds ?? existingTraces), ...patch.traceIds]),
-    );
-  }
-  if (patch.routineId) {
-    current.routineId = patch.routineId;
-  }
-  if (patch.tags && patch.tags.length > 0) {
-    current.tags = Array.from(new Set([...(current.tags ?? []), ...patch.tags]));
-  }
-  return true;
-}
-
-export function setContextLoggedInUser(user: LogUser): boolean {
-  return updateLogContext({ loggedInUser: user });
-}
-
-export const logContextProvider: LogContextProvider = () => currentContext;
-
-export function installLogContextProvider(): () => void {
-  const previous = setLogContextProvider(logContextProvider);
-  return () => {
-    setLogContextProvider(previous);
-  };
-}
+export const runWithLogContext = api.runWithLogContext;
+export const getLogContext = api.getLogContext;
+export const updateLogContext = api.updateLogContext;
+export const setContextLoggedInUser = api.setContextLoggedInUser;
+export const logContextProvider = api.logContextProvider;
+export const installLogContextProvider = api.installLogContextProvider;

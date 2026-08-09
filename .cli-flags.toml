@@ -1,0 +1,298 @@
+# flags-2-env contract for the `next-loggers` CLI.
+# Format: https://github.com/oresoftware/flags-2-env
+# Detailed CLI/package docs:
+# https://github.com/ORESoftware/next-loggers.ts/blob/main/docs/CLI.md
+#
+# This file is the portable, authoritative description of the flag/env and
+# command-help surface. `next-loggers packages` exposes the independently
+# publishable Zed, npm, PyPI, Go module, crates.io, Maven Central, pub.dev,
+# RubyGems, and Hex identities; its target/registry/version filters below are
+# therefore also part of the release documentation contract.
+#
+# The CLI does NOT parse this file at runtime: flags-2-env's Node client is an
+# N-API addon requiring a C toolchain, and this package ships zero runtime
+# dependencies. Instead src/cli/spec.ts declares the same contract in
+# TypeScript, and tests/cli-flags.test.mjs asserts flags, env names, defaults,
+# descriptions, command names, and command descriptions never drift in either
+# direction. `next-loggers flags --check` runs the identical comparison.
+# Canonical flags-2-env itself audits this file in the packaging workflow at an
+# immutable tooling commit.
+#
+# This mirrors zed-cli, which keeps clap as its real parser and this file as
+# the portable description, with a test preventing drift.
+#
+# TWO DOCUMENTED DEVIATIONS FROM UPSTREAM SEMANTICS:
+#
+# 1. Defaults never outrank the environment. Upstream folds declared defaults
+#    into the parsed map and lets that map win over the process environment.
+#    Here a default applies only when the flag is absent from argv AND its env
+#    var is unset — because these flags write the same NEXT_LOGGER_* variables
+#    src/config.ts reads, and a default that beat the environment would
+#    fabricate configuration the user never wrote. No flag whose env var is
+#    consumed by envToLoggerOptions() declares a default at all; the drift test
+#    enforces that mechanically.
+#
+# 2. `array` flags are repeatable. flags-2-env normally accepts a JSON array;
+#    this CLI additionally accepts `--target ruby --target java` and combines
+#    repeated scalar values into one JSON-array environment value.
+
+[parse]
+command_env = "NEXT_LOGGER_CLI_COMMAND"
+allow_unknown = false
+
+[help]
+url = "https://github.com/ORESoftware/next-loggers.ts/blob/main/docs/CLI.md"
+columns = ["options", "env", "type", "default", "description"]
+
+# ── Library contract ────────────────────────────────────────────────────────
+# These write the variables envToLoggerOptions() reads (src/config.ts), so a
+# flag and its env var are genuinely interchangeable. None declares a default.
+
+[flags.app_name]
+env = "NEXT_LOGGER_APP_NAME"
+aliases = ["app-name"]
+type = "string"
+help = "Application name stamped on every record."
+
+[flags.logger_name]
+env = "NEXT_LOGGER_NAME"
+aliases = ["logger-name"]
+type = "string"
+help = "Logger instance name."
+
+[flags.max_level]
+env = "NEXT_LOGGER_MAX_LEVEL"
+aliases = ["max-level"]
+short = "L"
+type = "string"
+help = "Lowest level emitted (trace|debug|info|warn|error|fatal)."
+
+[flags.console]
+env = "NEXT_LOGGER_CONSOLE"
+aliases = ["console"]
+type = "bool"
+help = "Write records to the console."
+
+[flags.auto_send]
+env = "NEXT_LOGGER_AUTO_SEND"
+aliases = ["auto-send"]
+type = "bool"
+help = "Send events without an explicit .send() call."
+
+[flags.http_endpoint]
+env = "NEXT_LOGGER_HTTP_ENDPOINT"
+aliases = ["http-endpoint"]
+type = "string"
+help = "HTTP transport endpoint."
+
+[flags.http_fallback_endpoint]
+env = "NEXT_LOGGER_HTTP_FALLBACK_ENDPOINT"
+aliases = ["http-fallback-endpoint"]
+type = "string"
+help = "HTTP transport fallback endpoint, tried when the primary fails."
+
+[flags.error_tracking_url]
+env = "NEXT_LOGGER_ERROR_TRACKING_URL"
+aliases = ["error-tracking-url"]
+type = "string"
+help = "Error-tracking endpoint for high-severity records."
+
+[flags.error_tracking_fallback_url]
+env = "NEXT_LOGGER_ERROR_TRACKING_FALLBACK_URL"
+aliases = ["error-tracking-fallback-url"]
+type = "string"
+help = "Error-tracking fallback endpoint."
+
+[flags.error_tracking_min_level]
+env = "NEXT_LOGGER_ERROR_TRACKING_MIN_LEVEL"
+aliases = ["error-tracking-min-level"]
+type = "string"
+help = "Lowest level forwarded to the error tracker."
+
+[flags.supabase_url]
+env = "NEXT_LOGGER_SUPABASE_URL"
+aliases = ["supabase-url"]
+type = "string"
+help = "Supabase project or Realtime WebSocket URL."
+
+[flags.supabase_anon_key]
+env = "NEXT_LOGGER_SUPABASE_ANON_KEY"
+aliases = ["supabase-anon-key"]
+type = "string"
+help = "Supabase publishable/anon key. Required alongside the URL."
+
+[flags.supabase_channel]
+env = "NEXT_LOGGER_SUPABASE_CHANNEL"
+aliases = ["supabase-channel"]
+type = "string"
+help = "Supabase Realtime channel name."
+
+[flags.supabase_event]
+env = "NEXT_LOGGER_SUPABASE_EVENT"
+aliases = ["supabase-event"]
+type = "string"
+help = "Supabase Realtime broadcast event name."
+
+[flags.config_dir]
+env = "NEXT_LOGGER_CONFIG_DIR"
+aliases = ["config-dir"]
+type = "string"
+help = "Directory searched for .next-logger.{ts,mts,mjs,js}."
+
+# ── CLI presentation ────────────────────────────────────────────────────────
+# CLI-only; src/config.ts never reads these, so defaults are safe here.
+
+[flags.json]
+env = "NEXT_LOGGER_CLI_JSON"
+aliases = ["json"]
+type = "bool"
+default = "false"
+help = "Emit one machine-readable JSON object instead of human output."
+
+[flags.color]
+env = "NEXT_LOGGER_CLI_COLOR"
+aliases = ["color"]
+type = "string"
+default = "auto"
+help = "Colorize output: auto|always|never. NO_COLOR is always honoured."
+
+[flags.quiet]
+env = "NEXT_LOGGER_CLI_QUIET"
+aliases = ["quiet"]
+short = "q"
+type = "bool"
+default = "false"
+help = "Suppress non-essential output."
+
+# ── Commands ────────────────────────────────────────────────────────────────
+# Command descriptions are required and drift-checked because canonical
+# flags-2-env renders them into --help and shell-completion documentation.
+
+[commands.smoke]
+help = "Verify an installed build: import it, assert the runtime, run the smoke test."
+
+[commands.smoke.flags.package]
+env = "NEXT_LOGGER_CLI_SMOKE_PACKAGE"
+aliases = ["package"]
+short = "p"
+type = "string"
+help = "Directory of the installed package. Defaults to the CLI's own package root."
+
+[commands.smoke.flags.expect_runtime]
+env = "NEXT_LOGGER_CLI_EXPECT_RUNTIME"
+aliases = ["expect-runtime"]
+type = "string"
+help = "Require the root export to resolve to this runtime (node|bun|deno|browser|edge|cloudflare)."
+
+[commands.smoke.flags.depth]
+env = "NEXT_LOGGER_CLI_SMOKE_DEPTH"
+aliases = ["depth"]
+type = "string"
+default = "basic"
+help = "basic = import + runtime + r2gSmokeTest; full = adds context, redaction and limits checks."
+
+[commands.doctor]
+help = "Diagnose whether logging will behave correctly in this environment."
+
+[commands.doctor.flags.strict]
+env = "NEXT_LOGGER_CLI_STRICT"
+aliases = ["strict"]
+type = "bool"
+default = "false"
+help = "Treat warnings as failures (exit 1)."
+
+[commands.resolve]
+help = "Walk the package's exports map and print what each subpath resolves to."
+
+[commands.resolve.flags.condition]
+env = "NEXT_LOGGER_CLI_CONDITIONS"
+aliases = ["condition"]
+short = "c"
+type = "array"
+help = "Export condition to apply; repeatable. Implies --runtime is ignored."
+
+[commands.resolve.flags.runtime]
+env = "NEXT_LOGGER_CLI_RUNTIME"
+aliases = ["runtime"]
+short = "r"
+type = "string"
+help = "Shorthand condition set: node|bun|deno|browser|workerd|edge-light."
+
+[commands.resolve.flags.subpath]
+env = "NEXT_LOGGER_CLI_SUBPATH"
+aliases = ["subpath"]
+short = "s"
+type = "string"
+help = "Limit output to one subpath, e.g. \".\" or \"./context\"."
+
+[commands.pretty]
+help = "Render next-loggers/v1 NDJSON from stdin; non-JSON lines pass through."
+
+[commands.pretty.flags.min_level]
+env = "NEXT_LOGGER_CLI_MIN_LEVEL"
+aliases = ["min-level"]
+short = "m"
+type = "string"
+help = "Drop records below this level."
+
+[commands.pretty.flags.grep]
+env = "NEXT_LOGGER_CLI_GREP"
+aliases = ["grep"]
+short = "g"
+type = "string"
+help = "Keep only records whose message matches this substring."
+
+[commands.pretty.flags.show_stack]
+env = "NEXT_LOGGER_CLI_SHOW_STACK"
+aliases = ["show-stack"]
+type = "bool"
+default = "false"
+help = "Print captured stack traces and error stacks."
+
+[commands.pretty.flags.output]
+env = "NEXT_LOGGER_CLI_OUTPUT"
+aliases = ["output"]
+short = "o"
+type = "string"
+default = "text"
+help = "text = human output; json = re-emit filtered NDJSON so it composes."
+
+[commands.packages]
+help = "List independently publishable Zed/native packages and verify release metadata."
+
+[commands.packages.flags.target]
+env = "NEXT_LOGGER_CLI_PACKAGE_TARGETS"
+aliases = ["target"]
+short = "t"
+type = "array"
+help = "Release target filter; repeatable. See the detailed CLI documentation."
+
+[commands.packages.flags.registry]
+env = "NEXT_LOGGER_CLI_PACKAGE_REGISTRIES"
+aliases = ["registry"]
+short = "R"
+type = "array"
+help = "Registry filter; repeatable. See the detailed CLI documentation."
+
+[commands.packages.flags.release_version]
+env = "NEXT_LOGGER_CLI_RELEASE_VERSION"
+aliases = ["release-version"]
+type = "string"
+help = "Semantic version used to render immutable release tags; defaults to package.json."
+
+[commands.packages.flags.check]
+env = "NEXT_LOGGER_CLI_PACKAGES_CHECK"
+aliases = ["check"]
+type = "bool"
+default = "false"
+help = "Verify the compiled release catalog against package.json and .zpkg.toml."
+
+[commands.flags]
+help = "Print the command/flag/env documentation, or check it against .cli-flags.toml."
+
+[commands.flags.flags.check]
+env = "NEXT_LOGGER_CLI_FLAGS_CHECK"
+aliases = ["check"]
+type = "bool"
+default = "false"
+help = "Exit 1 if .cli-flags.toml command, flag, env, or help metadata has drifted."

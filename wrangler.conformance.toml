@@ -1,0 +1,12 @@
+# Conformance Worker for CI — see tests/conformance/worker-entry.mjs.
+#
+# Deliberately does NOT set compatibility_flags = ["nodejs_als"]. A bare Worker
+# is the hostile case: the package must still load and log, with the context
+# entry point falling back to single-frame storage rather than crashing the
+# isolate on a node:async_hooks import.
+name = "next-loggers-conformance"
+main = "tests/conformance/worker-entry.mjs"
+compatibility_date = "2026-01-01"
+
+[dev]
+port = 8787

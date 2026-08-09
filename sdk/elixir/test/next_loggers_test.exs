@@ -1,0 +1,64 @@
+ExUnit.start()
+
+defmodule ORESoftware.NextLoggersTest do
+  use ExUnit.Case, async: true
+
+  alias ORESoftware.NextLoggers
+
+  test "process context flows to OTEL and Supabase transports" do
+    parent = self()
+
+    logger =
+      NextLoggers.new("payments",
+        name: "audit",
+        fields: %{"environment" => "test"},
+        id_factory: fn -> "elixir-record-1" end,
+        clock: fn -> "2026-01-02T03:04:05.000Z" end,
+        transports: [
+          NextLoggers.otel_transport(fn value -> send(parent, {:otel, value}) end),
+          NextLoggers.supabase_transport(fn value -> send(parent, {:supabase, value}) end)
+        ]
+      )
+
+    record =
+      NextLoggers.with_context(
+        %{
+          trace_id: "0123456789abcdef0123456789abcdef",
+          span_id: "0123456789abcdef",
+          trace_flags: 1,
+          trace_state: "vendor=value",
+          fields: %{"requestId" => "request-1"},
+          tags: ["otel", "beam"]
+        },
+        fn -> NextLoggers.error(logger, "payment failed", %{"orderId" => "order-42"}) end
+      )
+
+    assert record["schema"] == "next-loggers/v1"
+    assert record["level"] == "ERROR"
+    assert record["traceId"] == "0123456789abcdef0123456789abcdef"
+    assert record["fields"]["otel.span_id"] == "0123456789abcdef"
+    assert record["fields"]["requestId"] == "request-1"
+    assert record["fields"]["orderId"] == "order-42"
+    assert_receive {:otel, %{"severityNumber" => 17}}
+    assert_receive {:supabase, ^record}
+    assert NextLoggers.current_context() == %{}
+  end
+
+  test "concurrent tasks keep process-local trace context isolated" do
+    logger = NextLoggers.new("app", transports: [])
+
+    traces =
+      [a: "trace-a", b: "trace-b"]
+      |> Task.async_stream(
+        fn {name, trace_id} ->
+          NextLoggers.with_context(%{trace_id: trace_id, span_id: "#{name}-span"}, fn ->
+            NextLoggers.info(logger, Atom.to_string(name))["traceId"]
+          end)
+        end,
+        ordered: true
+      )
+      |> Enum.map(fn {:ok, trace_id} -> trace_id end)
+
+    assert traces == ["trace-a", "trace-b"]
+  end
+end

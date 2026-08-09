@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oresoftware.github.io/next-loggers.ts/schemas/server-lifecycle-audit.schema.json",
+  "title": "Server lifecycle and execution-context audit report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "contractVersion",
+    "generatedAt",
+    "repositories",
+    "summary"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "contractVersion": { "type": "string", "minLength": 1 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "repositories": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/repository" }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scanned", "servers", "highRisk", "mediumRisk", "lowRisk"],
+      "properties": {
+        "scanned": { "type": "integer", "minimum": 0 },
+        "servers": { "type": "integer", "minimum": 0 },
+        "highRisk": { "type": "integer", "minimum": 0 },
+        "mediumRisk": { "type": "integer", "minimum": 0 },
+        "lowRisk": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "$defs": {
+    "risk": {
+      "enum": ["not-a-server", "low", "medium", "high"]
+    },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sigint",
+        "sigterm",
+        "graceful",
+        "force",
+        "tty",
+        "stdinEof",
+        "timeout",
+        "flush",
+        "context"
+      ],
+      "properties": {
+        "sigint": { "type": "boolean" },
+        "sigterm": { "type": "boolean" },
+        "graceful": { "type": "boolean" },
+        "force": { "type": "boolean" },
+        "tty": { "type": "boolean" },
+        "stdinEof": { "type": "boolean" },
+        "timeout": { "type": "boolean" },
+        "flush": { "type": "boolean" },
+        "context": { "type": "boolean" }
+      }
+    },
+    "checkEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sigint",
+        "sigterm",
+        "graceful",
+        "force",
+        "tty",
+        "stdinEof",
+        "timeout",
+        "flush",
+        "context"
+      ],
+      "properties": {
+        "sigint": { "$ref": "#/$defs/evidence" },
+        "sigterm": { "$ref": "#/$defs/evidence" },
+        "graceful": { "$ref": "#/$defs/evidence" },
+        "force": { "$ref": "#/$defs/evidence" },
+        "tty": { "$ref": "#/$defs/evidence" },
+        "stdinEof": { "$ref": "#/$defs/evidence" },
+        "timeout": { "$ref": "#/$defs/evidence" },
+        "flush": { "$ref": "#/$defs/evidence" },
+        "context": { "$ref": "#/$defs/evidence" }
+      }
+    },
+    "language": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifests",
+        "sourceFileCount",
+        "serverDetected",
+        "serverEvidence",
+        "checks",
+        "checkEvidence",
+        "missing",
+        "risk"
+      ],
+      "properties": {
+        "manifests": { "$ref": "#/$defs/evidence" },
+        "sourceFileCount": { "type": "integer", "minimum": 0 },
+        "serverDetected": { "type": "boolean" },
+        "serverEvidence": { "$ref": "#/$defs/evidence" },
+        "checks": { "$ref": "#/$defs/checks" },
+        "checkEvidence": { "$ref": "#/$defs/checkEvidence" },
+        "missing": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "sigint",
+              "sigterm",
+              "graceful",
+              "force",
+              "tty",
+              "stdinEof",
+              "timeout",
+              "flush",
+              "context"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "risk": { "$ref": "#/$defs/risk" }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "root",
+        "contractVersion",
+        "languages",
+        "serverDetected",
+        "risk",
+        "missing"
+      ],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "contractVersion": { "type": "string", "minLength": 1 },
+        "languages": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "node": { "$ref": "#/$defs/language" },
+            "go": { "$ref": "#/$defs/language" },
+            "rust": { "$ref": "#/$defs/language" },
+            "gleam": { "$ref": "#/$defs/language" },
+            "dart": { "$ref": "#/$defs/language" }
+          }
+        },
+        "serverDetected": { "type": "boolean" },
+        "risk": { "$ref": "#/$defs/risk" },
+        "missing": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

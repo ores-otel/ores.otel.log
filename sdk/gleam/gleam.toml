@@ -1,0 +1,22 @@
+name = "oresoftware_next_loggers"
+version = "0.1.0"
+description = "Portable next-loggers/v1 records and lifecycle semantics for Gleam"
+licences = ["MIT"]
+target = "erlang"
+gleam = ">= 1.15.0"
+
+[repository]
+type = "github"
+user = "ORESoftware"
+repo = "next-loggers.ts"
+path = "sdk/gleam"
+tag_prefix = "sdk/gleam/"
+
+[dependencies]
+gleam_erlang = ">= 1.0.0 and < 2.0.0"
+gleam_json = ">= 3.0.2 and < 4.0.0"
+gleam_otp = ">= 1.0.0 and < 2.0.0"
+gleam_stdlib = ">= 0.44.0 and < 2.0.0"
+
+[dev_dependencies]
+gleeunit = ">= 1.0.0 and < 2.0.0"

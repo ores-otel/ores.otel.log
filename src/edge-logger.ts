@@ -5,46 +5,12 @@ import {
   type LoggerOptions,
 } from './base-logger.js';
 
-// Explicit named re-exports (no `export *`): keeps the shared surface identical
-// and statically analyzable across Node, Bun, Deno, and bundler ESM resolvers.
-export {
-  BaseLogger,
-  createLogger,
-  DEFAULT_REDACTED_KEY_PATTERNS,
-  getLogContextProvider,
-  getPendingLogCount,
-  HttpTransport,
-  LOG_LEVELS,
-  LogEvent,
-  pendingLogPromises,
-  r2gSmokeTest,
-  serializeLogValue,
-  serializeLogValueRedacted,
-  setLogContextProvider,
-  SupabaseRealtimeTransport,
-  waitForPendingLogs,
-} from './base-logger.js';
-export type {
-  AsyncLocalStorageLike,
-  BuiltInLoggerRuntime,
-  ErrorTrackingOptions,
-  FlushOptions,
-  HttpTransportOptions,
-  LogArgument,
-  LogContext,
-  LogContextProvider,
-  LogFields,
-  LoggerOptions,
-  LoggerRuntime,
-  LogLevel,
-  LogRecord,
-  LogTransport,
-  LogUser,
-  SerializedValue,
-  SupabaseRealtimeOptions,
-  WebSocketFactory,
-  WebSocketLike,
-} from './base-logger.js';
+// Namespaced re-export: the whole shared surface is reachable as `base.*` from
+// every runtime entrypoint, without flattening it into this module's own
+// exports (so runtime-specific names can never collide with shared ones).
+// A namespace re-export carries types as well as values, so `base.LogLevel`
+// works in type position and `base.createLogger` in value position.
+export * as base from './base-logger.js';
 
 export interface EdgeExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;

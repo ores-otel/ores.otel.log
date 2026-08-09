@@ -1,93 +1,59 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import {
-  setLogContextProvider,
-  type LogContext,
-  type LogContextProvider,
-  type LogUser,
-} from './base-logger.js';
+import type { LogContext, LogContextProvider } from './base-logger.js';
+import { createLogContextApi, type LogContextStorage } from './context-shared.js';
 
-export type { LogContext, LogContextProvider };
+export type { LogContext, LogContextProvider, LogContextStorage };
 
 /**
- * Structural view of the underlying AsyncLocalStorage: keeps the emitted
- * declaration file free of node:async_hooks so consumers without @types/node
- * (and with skipLibCheck: false) still typecheck.
- */
-export interface LogContextStorage {
-  getStore(): LogContext | undefined;
-  run<R>(store: LogContext, callback: () => R): R;
-}
-
-/**
- * AsyncLocalStorage-backed ambient log context for Node.js, Bun, Deno, and
- * edge runtimes with node:async_hooks support (Vercel edge-light, workerd
- * with nodejs_compat). Browsers resolve this specifier to context-browser.js
- * through the package's conditional exports.
+ * AsyncLocalStorage-backed ambient log context.
+ *
+ * Runtime support for `node:async_hooks`:
+ *   - Node.js       — native.
+ *   - Bun           — implements node:async_hooks AsyncLocalStorage.
+ *   - Deno          — implements node:async_hooks AsyncLocalStorage.
+ *   - Vercel edge   — available (edge-light); resolves here.
+ *   - workerd       — needs the nodejs_als or nodejs_compat flag, so the
+ *                     package's `workerd` export condition sends that runtime
+ *                     to context-workerd.js, which probes for the global
+ *                     instead of importing node:async_hooks (a static import
+ *                     throws at module evaluation when the flag is absent).
+ *   - Browsers      — resolve to context-browser.js via the `browser` condition.
+ *
+ * The import above is deliberately static: on every runtime routed here the
+ * module exists, and a static import keeps this file free of top-level await
+ * (which some bundlers still refuse to inline).
  */
 export const logContextStorage: LogContextStorage = new AsyncLocalStorage<LogContext>();
 
-/** Runs callback with the given context active; nested calls shadow outer frames. */
-export function runWithLogContext<T>(context: LogContext, callback: () => T): T {
-  return logContextStorage.run({ ...context }, callback);
-}
+const api = createLogContextApi(logContextStorage, true);
 
-export function getLogContext(): LogContext | undefined {
-  return logContextStorage.getStore();
-}
+/**
+ * True when the active storage isolates concurrent async flows. Always true
+ * here; the browser and unflagged-workerd builds report false so callers can
+ * detect the degraded single-frame fallback.
+ */
+export const isAsyncContextTracked = api.isAsyncContextTracked;
+
+/** Runs callback with the given context active; nested calls shadow outer frames. */
+export const runWithLogContext = api.runWithLogContext;
+
+export const getLogContext = api.getLogContext;
 
 /**
  * Shallow-merges a patch into the live context frame (objects merge, arrays
  * append and dedupe). Returns false when no frame is active.
  */
-export function updateLogContext(patch: LogContext): boolean {
-  const current = logContextStorage.getStore();
-  if (!current) {
-    return false;
-  }
-  if (patch.loggedInUser) {
-    current.loggedInUser = { ...current.loggedInUser, ...patch.loggedInUser };
-  }
-  if (patch.users && patch.users.length > 0) {
-    current.users = [...(current.users ?? []), ...patch.users];
-  }
-  if (patch.fields) {
-    current.fields = { ...current.fields, ...patch.fields };
-  }
-  const existingTraces = current.traceIds ?? (current.traceId ? [current.traceId] : []);
-  if (patch.traceId) {
-    current.traceId = patch.traceId;
-    current.traceIds = Array.from(new Set([...existingTraces, patch.traceId]));
-  }
-  if (patch.traceIds && patch.traceIds.length > 0) {
-    current.traceIds = Array.from(
-      new Set([...(current.traceIds ?? existingTraces), ...patch.traceIds]),
-    );
-  }
-  if (patch.routineId) {
-    current.routineId = patch.routineId;
-  }
-  if (patch.tags && patch.tags.length > 0) {
-    current.tags = Array.from(new Set([...(current.tags ?? []), ...patch.tags]));
-  }
-  return true;
-}
+export const updateLogContext = api.updateLogContext;
 
 /** Convenience for the most common patch: recording who is acting. */
-export function setContextLoggedInUser(user: LogUser): boolean {
-  return updateLogContext({ loggedInUser: user });
-}
+export const setContextLoggedInUser = api.setContextLoggedInUser;
 
 /** A provider reading this module's storage, suitable for setLogContextProvider or logger options. */
-export const logContextProvider: LogContextProvider = () => logContextStorage.getStore();
+export const logContextProvider = api.logContextProvider;
 
 /**
  * Makes every logger in the process read this module's storage.
  * Returns an uninstall function that restores the previous provider.
  */
-export function installLogContextProvider(): () => void {
-  const previous = setLogContextProvider(logContextProvider);
-  return () => {
-    setLogContextProvider(previous);
-  };
-}
+export const installLogContextProvider = api.installLogContextProvider;

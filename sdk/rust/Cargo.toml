@@ -1,0 +1,23 @@
+[package]
+name = "oresoftware-next-loggers"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Rust implementation of the next-loggers/v1 structured logging contract"
+license = "MIT"
+repository = "https://github.com/ORESoftware/next-loggers.ts"
+homepage = "https://github.com/ORESoftware/next-loggers.ts"
+documentation = "https://docs.rs/oresoftware-next-loggers"
+readme = "README.md"
+keywords = ["logging", "opentelemetry", "observability", "supabase"]
+categories = ["development-tools::debugging"]
+include = ["src/**", "tests/**", "README.md", "LICENSE"]
+
+[lib]
+name = "next_loggers"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "=0.3.36", features = ["formatting"] }

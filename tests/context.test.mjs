@@ -7,6 +7,7 @@ import { createBrowserLogger } from '@oresoftware/next-loggers/browser';
 import { createBunLogger } from '@oresoftware/next-loggers/bun';
 import { createDenoLogger } from '@oresoftware/next-loggers/deno';
 import { createEdgeLogger } from '@oresoftware/next-loggers/edge';
+import { createCloudflareWorkerLogger } from '@oresoftware/next-loggers/cloudflare';
 import { createNodeLogger } from '@oresoftware/next-loggers/node';
 import {
   getLogContext,
@@ -173,6 +174,8 @@ test('record shape is consistent across every runtime logger', async () => {
     browser: (transports) =>
       createBrowserLogger({ console: false, transports, clock, idFactory, flushOnUnload: false }),
     edge: (transports) => createEdgeLogger({ console: false, transports, clock, idFactory }),
+    cloudflare: (transports) =>
+      createCloudflareWorkerLogger({ console: false, transports, clock, idFactory }),
     node: (transports) =>
       createNodeLogger({ console: false, transports, clock, idFactory, flushOnShutdown: false }),
     bun: (transports) =>

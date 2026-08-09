@@ -1,0 +1,77 @@
+name: External repository lifecycle audit
+
+on:
+  workflow_call:
+    inputs:
+      strict:
+        description: Fail when a supported server is classified as high risk
+        required: false
+        type: boolean
+        default: true
+      canonical-ref:
+        description: Canonical next-loggers ref used for tooling checkout
+        required: false
+        type: string
+        default: agent/polyglot-context-shutdown-20260808
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@v4
+        with:
+          path: target
+
+      - name: Check out canonical audit tooling
+        uses: actions/checkout@v4
+        with:
+          repository: ORESoftware/next-loggers.ts
+          ref: ${{ inputs.canonical-ref }}
+          path: tooling
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify canonical audit tooling
+        run: >-
+          node --test
+          tooling/tests/server-lifecycle-audit.test.mjs
+          tooling/tests/schema-fixtures.test.mjs
+
+      - name: Produce audit evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          node tooling/scripts/audit-server-lifecycle.mjs \
+            --format=json \
+            --output=artifacts/server-lifecycle-audit.json \
+            target
+          node tooling/scripts/audit-server-lifecycle.mjs \
+            --format=markdown \
+            --output=artifacts/server-lifecycle-audit.md \
+            target
+          cat artifacts/server-lifecycle-audit.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce accepted baseline
+        if: ${{ inputs.strict }}
+        run: >-
+          node tooling/scripts/audit-server-lifecycle.mjs
+          --strict
+          --format=json
+          target
+
+      - name: Upload exact-head evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-lifecycle-audit-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,295 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Build + typecheck + the Node test suite ───────────────────────────────
+  build:
+    name: build & typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # dist/ is shared with every runtime job so each one tests the same
+      # artifact rather than rebuilding with a different toolchain.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist
+          retention-days: 1
+
+  # ── Native SDKs sharing the next-loggers/v1 wire contract ────────────────
+  polyglot:
+    name: python, go, rust, gleam, java, dart, beam & wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.24.x"
+          cache: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.19.0"
+          gleam-version: "1.17.0"
+      - run: cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
+      - run: gleam format --check src test
+        working-directory: sdk/gleam
+      - run: npm run test:polyglot
+
+  # ── Node LTS matrix ───────────────────────────────────────────────────────
+  node:
+    name: node ${{ matrix.node }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - run: node tests/conformance/run-node.mjs
+      - run: node --test tests/*.test.mjs
+
+  # ── Bun ───────────────────────────────────────────────────────────────────
+  bun:
+    name: bun
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # Verifies bun's `bun` export condition resolves to the Bun logger and
+      # that node:async_hooks AsyncLocalStorage really works there.
+      - run: bun run tests/conformance/run-node.mjs
+
+  # ── Deno ──────────────────────────────────────────────────────────────────
+  deno:
+    name: deno
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # --allow-* is explicit: the suite needs module reads and timers only.
+      # Deno resolves the package's `deno` condition out of node_modules.
+      - run: deno run --allow-read --allow-env --allow-net --allow-hrtime tests/conformance/run-node.mjs
+
+  # ── Cloudflare Workers (workerd, via wrangler dev) ────────────────────────
+  workerd:
+    name: cloudflare workerd
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - run: npm install --no-save wrangler@3
+      # `wrangler dev --local` runs the real workerd binary, no Cloudflare
+      # account or API token required.
+      - name: start workerd
+        run: |
+          npx wrangler dev --config wrangler.conformance.toml --local --port 8787 &
+          echo "WORKER_PID=$!" >> "$GITHUB_ENV"
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:8787/; then
+              echo "workerd is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "workerd did not become ready"; exit 1
+      - name: run conformance in workerd
+        run: |
+          body=$(curl -s -w '\n%{http_code}' http://127.0.0.1:8787/)
+          status=$(printf '%s' "$body" | tail -n1)
+          printf '%s\n' "$body" | sed '$d'
+          test "$status" = "200"
+      - name: stop workerd
+        if: always()
+        run: kill "$WORKER_PID" || true
+
+  # ── Browser (headless Chromium via Playwright) ────────────────────────────
+  browser:
+    name: browser (chromium)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - run: npm install --no-save esbuild playwright ws
+      - run: npx playwright install --with-deps chromium
+      # Bundles with the `browser` condition, asserts node:async_hooks never
+      # reaches the client bundle, and streams records over a real WebSocket.
+      - run: node tests/conformance/run-browser.mjs
+
+  # ── CLI contract + zed-pkg manifest ───────────────────────────────────────
+  cli:
+    name: cli & zpkg manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - run: node -e "require('node:fs').chmodSync('dist/cli/main.js', 0o755)"
+      # The same drift comparison the test runs, exercised through the bin so
+      # a consumer's invocation path is covered too.
+      - name: flag/env contract has not drifted
+        run: node dist/cli/main.js flags --check
+      - name: the installed build verifies itself
+        run: node dist/cli/main.js smoke --depth full
+      - name: exports resolve for every runtime
+        run: |
+          for runtime in node bun deno browser workerd edge-light; do
+            node dist/cli/main.js resolve --runtime "$runtime" >/dev/null \
+              || { echo "resolve failed for $runtime"; exit 1; }
+          done
+          # The regression recorded in docs/AUDIT.md: a Worker without
+          # nodejs_als must not be sent to the node:async_hooks build.
+          resolved=$(node dist/cli/main.js resolve --runtime workerd --subpath ./context --json)
+          echo "$resolved"
+          echo "$resolved" | grep -q 'context-workerd.js'
+      - name: pretty round-trips NDJSON losslessly
+        run: |
+          printf '%s\n' '{"schema":"next-loggers/v1","id":"1","timestamp":"2026-01-01T00:00:00.000Z","level":"ERROR","runtime":"node","appName":"ci","message":"hello","values":["hello"],"fields":{}}' \
+            | node dist/cli/main.js pretty --output json \
+            | grep -q '"message":"hello"'
+
+  zed:
+    name: zed pack & r2g
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Build rather than downloading dist/, because the point of this job is
+      # to prove the release path (build → pack → install → smoke) works.
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+      - name: install the zed CLI
+        run: cargo install --git https://github.com/zed-pkg/zed-cli --locked zed-cli
+      - name: pack and roundtrip-test the artifact
+        run: |
+          zed pack
+          # r2g publishes to a throwaway file:// registry, installs into a mock
+          # consumer, and runs publish.smoke_test against the real artifact.
+          zed r2g --clean
+
+  # ── Packed-package consumer (what npm users actually install) ─────────────
+  package:
+    name: packed package consumer
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm pack
+      - name: install the tarball into a scratch consumer
+        run: |
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE"/oresoftware-next-loggers-*.tgz
+          cp "$GITHUB_WORKSPACE"/.r2g/tests/runtime-consumer.mjs .
+          node runtime-consumer.mjs
+      - name: typecheck the TypeScript consumer fixture
+        run: |
+          cd /tmp/consumer
+          cp -r "$GITHUB_WORKSPACE"/.r2g/fixtures/typescript-consumer/. .
+          npm install --no-save typescript@5
+          npx tsc -p tsconfig.json --noEmit

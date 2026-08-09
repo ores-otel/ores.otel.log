@@ -1,0 +1,773 @@
+//! Rust implementation of the language-neutral `next-loggers/v1` contract.
+
+use serde::{Deserialize, Serialize};
+pub use serde_json::{json, Map, Value};
+use std::collections::HashMap;
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
+
+pub const SCHEMA: &str = "next-loggers/v1";
+pub type JsonObject = Map<String, Value>;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Fatal,
+}
+
+impl LogLevel {
+    fn index(self) -> u8 {
+        match self {
+            Self::Trace => 0,
+            Self::Debug => 1,
+            Self::Info => 2,
+            Self::Warn => 3,
+            Self::Error => 4,
+            Self::Fatal => 5,
+        }
+    }
+
+    pub fn otel_severity_number(self) -> u8 {
+        match self {
+            Self::Trace => 1,
+            Self::Debug => 5,
+            Self::Info => 9,
+            Self::Warn => 13,
+            Self::Error => 17,
+            Self::Fatal => 21,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct LogRecord {
+    pub schema: String,
+    pub id: String,
+    pub timestamp: String,
+    pub level: LogLevel,
+    pub runtime: String,
+    #[serde(rename = "appName")]
+    pub app_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub message: String,
+    pub values: Vec<Value>,
+    pub fields: JsonObject,
+    #[serde(rename = "loggedInUser", skip_serializing_if = "Option::is_none")]
+    pub logged_in_user: Option<JsonObject>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub users: Vec<JsonObject>,
+    #[serde(rename = "traceId", skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    #[serde(rename = "traceIds", default, skip_serializing_if = "Vec::is_empty")]
+    pub trace_ids: Vec<String>,
+    #[serde(rename = "routineId", skip_serializing_if = "Option::is_none")]
+    pub routine_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub meta: Vec<Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<Value>,
+    #[serde(rename = "stackTrace", default, skip_serializing_if = "Vec::is_empty")]
+    pub stack_trace: Vec<String>,
+}
+
+impl LogRecord {
+    pub fn to_json(&self) -> Result<String, LoggerError> {
+        serde_json::to_string(self).map_err(LoggerError::from)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LoggerError(pub String);
+
+impl Display for LoggerError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl Error for LoggerError {}
+
+impl From<serde_json::Error> for LoggerError {
+    fn from(error: serde_json::Error) -> Self {
+        Self(error.to_string())
+    }
+}
+
+pub trait Transport: Send + Sync {
+    fn write(&self, record: &LogRecord) -> Result<(), LoggerError>;
+
+    fn flush(&self) -> Result<(), LoggerError> {
+        Ok(())
+    }
+
+    fn flush_on_exit(&self, _records: &[LogRecord]) -> Result<(), LoggerError> {
+        Ok(())
+    }
+
+    fn close(&self) -> Result<(), LoggerError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct OpenTelemetryLogRecord {
+    pub body: String,
+    #[serde(rename = "severityText")]
+    pub severity_text: String,
+    #[serde(rename = "severityNumber")]
+    pub severity_number: u8,
+    pub timestamp: String,
+    pub attributes: JsonObject,
+}
+
+/// Dependency-free adapter for an application-owned OpenTelemetry logger.
+/// It installs no global provider, context manager, or instrumentation.
+pub struct OpenTelemetryTransport {
+    emit: Arc<dyn Fn(OpenTelemetryLogRecord) -> Result<(), LoggerError> + Send + Sync>,
+}
+
+impl OpenTelemetryTransport {
+    pub fn new<F>(emit: F) -> Self
+    where
+        F: Fn(OpenTelemetryLogRecord) -> Result<(), LoggerError> + Send + Sync + 'static,
+    {
+        Self {
+            emit: Arc::new(emit),
+        }
+    }
+}
+
+impl Transport for OpenTelemetryTransport {
+    fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
+        let mut attributes = JsonObject::from_iter([
+            (
+                "service.name".into(),
+                Value::String(record.app_name.clone()),
+            ),
+            (
+                "next_logger.schema".into(),
+                Value::String(record.schema.clone()),
+            ),
+            (
+                "next_logger.runtime".into(),
+                Value::String(record.runtime.clone()),
+            ),
+            ("log.record.uid".into(), Value::String(record.id.clone())),
+        ]);
+        if let Some(trace_id) = &record.trace_id {
+            attributes.insert("trace.id".into(), Value::String(trace_id.clone()));
+        }
+        for (key, value) in &record.fields {
+            attributes.insert(format!("next_logger.field.{key}"), value.clone());
+        }
+        (self.emit)(OpenTelemetryLogRecord {
+            body: record.message.clone(),
+            severity_text: format!("{:?}", record.level).to_uppercase(),
+            severity_number: record.level.otel_severity_number(),
+            timestamp: record.timestamp.clone(),
+            attributes,
+        })
+    }
+}
+
+/// Adapter for an application-owned authenticated Supabase sender.
+pub struct SupabaseTransport {
+    send: Arc<dyn Fn(LogRecord) -> Result<(), LoggerError> + Send + Sync>,
+}
+
+impl SupabaseTransport {
+    pub fn new<F>(send: F) -> Self
+    where
+        F: Fn(LogRecord) -> Result<(), LoggerError> + Send + Sync + 'static,
+    {
+        Self {
+            send: Arc::new(send),
+        }
+    }
+}
+
+impl Transport for SupabaseTransport {
+    fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
+        (self.send)(record.clone())
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct MemoryState {
+    records: Vec<LogRecord>,
+    exit_records: Vec<LogRecord>,
+    flush_count: usize,
+    closed: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct MemoryTransport {
+    state: Mutex<MemoryState>,
+}
+
+impl MemoryTransport {
+    pub fn records(&self) -> Vec<LogRecord> {
+        self.state
+            .lock()
+            .expect("memory transport poisoned")
+            .records
+            .clone()
+    }
+
+    pub fn exit_records(&self) -> Vec<LogRecord> {
+        self.state
+            .lock()
+            .expect("memory transport poisoned")
+            .exit_records
+            .clone()
+    }
+
+    pub fn flush_count(&self) -> usize {
+        self.state
+            .lock()
+            .expect("memory transport poisoned")
+            .flush_count
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.state.lock().expect("memory transport poisoned").closed
+    }
+}
+
+impl Transport for MemoryTransport {
+    fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?;
+        if state.closed {
+            return Err(LoggerError("transport is closed".into()));
+        }
+        state.records.push(record.clone());
+        Ok(())
+    }
+
+    fn flush(&self) -> Result<(), LoggerError> {
+        self.state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .flush_count += 1;
+        Ok(())
+    }
+
+    fn flush_on_exit(&self, records: &[LogRecord]) -> Result<(), LoggerError> {
+        self.state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .exit_records
+            .extend_from_slice(records);
+        Ok(())
+    }
+
+    fn close(&self) -> Result<(), LoggerError> {
+        self.state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .closed = true;
+        Ok(())
+    }
+}
+
+pub struct Options {
+    pub app_name: String,
+    pub name: Option<String>,
+    pub runtime: String,
+    pub max_level: LogLevel,
+    pub fields: JsonObject,
+    pub logged_in_user: JsonObject,
+    pub transports: Vec<Arc<dyn Transport>>,
+    pub console: bool,
+    pub id_factory: Arc<dyn Fn() -> String + Send + Sync>,
+    pub clock: Arc<dyn Fn() -> String + Send + Sync>,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            app_name: "app".into(),
+            name: None,
+            runtime: "rust".into(),
+            max_level: LogLevel::Info,
+            fields: JsonObject::new(),
+            logged_in_user: JsonObject::new(),
+            transports: Vec::new(),
+            console: true,
+            id_factory: Arc::new(default_id),
+            clock: Arc::new(default_clock),
+        }
+    }
+}
+
+impl Options {
+    pub fn with_transport<T: Transport + 'static>(mut self, transport: Arc<T>) -> Self {
+        self.transports.push(transport);
+        self
+    }
+}
+
+fn default_id() -> String {
+    static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+    let sequence = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "rust-{}-{sequence}",
+        OffsetDateTime::now_utc().unix_timestamp_nanos()
+    )
+}
+
+fn default_clock() -> String {
+    OffsetDateTime::now_utc()
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
+}
+
+#[derive(Clone)]
+pub struct Logger {
+    inner: Arc<LoggerInner>,
+}
+
+struct LoggerInner {
+    app_name: String,
+    name: Option<String>,
+    runtime: String,
+    max_level: LogLevel,
+    fields: Mutex<JsonObject>,
+    current_user: Mutex<JsonObject>,
+    transports: Vec<Arc<dyn Transport>>,
+    console: bool,
+    id_factory: Arc<dyn Fn() -> String + Send + Sync>,
+    clock: Arc<dyn Fn() -> String + Send + Sync>,
+    unsent: Mutex<HashMap<u64, Arc<Mutex<EventState>>>>,
+    next_event: AtomicU64,
+    closed: AtomicBool,
+}
+
+impl Logger {
+    pub fn new(options: Options) -> Self {
+        Self {
+            inner: Arc::new(LoggerInner {
+                app_name: options.app_name,
+                name: options.name,
+                runtime: options.runtime,
+                max_level: options.max_level,
+                fields: Mutex::new(options.fields),
+                current_user: Mutex::new(options.logged_in_user),
+                transports: options.transports,
+                console: options.console,
+                id_factory: options.id_factory,
+                clock: options.clock,
+                unsent: Mutex::new(HashMap::new()),
+                next_event: AtomicU64::new(1),
+                closed: AtomicBool::new(false),
+            }),
+        }
+    }
+
+    fn create_event(&self, level: LogLevel, values: Vec<Value>) -> Event {
+        assert!(
+            !self.inner.closed.load(Ordering::Acquire),
+            "next_loggers: logger is closed"
+        );
+        let id = self.inner.next_event.fetch_add(1, Ordering::Relaxed);
+        let state = Arc::new(Mutex::new(EventState::new(level, values)));
+        self.inner
+            .unsent
+            .lock()
+            .expect("unsent event registry poisoned")
+            .insert(id, state.clone());
+        Event {
+            logger: self.clone(),
+            id,
+            state,
+        }
+    }
+
+    pub fn trace(&self, values: Vec<Value>) -> Event {
+        self.create_event(LogLevel::Trace, values)
+    }
+
+    pub fn debug(&self, values: Vec<Value>) -> Event {
+        self.create_event(LogLevel::Debug, values)
+    }
+
+    pub fn info(&self, values: Vec<Value>) -> Event {
+        self.create_event(LogLevel::Info, values)
+    }
+
+    pub fn log(&self, values: Vec<Value>) -> Event {
+        self.info(values)
+    }
+
+    pub fn warn(&self, values: Vec<Value>) -> Event {
+        self.create_event(LogLevel::Warn, values)
+    }
+
+    pub fn error(&self, values: Vec<Value>) -> Event {
+        self.create_event(LogLevel::Error, values)
+    }
+
+    pub fn fatal(&self, values: Vec<Value>) -> Event {
+        self.create_event(LogLevel::Fatal, values)
+    }
+
+    pub fn add_fields(&self, fields: JsonObject) -> &Self {
+        self.inner
+            .fields
+            .lock()
+            .expect("logger fields poisoned")
+            .extend(fields);
+        self
+    }
+
+    pub fn set_current_user(&self, user: JsonObject) -> &Self {
+        self.inner
+            .current_user
+            .lock()
+            .expect("current user poisoned")
+            .extend(user);
+        self
+    }
+
+    fn emit(&self, event: &Event, store: bool) -> Result<Option<LogRecord>, LoggerError> {
+        self.inner
+            .unsent
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .remove(&event.id);
+        let level = event
+            .state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .level;
+        if level.index() < self.inner.max_level.index() {
+            return Ok(None);
+        }
+        let record = event.to_record()?;
+        if self.inner.console {
+            println!(
+                "[{}] [{:?}] [{}] {}",
+                record.timestamp, record.level, record.app_name, record.message
+            );
+        }
+        if store {
+            for transport in &self.inner.transports {
+                transport.write(&record)?;
+            }
+        }
+        Ok(Some(record))
+    }
+
+    pub fn flush(&self, send_unsent: bool) -> Result<(), LoggerError> {
+        if send_unsent {
+            for event in self.unsent_events()? {
+                event.send()?;
+            }
+        }
+        for transport in &self.inner.transports {
+            transport.flush()?;
+        }
+        Ok(())
+    }
+
+    pub fn flush_on_exit(&self) -> Result<(), LoggerError> {
+        let mut recovered = Vec::new();
+        for event in self.unsent_events()? {
+            if let Some(record) = event.send()? {
+                recovered.push(record);
+            }
+        }
+        for transport in &self.inner.transports {
+            transport.flush_on_exit(&recovered)?;
+        }
+        self.flush(false)
+    }
+
+    pub fn close(&self) -> Result<(), LoggerError> {
+        if self.inner.closed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.flush_on_exit()?;
+        for transport in &self.inner.transports {
+            transport.close()?;
+        }
+        self.inner.closed.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    fn unsent_events(&self) -> Result<Vec<Event>, LoggerError> {
+        let unsent = self
+            .inner
+            .unsent
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?;
+        Ok(unsent
+            .iter()
+            .map(|(id, state)| Event {
+                logger: self.clone(),
+                id: *id,
+                state: state.clone(),
+            })
+            .collect())
+    }
+}
+
+struct EventState {
+    level: LogLevel,
+    values: Vec<Value>,
+    fields: JsonObject,
+    logged_in_user: JsonObject,
+    users: Vec<JsonObject>,
+    trace_id: Option<String>,
+    trace_ids: Vec<String>,
+    routine_id: Option<String>,
+    tags: Vec<String>,
+    context: Vec<Value>,
+    meta: Vec<Value>,
+    errors: Vec<Value>,
+    stack_trace: Vec<String>,
+    sent: bool,
+    record: Option<LogRecord>,
+}
+
+impl EventState {
+    fn new(level: LogLevel, values: Vec<Value>) -> Self {
+        Self {
+            level,
+            values,
+            fields: JsonObject::new(),
+            logged_in_user: JsonObject::new(),
+            users: Vec::new(),
+            trace_id: None,
+            trace_ids: Vec::new(),
+            routine_id: None,
+            tags: Vec::new(),
+            context: Vec::new(),
+            meta: Vec::new(),
+            errors: Vec::new(),
+            stack_trace: Vec::new(),
+            sent: false,
+            record: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Event {
+    logger: Logger,
+    id: u64,
+    state: Arc<Mutex<EventState>>,
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+}
+
+impl Event {
+    pub fn add_fields(self, fields: JsonObject) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .fields
+            .extend(fields);
+        self
+    }
+
+    pub fn add_trace(self, trace_id: impl Into<String>, make_first: bool) -> Self {
+        let value = trace_id.into().trim().to_string();
+        if value.is_empty() {
+            return self;
+        }
+        let mut state = self.state.lock().expect("event state poisoned");
+        if state.trace_id.is_none() || make_first {
+            state.trace_id = Some(value.clone());
+        }
+        push_unique(&mut state.trace_ids, value);
+        drop(state);
+        self
+    }
+
+    pub fn add_trace_id(self, trace_id: impl Into<String>, make_first: bool) -> Self {
+        self.add_trace(trace_id, make_first)
+    }
+
+    pub fn add_routine_id(self, routine_id: impl Into<String>) -> Self {
+        self.state.lock().expect("event state poisoned").routine_id = Some(routine_id.into());
+        self
+    }
+
+    pub fn add_tags<I, S>(self, tags: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut state = self.state.lock().expect("event state poisoned");
+        for tag in tags {
+            let value = tag.into().trim().to_string();
+            if !value.is_empty() {
+                push_unique(&mut state.tags, value);
+            }
+        }
+        drop(state);
+        self
+    }
+
+    pub fn add_context(self, value: Value) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .context
+            .push(value);
+        self
+    }
+
+    pub fn add_meta(self, value: Value) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .meta
+            .push(value);
+        self
+    }
+
+    pub fn add_error(self, value: Value) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .errors
+            .push(value);
+        self
+    }
+
+    pub fn add_logged_in_user_info(self, user: JsonObject) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .logged_in_user
+            .extend(user);
+        self
+    }
+
+    pub fn add_logged_in_user_id(self, id: impl Into<String>) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .logged_in_user
+            .insert("id".into(), Value::String(id.into()));
+        self
+    }
+
+    pub fn add_user_info(self, user: JsonObject) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .users
+            .push(user);
+        self
+    }
+
+    pub fn add_stack_trace(self, line: impl Into<String>) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .stack_trace
+            .push(line.into());
+        self
+    }
+
+    pub fn to_record(&self) -> Result<LogRecord, LoggerError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?;
+        if let Some(record) = &state.record {
+            return Ok(record.clone());
+        }
+        let mut fields = self
+            .logger
+            .inner
+            .fields
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .clone();
+        fields.extend(state.fields.clone());
+        let mut user = self
+            .logger
+            .inner
+            .current_user
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .clone();
+        user.extend(state.logged_in_user.clone());
+        let message = state
+            .values
+            .iter()
+            .map(|value| match value {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let record = LogRecord {
+            schema: SCHEMA.into(),
+            id: (self.logger.inner.id_factory)(),
+            timestamp: (self.logger.inner.clock)(),
+            level: state.level,
+            runtime: self.logger.inner.runtime.clone(),
+            app_name: self.logger.inner.app_name.clone(),
+            name: self.logger.inner.name.clone(),
+            message,
+            values: state.values.clone(),
+            fields,
+            logged_in_user: (!user.is_empty()).then_some(user),
+            users: state.users.clone(),
+            trace_id: state.trace_id.clone(),
+            trace_ids: state.trace_ids.clone(),
+            routine_id: state.routine_id.clone(),
+            tags: state.tags.clone(),
+            context: state.context.clone(),
+            meta: state.meta.clone(),
+            errors: state.errors.clone(),
+            stack_trace: state.stack_trace.clone(),
+        };
+        state.record = Some(record.clone());
+        Ok(record)
+    }
+
+    pub fn send(&self) -> Result<Option<LogRecord>, LoggerError> {
+        self.send_with_store(true)
+    }
+
+    pub fn send_with_store(&self, store: bool) -> Result<Option<LogRecord>, LoggerError> {
+        {
+            let mut state = self
+                .state
+                .lock()
+                .map_err(|error| LoggerError(error.to_string()))?;
+            if state.sent {
+                return Ok(state.record.clone());
+            }
+            state.sent = true;
+        }
+        self.logger.emit(self, store)
+    }
+}

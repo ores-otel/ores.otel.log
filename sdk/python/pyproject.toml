@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "oresoftware-next-loggers"
+version = "0.1.0"
+description = "Python implementation of the next-loggers/v1 structured logging contract"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "ORESoftware", email = "opensource@oresoftware.com" }]
+keywords = ["logging", "opentelemetry", "observability", "supabase", "structured-logging"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ORESoftware/next-loggers.ts"
+Repository = "https://github.com/ORESoftware/next-loggers.ts/tree/main/sdk/python"
+Issues = "https://github.com/ORESoftware/next-loggers.ts/issues"
+Changelog = "https://github.com/ORESoftware/next-loggers.ts/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+next_loggers = ["py.typed"]

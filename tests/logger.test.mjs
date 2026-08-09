@@ -12,6 +12,7 @@ import { browserLogger, createBrowserLogger } from '@oresoftware/next-loggers/br
 import { createBunLogger } from '@oresoftware/next-loggers/bun';
 import { createDenoLogger } from '@oresoftware/next-loggers/deno';
 import { createEdgeLogger } from '@oresoftware/next-loggers/edge';
+import { createCloudflareWorkerLogger } from '@oresoftware/next-loggers/cloudflare';
 import { createNodeLogger } from '@oresoftware/next-loggers/node';
 import { logger as conditionLogger } from '@oresoftware/next-loggers';
 
@@ -23,6 +24,7 @@ test('all explicit runtime entry points are importable from ESM', () => {
   assert.equal(createLogger({ console: false }).runtime, 'base');
   assert.equal(createBrowserLogger({ console: false, flushOnUnload: false }).runtime, 'browser');
   assert.equal(createEdgeLogger({ console: false }).runtime, 'edge');
+  assert.equal(createCloudflareWorkerLogger({ console: false }).runtime, 'cloudflare');
   assert.equal(createNodeLogger({ console: false, flushOnShutdown: false }).runtime, 'node');
   assert.equal(createBunLogger({ console: false, flushOnShutdown: false }).runtime, 'bun');
   assert.equal(createDenoLogger({ console: false, flushOnUnload: false }).runtime, 'deno');
@@ -267,6 +269,103 @@ test('edge logger passes remote delivery to waitUntil', async () => {
   await Promise.all(promises);
 });
 
+test('cloudflare worker logger attaches request, cf, and env fields', async () => {
+  const records = [];
+  const logger = createCloudflareWorkerLogger({
+    console: false,
+    transports: { write: (record) => void records.push(record) },
+    envFields: ['ENVIRONMENT', 'API_TOKEN', 'KV'],
+  });
+
+  const request = {
+    url: 'https://worker.example.com/orders',
+    method: 'POST',
+    headers: new Headers({ 'cf-ray': '8f3a1b2c4d5e6f70-SJC', 'cf-connecting-ip': '203.0.113.7' }),
+    cf: { colo: 'SJC', country: 'US', city: 'San Jose', asn: 13335, httpProtocol: 'HTTP/2' },
+  };
+  const promises = [];
+  const child = logger.forRequest(request, { waitUntil: (promise) => promises.push(promise) }, {
+    ENVIRONMENT: 'production',
+    API_TOKEN: 'super-secret',
+    KV: { get: async () => null },
+  });
+
+  await child.info('handled').send();
+  assert.equal(promises.length, 1);
+  await Promise.all(promises);
+
+  const [record] = records;
+  assert.equal(record.runtime, 'cloudflare');
+  assert.equal(record.fields.requestUrl, 'https://worker.example.com/orders');
+  assert.equal(record.fields.requestMethod, 'POST');
+  assert.equal(record.fields.rayId, '8f3a1b2c4d5e6f70-SJC');
+  assert.equal(record.fields.colo, 'SJC');
+  assert.equal(record.fields.country, 'US');
+  assert.equal(record.fields.asn, 13335);
+  assert.equal(record.fields.ENVIRONMENT, 'production');
+  // cf-connecting-ip stays off unless includeClientIp is set; bindings are not primitives.
+  assert.equal('clientIp' in record.fields, false);
+  assert.equal('KV' in record.fields, false);
+  // redaction still applies to runtime fields
+  assert.equal(record.fields.API_TOKEN, '[REDACTED]');
+});
+
+test('cloudflare worker logger honours includeClientIp and includeCfProperties', async () => {
+  const records = [];
+  const logger = createCloudflareWorkerLogger({
+    console: false,
+    includeClientIp: true,
+    includeCfProperties: false,
+    transports: { write: (record) => void records.push(record) },
+    request: {
+      url: 'https://worker.example.com/',
+      method: 'GET',
+      headers: new Headers({ 'cf-connecting-ip': '203.0.113.7' }),
+      cf: { colo: 'SJC' },
+    },
+  });
+
+  await logger.info('direct').send();
+  const [record] = records;
+  assert.equal(record.fields.clientIp, '203.0.113.7');
+  assert.equal('colo' in record.fields, false);
+});
+
+test('cloudflare worker logger swaps fetch and scheduled bindings per invocation', async () => {
+  const records = [];
+  const logger = createCloudflareWorkerLogger({
+    console: false,
+    transports: { write: (record) => void records.push(record) },
+  });
+
+  const fetchLogger = logger.forRequest({ url: 'https://worker.example.com/', method: 'GET' });
+  const cronLogger = fetchLogger.forScheduled({ cron: '*/5 * * * *', scheduledTime: 1767225845000 });
+
+  await cronLogger.info('cron tick').send();
+  const [record] = records;
+  assert.equal(record.fields.cron, '*/5 * * * *');
+  assert.equal(record.fields.scheduledTime, '2026-01-01T00:04:05.000Z');
+  assert.equal('requestUrl' in record.fields, false);
+});
+
+test('cloudflare worker logger routes a throwing waitUntil to onLifecycleError', async () => {
+  const failures = [];
+  const logger = createCloudflareWorkerLogger({
+    console: false,
+    transports: { write: async () => undefined },
+    executionContext: {
+      waitUntil: () => {
+        throw new Error('isolate already cancelled');
+      },
+    },
+    onLifecycleError: (error, hook) => void failures.push([hook, String(error)]),
+  });
+
+  await logger.info('cloudflare lifecycle').send();
+  assert.equal(failures.length, 1);
+  assert.equal(failures[0][0], 'waitUntil');
+});
+
 test('Node SIGTERM drains unsent events before preserving signal shutdown', async () => {
   const source = `
     import { createNodeLogger } from '@oresoftware/next-loggers/node';
@@ -322,7 +421,7 @@ test('ordered export conditions select each runtime implementation', () => {
   for (const [condition, runtime] of [
     ['browser', 'browser'],
     ['edge-light', 'edge'],
-    ['workerd', 'edge'],
+    ['workerd', 'cloudflare'],
     ['worker', 'edge'],
     ['bun', 'bun'],
     ['deno', 'deno'],

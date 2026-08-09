@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+# zed-pkg: dependency tree and scratch output. .zpkg.lock is COMMITTED —
+# `zed install --frozen` requires it even at zero dependencies.
+zed_modules/
+.zed/
 
 # Build and framework output
 dist/
@@ -7,15 +11,49 @@ dist/
 .turbo/
 .vercel/
 *.tsbuildinfo
+# Generated npm release slice; package.json and .zpkg-smoke.sh remain tracked.
+sdk/nodejs/dist/
+sdk/nodejs/src/
+sdk/nodejs/README.md
+sdk/nodejs/LICENSE
+sdk/nodejs/.cli-flags.toml
+sdk/java/target/
+sdk/java/.build/
+sdk/dart/.dart_tool/
+sdk/dart/pubspec.lock
+sdk/erlang/_build/
+sdk/erlang/.build/
+sdk/elixir/_build/
+sdk/elixir/deps/
 
 # Tests and tool caches
 coverage/
 .nyc_output/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.out
+# Generated browser-conformance entry (must live in-package for self-reference)
+.conformance-tmp/
+.wrangler/
 .eslintcache
 .cache/
 
 # Package artifacts and logs
 *.tgz
+*.tar
+*.tar.gz
+*.gem
+*.whl
+*.egg-info/
+sdk/python/build/
+sdk/python/dist/
+sdk/rust/target/
+sdk/wasm/target/
+sdk/gleam/build/
 *.log
 npm-debug.log*
 yarn-debug.log*

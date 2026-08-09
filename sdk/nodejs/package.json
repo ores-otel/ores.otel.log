@@ -1,0 +1,176 @@
+{
+  "name": "@oresoftware/next-loggers",
+  "version": "0.1.0",
+  "description": "Runtime-aware structured loggers with native SDKs for JavaScript/TypeScript, Python, Go, Rust, WebAssembly, Java, Dart, Ruby, Gleam, Erlang, and Elixir",
+  "type": "module",
+  "types": "./dist/base-logger.d.ts",
+  "sideEffects": false,
+  "bin": {
+    "next-loggers": "./dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    ".cli-flags.toml",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": {
+      "edge-light": {
+        "types": "./dist/edge-logger.d.ts",
+        "default": "./dist/edge-logger.js"
+      },
+      "workerd": {
+        "types": "./dist/cloudflare-worker-logger.d.ts",
+        "default": "./dist/cloudflare-worker-logger.js"
+      },
+      "worker": {
+        "types": "./dist/edge-logger.d.ts",
+        "default": "./dist/edge-logger.js"
+      },
+      "browser": {
+        "types": "./dist/browser-logger.d.ts",
+        "default": "./dist/browser-logger.js"
+      },
+      "deno": {
+        "types": "./dist/deno-logger.d.ts",
+        "default": "./dist/deno-logger.js"
+      },
+      "bun": {
+        "types": "./dist/bun-logger.d.ts",
+        "default": "./dist/bun-logger.js"
+      },
+      "node": {
+        "types": "./dist/node-logger.d.ts",
+        "default": "./dist/node-logger.js"
+      },
+      "types": "./dist/base-logger.d.ts",
+      "import": "./dist/base-logger.js",
+      "default": "./dist/base-logger.js"
+    },
+    "./base": {
+      "types": "./dist/base-logger.d.ts",
+      "default": "./dist/base-logger.js"
+    },
+    "./browser": {
+      "types": "./dist/browser-logger.d.ts",
+      "default": "./dist/browser-logger.js"
+    },
+    "./edge": {
+      "types": "./dist/edge-logger.d.ts",
+      "default": "./dist/edge-logger.js"
+    },
+    "./cloudflare": {
+      "types": "./dist/cloudflare-worker-logger.d.ts",
+      "default": "./dist/cloudflare-worker-logger.js"
+    },
+    "./node": {
+      "types": "./dist/node-logger.d.ts",
+      "default": "./dist/node-logger.js"
+    },
+    "./bun": {
+      "types": "./dist/bun-logger.d.ts",
+      "default": "./dist/bun-logger.js"
+    },
+    "./deno": {
+      "types": "./dist/deno-logger.d.ts",
+      "default": "./dist/deno-logger.js"
+    },
+    "./context": {
+      "browser": {
+        "types": "./dist/context-browser.d.ts",
+        "default": "./dist/context-browser.js"
+      },
+      "workerd": {
+        "types": "./dist/context-workerd.d.ts",
+        "default": "./dist/context-workerd.js"
+      },
+      "types": "./dist/context.d.ts",
+      "default": "./dist/context.js"
+    },
+    "./browser-stream": {
+      "types": "./dist/browser-stream.d.ts",
+      "default": "./dist/browser-stream.js"
+    },
+    "./otel": {
+      "types": "./dist/otel.d.ts",
+      "default": "./dist/otel.js"
+    },
+    "./prometheus": {
+      "types": "./dist/prometheus.d.ts",
+      "default": "./dist/prometheus.js"
+    },
+    "./supabase-ingest": {
+      "types": "./dist/supabase-ingest.d.ts",
+      "default": "./dist/supabase-ingest.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./eslint": {
+      "types": "./dist/eslint-plugin.d.ts",
+      "default": "./dist/eslint-plugin.js"
+    },
+    "./package.json": "./package.json",
+    "./server-lifecycle": {
+      "types": "./dist/server-lifecycle.d.ts",
+      "import": "./dist/server-lifecycle.js",
+      "default": "./dist/server-lifecycle.js"
+    },
+    "./execution-context": {
+      "browser": {
+        "types": "./dist/execution-context-browser.d.ts",
+        "default": "./dist/execution-context-browser.js"
+      },
+      "workerd": {
+        "types": "./dist/execution-context-workerd.d.ts",
+        "default": "./dist/execution-context-workerd.js"
+      },
+      "types": "./dist/execution-context.d.ts",
+      "default": "./dist/execution-context.js"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ORESoftware/next-loggers.ts.git",
+    "directory": "sdk/nodejs"
+  },
+  "homepage": "https://github.com/ORESoftware/next-loggers.ts#readme",
+  "bugs": {
+    "url": "https://github.com/ORESoftware/next-loggers.ts/issues"
+  },
+  "peerDependencies": {
+    "eslint": ">=9 <11"
+  },
+  "peerDependenciesMeta": {
+    "eslint": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "logging",
+    "opentelemetry",
+    "otel",
+    "loki",
+    "prometheus",
+    "grafana",
+    "nextjs",
+    "esm",
+    "supabase",
+    "bun",
+    "deno",
+    "edge",
+    "cloudflare-workers",
+    "workerd"
+  ],
+  "license": "MIT"
+}

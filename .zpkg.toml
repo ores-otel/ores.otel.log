@@ -1,0 +1,166 @@
+[package]
+org = "oresoftware"
+name = "next-loggers"
+version = "0.1.0"
+description = "Runtime-aware structured loggers with native SDKs for JavaScript/TypeScript, Python, Go, Rust, WebAssembly, Java, Dart, Ruby, Gleam, Erlang, and Elixir"
+license = "MIT"
+keywords = [
+  "logging",
+  "opentelemetry",
+  "otel",
+  "loki",
+  "prometheus",
+  "grafana",
+  "nextjs",
+  "esm",
+  "supabase",
+  "bun",
+  "deno",
+  "edge",
+  "cloudflare-workers",
+  "workerd",
+]
+
+[package.repository]
+vcs = "git"
+url = "https://github.com/ORESoftware/next-loggers.ts"
+
+[dependencies]
+
+[publish]
+include_readme = true
+tag_format = "v{version}"
+exclude = [
+  ".github/**",
+  ".r2g/**",
+  ".zed/**",
+  "**/.zed/**",
+  ".zpkg-pack/**",
+  "coverage/**",
+  "node_modules/**",
+  "**/node_modules/**",
+  "**/.dart_tool/**",
+  "pubspec.lock",
+  "**/.build/**",
+  "**/_build/**",
+  "**/build/**",
+  "**/target/**",
+  "**/.pytest_cache/**",
+  "**/__pycache__/**",
+  "**/*.pyc",
+  "**/*.tgz",
+  "**/*.tar",
+  "**/*.tar.gz",
+  "**/*.gem",
+  "**/*.whl",
+  "**/*.log",
+  "tests/**",
+  "test/**",
+  "src/test/**",
+  "**/test.sh",
+]
+smoke_test = "sh \"$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh\""
+
+[targets.contracts]
+dir = "contracts"
+name = "next-loggers-contracts"
+adapter = "none"
+
+[targets.nodejs]
+dir = "sdk/nodejs"
+name = "next-loggers-nodejs"
+adapter = "node"
+
+[targets.nodejs.native]
+registry = "npm"
+package = "@oresoftware/next-loggers"
+tag_format = "sdk/nodejs/v{version}"
+
+[targets.python]
+dir = "sdk/python"
+name = "next-loggers-python"
+adapter = "python"
+
+[targets.python.native]
+registry = "pypi"
+package = "oresoftware-next-loggers"
+tag_format = "sdk/python/v{version}"
+
+[targets.golang]
+dir = "sdk/go"
+name = "next-loggers-golang"
+adapter = "go"
+
+[targets.golang.native]
+registry = "go-modules"
+package = "github.com/ORESoftware/next-loggers.ts/sdk/go"
+tag_format = "sdk/go/v{version}"
+
+[targets.rust]
+dir = "sdk/rust"
+name = "next-loggers-rust"
+adapter = "rust"
+
+[targets.rust.native]
+registry = "crates-io"
+package = "oresoftware-next-loggers"
+tag_format = "sdk/rust/v{version}"
+
+[targets.rust-wasm]
+dir = "sdk/wasm"
+name = "next-loggers-rust-wasm"
+adapter = "rust"
+ecosystem = "cargo"
+
+[targets.rust-wasm.native]
+registry = "crates-io"
+package = "oresoftware-next-loggers-wasm"
+tag_format = "sdk/wasm/v{version}"
+
+[targets.java]
+dir = "sdk/java"
+name = "next-loggers-java"
+adapter = "java"
+
+[targets.java.native]
+registry = "maven-central"
+package = "io.github.oresoftware:next-loggers"
+tag_format = "sdk/java/v{version}"
+
+[targets.dart]
+dir = "sdk/dart"
+name = "next-loggers-dart"
+adapter = "dart"
+
+[targets.dart.native]
+registry = "pub.dev"
+package = "oresoftware_next_loggers"
+tag_format = "sdk/dart/v{version}"
+
+[targets.ruby]
+dir = "sdk/ruby"
+name = "next-loggers-ruby"
+adapter = "none"
+
+[targets.ruby.native]
+registry = "rubygems"
+package = "oresoftware-next-loggers"
+tag_format = "sdk/ruby/v{version}"
+
+# Zed currently models BEAM packages as installable Hex targets but does not
+# yet expose Hex as a native mirror registry. The tag-scoped release workflow
+# publishes these three targets independently to Hex.
+[targets.gleam]
+dir = "sdk/gleam"
+name = "next-loggers-gleam"
+adapter = "none"
+
+[targets.erlang]
+dir = "sdk/erlang"
+name = "next-loggers-erlang"
+adapter = "none"
+
+[targets.elixir]
+dir = "sdk/elixir"
+name = "next-loggers-elixir"
+adapter = "none"

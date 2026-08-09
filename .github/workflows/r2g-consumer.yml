@@ -1,0 +1,70 @@
+name: r2g installed consumer
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  latest-reviewed-tip:
+    name: current r2g tip / packed downstream consumer
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out next-loggers without credentials
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # This was the immutable tip of ORESoftware/r2g/main reviewed on
+      # 2026-08-06. Updating the pin is an explicit compatibility decision;
+      # the workflow never executes a mutable branch from another repository.
+      - name: Check out the current reviewed r2g tip
+        uses: actions/checkout@v7
+        with:
+          repository: ORESoftware/r2g
+          ref: 3e4e2263f7b6e5c086deba311cfaa38f72d40d73
+          path: .tooling/r2g
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            .tooling/r2g/package-lock.json
+
+      - name: Install next-loggers and exact r2g dependencies
+        run: |
+          npm ci
+          npm ci --prefix .tooling/r2g
+
+      - name: Build and pack the reviewed r2g tool
+        run: |
+          npm run build --prefix .tooling/r2g
+          mkdir -p "$RUNNER_TEMP/r2g-package"
+          cd .tooling/r2g
+          npm pack --pack-destination "$RUNNER_TEMP/r2g-package"
+          test -n "$(find "$RUNNER_TEMP/r2g-package" -maxdepth 1 -name 'r2g-*.tgz' -print -quit)"
+
+      - name: Install r2g from its packed artifact
+        run: |
+          npm install --global "$RUNNER_TEMP"/r2g-package/r2g-*.tgz
+          find .tooling/r2g -depth -delete
+          test ! -e .tooling/r2g
+          command -v r2g
+
+      - name: Exercise next-loggers as a packed downstream dependency
+        env:
+          CI: "true"
+          R2G_TEMP_BASE: ${{ runner.temp }}/next-loggers-r2g
+        run: r2g run

@@ -1,0 +1,74 @@
+name: Server lifecycle audit
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/server-lifecycle-audit.yml'
+      - 'scripts/audit-server-lifecycle.mjs'
+      - 'schemas/server-lifecycle-audit.schema.json'
+      - 'tests/server-lifecycle-audit.test.mjs'
+      - 'src/**'
+      - 'sdk/**'
+      - 'docs/context-and-shutdown.md'
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      roots:
+        description: Space-delimited repository roots to scan after checkout
+        required: false
+        type: string
+        default: '.'
+      strict:
+        description: Fail with exit code 2 when a high-risk server is found
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Test audit classifier
+        run: node --test tests/server-lifecycle-audit.test.mjs
+
+      - name: Produce JSON and Markdown reports
+        shell: bash
+        env:
+          INPUT_ROOTS: ${{ inputs.roots || '.' }}
+          INPUT_STRICT: ${{ inputs.strict || false }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          read -r -a roots <<< "$INPUT_ROOTS"
+          strict=()
+          if [[ "$INPUT_STRICT" == "true" ]]; then
+            strict=(--strict)
+          fi
+          node scripts/audit-server-lifecycle.mjs \
+            --format=json \
+            --output=artifacts/server-lifecycle-audit.json \
+            "${strict[@]}" \
+            "${roots[@]}"
+          node scripts/audit-server-lifecycle.mjs \
+            --format=markdown \
+            --output=artifacts/server-lifecycle-audit.md \
+            "${roots[@]}"
+
+      - name: Upload audit evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-lifecycle-audit-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30

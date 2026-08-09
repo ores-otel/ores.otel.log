@@ -1,0 +1,21 @@
+[package]
+name = "oresoftware-next-loggers-wasm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "WASM-safe next-loggers/v1 records with explicit host context and telemetry sinks"
+license = "MIT"
+repository = "https://github.com/ORESoftware/next-loggers.ts"
+homepage = "https://github.com/ORESoftware/next-loggers.ts"
+documentation = "https://docs.rs/oresoftware-next-loggers-wasm"
+readme = "README.md"
+keywords = ["logging", "wasm", "opentelemetry", "observability"]
+categories = ["wasm", "development-tools::debugging"]
+include = ["src/**", "tests/**", "README.md", "LICENSE"]
+
+[lib]
+name = "next_loggers_wasm"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]

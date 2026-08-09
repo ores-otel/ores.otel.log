@@ -12,20 +12,30 @@ import {
 import { createEdgeLogger } from '@oresoftware/next-loggers/edge';
 import { createNodeLogger } from '@oresoftware/next-loggers/node';
 
-const RUNTIME_ENTRIES = ['browser', 'edge', 'node', 'bun', 'deno'];
+const RUNTIME_ENTRIES = ['browser', 'edge', 'cloudflare', 'node', 'bun', 'deno'];
 
-test('every runtime entry re-exports the full base surface explicitly', async () => {
-  const baseNames = Object.keys(base).filter((name) => name !== 'logger' && name !== 'default');
+test('every runtime entry re-exports the full base surface as `base`', async () => {
+  const baseNames = Object.keys(base).filter((name) => name !== 'default');
   assert.equal(baseNames.length > 0, true);
   for (const entry of RUNTIME_ENTRIES) {
     const module = await import(`@oresoftware/next-loggers/${entry}`);
+    assert.equal(
+      typeof module.base,
+      'object',
+      `entry point "${entry}" is missing the "base" namespace`,
+    );
     for (const name of baseNames) {
       assert.equal(
-        name in module,
+        name in module.base,
         true,
-        `entry point "${entry}" is missing the base export "${name}"`,
+        `entry point "${entry}" is missing the base export "base.${name}"`,
       );
     }
+    assert.equal(
+      module.base.logger,
+      base.logger,
+      `entry "${entry}" must expose the shared base logger as base.logger`,
+    );
     assert.notEqual(module.logger, base.logger, `entry "${entry}" must export its own logger`);
   }
 });

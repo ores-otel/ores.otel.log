@@ -1,0 +1,7 @@
+name = "r2g_consumer"
+version = "0.0.0"
+target = "erlang"
+
+[dependencies]
+__R2G_PACKAGE_NAME__ = { path = "__R2G_ARTIFACT_PATH__" }
+gleam_json = ">= 3.0.2 and < 4.0.0"

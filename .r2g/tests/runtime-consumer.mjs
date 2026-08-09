@@ -3,13 +3,17 @@
 // phase-C container runtime (node, bun, deno) against the installed package.
 import assert from 'node:assert/strict';
 
-import rootLogger, { r2gSmokeTest } from '@oresoftware/next-loggers';
+// r2g phase-S is a Node consumer and requires the package root to expose
+// r2gSmokeTest directly. A namespace import keeps this phase-T fixture usable
+// under Bun and Deno too, where only the shared `base` namespace is promised.
+import rootLogger, * as root from '@oresoftware/next-loggers';
 import { createLogger } from '@oresoftware/next-loggers/base';
 import {
   installLogContextProvider,
   runWithLogContext,
 } from '@oresoftware/next-loggers/context';
 
+const { base } = root;
 const isBun = typeof globalThis.Bun !== 'undefined';
 const isDeno = typeof globalThis.Deno !== 'undefined';
 const expectedRuntime = isBun ? 'bun' : isDeno ? 'deno' : 'node';
@@ -60,7 +64,14 @@ const tracked = createLogger({ console: false }).setErrorTrackingUrl(
 await tracked.error('tracked in container').send();
 assert.deepEqual(attempts, ['https://primary.invalid/collect', 'https://fallback.invalid/exec']);
 
-assert.equal(await r2gSmokeTest(), true);
+if (expectedRuntime === 'node') {
+  assert.equal(typeof root.r2gSmokeTest, 'function');
+  assert.equal(root.r2gSmokeTest, base.r2gSmokeTest);
+  assert.equal(await root.r2gSmokeTest(), true);
+} else {
+  assert.equal(await base.r2gSmokeTest(), true);
+}
 await logger.close();
+await tracked.close();
 await rootLogger.close();
 console.log(`${label} passed`);

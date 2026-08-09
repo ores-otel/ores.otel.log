@@ -3,7 +3,14 @@ export const LOG_LEVELS = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'] a
 export type LogLevel = (typeof LOG_LEVELS)[number];
 export type LogArgument = unknown;
 export type LogFields = Record<string, unknown>;
-export type BuiltInLoggerRuntime = 'base' | 'browser' | 'edge' | 'node' | 'bun' | 'deno';
+export type BuiltInLoggerRuntime =
+  | 'base'
+  | 'browser'
+  | 'edge'
+  | 'cloudflare'
+  | 'node'
+  | 'bun'
+  | 'deno';
 export type LoggerRuntime = BuiltInLoggerRuntime | (string & Record<never, never>);
 
 export interface LogUser extends LogFields {
@@ -180,6 +187,12 @@ export interface LoggerOptions {
    * loggedInUser/users identity blocks are never redacted.
    */
   redactKeys?: readonly string[] | false;
+  /**
+   * Caps on serialized size (string length, depth, collection and property
+   * counts). Defaults to DEFAULT_SERIALIZE_LIMITS; a single oversized payload
+   * should never be able to take down the process it is describing.
+   */
+  limits?: SerializeLimits;
   /** Attach delivery to a request lifecycle, such as an Edge execution context. */
   waitUntil?: (promise: Promise<void>) => void;
   /** Attach delivery to Next.js `after()`, without importing Next.js into this package. */
@@ -268,6 +281,55 @@ export const DEFAULT_REDACTED_KEY_PATTERNS: readonly string[] = [
 
 type RedactPatterns = readonly string[] | null;
 
+/**
+ * Caps applied while serializing. Without them a single log call carrying a
+ * multi-megabyte buffer, a 100k-element array, or a deeply self-referential
+ * graph can exhaust memory, blow the stack, or throw "Invalid string length"
+ * inside JSON.stringify — killing the process it was meant to diagnose.
+ */
+export interface SerializeLimits {
+  /** Strings longer than this are truncated with a marker. Default 20000. */
+  maxStringLength?: number;
+  /** Nesting beyond this is replaced with a marker. Default 12. */
+  maxDepth?: number;
+  /** Array/Set/Map entries kept per collection. Default 1000. */
+  maxArrayLength?: number;
+  /** Own properties kept per object. Default 200. */
+  maxProperties?: number;
+}
+
+type ResolvedLimits = Required<SerializeLimits>;
+
+export const DEFAULT_SERIALIZE_LIMITS: ResolvedLimits = {
+  maxStringLength: 20_000,
+  maxDepth: 12,
+  maxArrayLength: 1_000,
+  maxProperties: 200,
+};
+
+function resolveLimits(limits?: SerializeLimits): ResolvedLimits {
+  return limits ? { ...DEFAULT_SERIALIZE_LIMITS, ...limits } : DEFAULT_SERIALIZE_LIMITS;
+}
+
+/** Appends a marker element when a collection was cut short, so truncation is visible. */
+function capCollection(
+  serialized: SerializedValue[],
+  total: number,
+  limit: number,
+): SerializedValue[] {
+  if (total > limit) {
+    serialized.push(`[+${total - limit} more of ${total}]`);
+  }
+  return serialized;
+}
+
+function truncateString(value: string, limit: number): string {
+  if (limit <= 0 || value.length <= limit) {
+    return value;
+  }
+  return `${value.slice(0, limit)}…[truncated ${value.length - limit} chars]`;
+}
+
 function shouldRedact(key: string, patterns: RedactPatterns): boolean {
   if (!patterns) {
     return false;
@@ -280,30 +342,47 @@ function serializeError(
   error: Error,
   seen: WeakSet<object>,
   redact: RedactPatterns,
+  limits: ResolvedLimits,
+  depth: number,
 ): Record<string, SerializedValue> {
   const result: Record<string, SerializedValue> = {
     name: error.name,
-    message: error.message,
+    message: truncateString(error.message, limits.maxStringLength),
   };
   if (error.stack) {
-    result.stack = error.stack;
+    result.stack = truncateString(error.stack, limits.maxStringLength);
   }
   const errorWithCause = error as Error & { cause?: unknown };
   if (errorWithCause.cause !== undefined) {
-    result.cause = serialize(errorWithCause.cause, seen, redact);
+    result.cause = serialize(errorWithCause.cause, seen, redact, limits, depth + 1);
   }
   for (const key of Object.keys(error)) {
     if (shouldRedact(key, redact)) {
       result[key] = '[REDACTED]';
       continue;
     }
-    result[key] = serialize((error as unknown as Record<string, unknown>)[key], seen, redact);
+    result[key] = serialize(
+      (error as unknown as Record<string, unknown>)[key],
+      seen,
+      redact,
+      limits,
+      depth + 1,
+    );
   }
   return result;
 }
 
-function serialize(value: unknown, seen: WeakSet<object>, redact: RedactPatterns = null): SerializedValue {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+function serialize(
+  value: unknown,
+  seen: WeakSet<object>,
+  redact: RedactPatterns = null,
+  limits: ResolvedLimits = DEFAULT_SERIALIZE_LIMITS,
+  depth = 0,
+): SerializedValue {
+  if (typeof value === 'string') {
+    return truncateString(value, limits.maxStringLength);
+  }
+  if (value === null || typeof value === 'boolean') {
     return value;
   }
   if (typeof value === 'number') {
@@ -328,10 +407,16 @@ function serialize(value: unknown, seen: WeakSet<object>, redact: RedactPatterns
     return '[Circular]';
   }
 
+  // Depth is checked after the cycle guard so a self-reference still reports
+  // '[Circular]' (the more useful diagnosis) rather than a depth marker.
+  if (depth >= limits.maxDepth) {
+    return `[Max depth ${limits.maxDepth} exceeded]`;
+  }
+
   seen.add(value);
   try {
     if (value instanceof Error) {
-      return serializeError(value, seen, redact);
+      return serializeError(value, seen, redact, limits, depth);
     }
     if (value instanceof Date) {
       return Number.isNaN(value.getTime()) ? 'Invalid Date' : value.toISOString();
@@ -340,31 +425,61 @@ function serialize(value: unknown, seen: WeakSet<object>, redact: RedactPatterns
       return value.toString();
     }
     if (Array.isArray(value)) {
-      return value.map((item) => serialize(item, seen, redact));
+      return capCollection(
+        value.slice(0, limits.maxArrayLength).map((item) =>
+          serialize(item, seen, redact, limits, depth + 1),
+        ),
+        value.length,
+        limits.maxArrayLength,
+      );
     }
     if (value instanceof Map) {
-      return Array.from(value.entries(), ([key, entryValue]) => [
-        serialize(key, seen, redact),
-        serialize(entryValue, seen, redact),
-      ]);
+      const entries = Array.from(value.entries());
+      return capCollection(
+        entries.slice(0, limits.maxArrayLength).map(([key, entryValue]) => [
+          serialize(key, seen, redact, limits, depth + 1),
+          shouldRedact(String(key), redact)
+            ? '[REDACTED]'
+            : serialize(entryValue, seen, redact, limits, depth + 1),
+        ]),
+        entries.length,
+        limits.maxArrayLength,
+      );
     }
     if (value instanceof Set) {
-      return Array.from(value, (entryValue) => serialize(entryValue, seen, redact));
+      const entries = Array.from(value);
+      return capCollection(
+        entries.slice(0, limits.maxArrayLength).map((entryValue) =>
+          serialize(entryValue, seen, redact, limits, depth + 1),
+        ),
+        entries.length,
+        limits.maxArrayLength,
+      );
     }
 
     const result: Record<string, SerializedValue> = {};
     // Object.keys plus guarded access (not Object.entries) so one throwing
     // getter poisons only its own property, not every sibling.
-    for (const key of Object.keys(value as Record<string, unknown>)) {
+    const keys = Object.keys(value as Record<string, unknown>);
+    for (const key of keys.slice(0, limits.maxProperties)) {
       if (shouldRedact(key, redact)) {
         result[key] = '[REDACTED]';
         continue;
       }
       try {
-        result[key] = serialize((value as Record<string, unknown>)[key], seen, redact);
+        result[key] = serialize(
+          (value as Record<string, unknown>)[key],
+          seen,
+          redact,
+          limits,
+          depth + 1,
+        );
       } catch (error) {
         result[key] = `[Unserializable: ${error instanceof Error ? error.message : String(error)}]`;
       }
+    }
+    if (keys.length > limits.maxProperties) {
+      result.__truncatedKeys = keys.length - limits.maxProperties;
     }
     const constructorName = (value as { constructor?: { name?: string } }).constructor?.name;
     if (constructorName && constructorName !== 'Object') {
@@ -376,16 +491,22 @@ function serialize(value: unknown, seen: WeakSet<object>, redact: RedactPatterns
   }
 }
 
-export function serializeLogValue(value: unknown): SerializedValue {
-  return serialize(value, new WeakSet<object>());
+export function serializeLogValue(value: unknown, limits?: SerializeLimits): SerializedValue {
+  return serialize(value, new WeakSet<object>(), null, resolveLimits(limits));
 }
 
 /** serializeLogValue plus '[REDACTED]' for keys matching the given substrings. */
 export function serializeLogValueRedacted(
   value: unknown,
   redactKeyPatterns: readonly string[] = DEFAULT_REDACTED_KEY_PATTERNS,
+  limits?: SerializeLimits,
 ): SerializedValue {
-  return serialize(value, new WeakSet<object>(), redactKeyPatterns.map((p) => p.toLowerCase()));
+  return serialize(
+    value,
+    new WeakSet<object>(),
+    redactKeyPatterns.map((p) => p.toLowerCase()),
+    resolveLimits(limits),
+  );
 }
 
 function toMessagePart(value: unknown, serializer: (value: unknown) => SerializedValue): string {
@@ -1001,7 +1122,7 @@ export class LogEvent {
       JSON.stringify([
         this.level,
         this.logger.runtime,
-        this.values.map(serializeLogValue),
+        this.values.map((value) => serializeLogValue(value)),
         Array.from(this.traceIds),
       ]),
     );
@@ -1124,13 +1245,13 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
     return this.options.clock?.() ?? new Date();
   }
 
-  /** Serializes with this logger's redaction rules applied. */
+  /** Serializes with this logger's redaction rules and size limits applied. */
   serializeValue(value: unknown): SerializedValue {
     const redactKeys = this.options.redactKeys ?? DEFAULT_REDACTED_KEY_PATTERNS;
     if (redactKeys === false) {
-      return serializeLogValue(value);
+      return serializeLogValue(value, this.options.limits);
     }
-    return serializeLogValueRedacted(value, redactKeys);
+    return serializeLogValueRedacted(value, redactKeys, this.options.limits);
   }
 
   createId(): string {
