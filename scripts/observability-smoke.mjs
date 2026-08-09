@@ -227,14 +227,19 @@ await waitFor('Tempo service graph remote write', async () => {
 });
 
 await waitFor('Prometheus scrape health', async () => {
-  const result = await prometheusQuery('min(up{job=~"otel-collector-internal|otel-collector-exported|loki|tempo|prometheus"})');
+  const result = await prometheusQuery('min(up{job=~"otel-collector-internal|otel-collector-exported-metrics|loki|tempo|prometheus"})');
   return Number(result.data?.result?.[0]?.value?.[1] ?? 0) === 1;
 });
 
 await waitFor('Tempo trace lookup', async () => {
   const response = await fetchWithTimeout(`http://127.0.0.1:3200/api/traces/${TRACE_ID}`);
   if (!response.ok) return false;
-  return (await response.text()).includes(TRACE_ID);
+  const trace = await response.json();
+  const spans = (trace.batches ?? []).flatMap((batch) =>
+    (batch.scopeSpans ?? batch.instrumentationLibrarySpans ?? []).flatMap((scope) => scope.spans ?? []),
+  );
+  return spans.some((span) => span.name === 'call smoke server')
+    && spans.some((span) => span.name === 'handle smoke request');
 });
 
 const start = String(BigInt(Date.now() - 120_000) * 1_000_000n);
@@ -252,7 +257,16 @@ assert.ok(serializedLoki.includes(LOG_MARKER), 'Loki response must contain the s
 assert.ok(serializedLoki.includes(TRACE_ID), 'Loki structured metadata must contain the trace ID');
 assert.equal(serializedLoki.includes(SECRET_TOKEN), false, 'authorization value leaked to Loki');
 assert.equal(serializedLoki.includes(SECRET_EMAIL), false, 'email value leaked to Loki');
-for (const stream of lokiResponse.data.result.map((item) => item.stream || {})) {
+
+const seriesParameters = new URLSearchParams({
+  'match[]': '{service_name="next-loggers-smoke-server"}',
+  start,
+  end,
+});
+const lokiSeries = await json(`http://127.0.0.1:3100/loki/api/v1/series?${seriesParameters}`);
+assert.equal(lokiSeries.status, 'success');
+assert.ok(lokiSeries.data.length > 0, 'Loki must expose the smoke log stream');
+for (const stream of lokiSeries.data) {
   assert.equal('service_instance_id' in stream, false, 'service.instance.id became a Loki stream label');
   assert.equal('k8s_pod_name' in stream, false, 'k8s.pod.name became a Loki stream label');
   assert.equal('trace_id' in stream, false, 'trace ID became a Loki stream label');

@@ -32,6 +32,7 @@ jobs:
       DEPLOYMENT_ENVIRONMENT: ci
       GRAFANA_ADMIN_USER: admin
       GRAFANA_ADMIN_PASSWORD: ci-only-observability-password-not-for-production
+      GRAFANA_SECRET_KEY: ci-only-observability-secret-key-32-chars
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,7 +69,7 @@ jobs:
           docker run --rm \
             --entrypoint=/bin/promtool \
             -v "$PWD/observability:/etc/prometheus:ro" \
-            prom/prometheus:v3.12.0 \
+            prom/prometheus:v3.13.1 \
             check config /etc/prometheus/prometheus.yml
 
       - name: start pinned observability stack

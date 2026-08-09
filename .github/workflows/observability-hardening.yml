@@ -134,7 +134,7 @@ jobs:
           java-version: "21"
       - name: Compile with all warnings as errors and run both suites
         working-directory: sdk/java
-        run: sh test.sh
+        run: bash test.sh
       - name: Repeat cross-thread context isolation
         working-directory: sdk/java
         run: |
@@ -182,7 +182,7 @@ jobs:
           elixir-version: "1.18"
       - name: Erlang compile and EUnit
         working-directory: sdk/erlang
-        run: sh test.sh
+        run: bash test.sh
       - name: Elixir format, warnings, and ExUnit
         working-directory: sdk/elixir
-        run: sh test.sh
+        run: bash test.sh

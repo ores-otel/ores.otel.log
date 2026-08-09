@@ -80,7 +80,7 @@ assert.match(collectorExportedMetricsJob, /otel-collector:9464/u);
 assert.match(compose, /--web\.enable-remote-write-receiver/u);
 
 assert.match(datasources, /matcherType:\s+label/u);
-assert.match(datasources, /matcherRegex:\s+trace_id/u);
+assert.match(datasources, /matcherRegex:\s+trace(?:_id|\[_\]\?id)/u);
 assert.match(datasources, /tracesToLogsV2:/u);
 assert.match(datasources, /serviceMap:\s*\n\s+datasourceUid:\s+prometheus/u);
 

@@ -16,21 +16,6 @@ common:
     kvstore:
       store: inmemory
 
-distributor:
-  otlp_config:
-    # Intentionally low-cardinality. service.instance.id, k8s.pod.name,
-    # trace_id, and span_id remain structured metadata rather than stream labels.
-    default_resource_attributes_as_index_labels:
-      - service.name
-      - service.namespace
-      - deployment.environment.name
-      - cloud.region
-      - cloud.availability_zone
-      - k8s.cluster.name
-      - k8s.namespace.name
-      - k8s.container.name
-      - container.name
-
 ingester:
   chunk_encoding: snappy
 
@@ -51,6 +36,23 @@ limits_config:
   reject_old_samples: true
   reject_old_samples_max_age: 168h
   max_query_lookback: 168h
+  otlp_config:
+    resource_attributes:
+      ignore_defaults: true
+      attributes_config:
+        # Intentionally low-cardinality. Instance IDs, pod names, trace IDs,
+        # span IDs, and user IDs remain structured metadata, not stream labels.
+        - action: index_label
+          attributes:
+            - service.name
+            - service.namespace
+            - deployment.environment.name
+        - action: structured_metadata
+          attributes:
+            - service.version
+            - telemetry.sdk.language
+            - telemetry.sdk.name
+            - telemetry.sdk.version
 
 compactor:
   working_directory: /loki/compactor

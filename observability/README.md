@@ -184,7 +184,8 @@ signals and recent error/fatal logs.
 This stack is deliberately constrained for local and CI use:
 
 - every host port binds to `127.0.0.1`;
-- the Compose network is internal;
+- service-to-service traffic uses an internal Compose network, while a
+  separate bridge publishes the validation endpoints on loopback only;
 - containers use read-only root filesystems where practical;
 - Linux capabilities are dropped and `no-new-privileges` is enabled;
 - Grafana requires non-default admin and secret-key values;

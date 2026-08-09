@@ -39,7 +39,7 @@ test('observability images are explicitly pinned and no service publishes a wild
     'otel/opentelemetry-collector-contrib:0.157.0',
     'grafana/loki:3.7.2',
     'grafana/tempo:2.10.5',
-    'prom/prometheus:v3.12.0',
+    'prom/prometheus:v3.13.1',
     'grafana/grafana:13.1.0',
   ];
   for (const pin of pins) assert.match(compose, new RegExp(`image: ${pin.replaceAll('.', '\\.')}`, 'u'));
@@ -49,19 +49,22 @@ test('observability images are explicitly pinned and no service publishes a wild
   assert.ok(published.length >= 8, 'expected explicit host port mappings');
   assert.ok(published.every((mapping) => mapping.startsWith('127.0.0.1:')));
   assert.match(compose, /GF_SECURITY_ADMIN_PASSWORD: \$\{GRAFANA_ADMIN_PASSWORD:\?set GRAFANA_ADMIN_PASSWORD/u);
+  assert.match(compose, /GF_SECURITY_SECRET_KEY: \$\{GRAFANA_SECRET_KEY:\?set GRAFANA_SECRET_KEY/u);
   assert.match(compose, /GF_AUTH_ANONYMOUS_ENABLED: "false"/u);
+  assert.match(compose, /GF_PLUGINS_PREINSTALL_DISABLED: "true"/u);
+  assert.match(compose, /internal: true/u);
   assert.match(compose, /--web\.enable-remote-write-receiver/u);
   assert.match(compose, /--enable-feature=exemplar-storage/u);
   assert.equal(compose.includes('privileged: true'), false);
   assert.match(compose, /no-new-privileges:true/u);
 });
 
-test('Collector routes explicit OTLP with bounded queues, redaction, safe CORS, and self-observation', () => {
+test('Collector routes explicit OTLP with bounded queues, redaction, no browser CORS, and self-observation', () => {
   assert.match(collector, /otlphttp\/loki:[\s\S]*endpoint: http:\/\/loki:3100\/otlp/u);
   assert.match(collector, /otlp\/tempo:[\s\S]*endpoint: tempo:4317/u);
   assert.match(collector, /prometheus:[\s\S]*endpoint: 0\.0\.0\.0:9464/u);
-  assert.match(collector, /allowed_origins: \[\]/u);
-  assert.equal(/allowed_origins:[^\n]*\*/u.test(collector), false);
+  assert.match(collector, /max_request_body_size: 8388608/u);
+  assert.equal(/^\s+cors:\s*$/mu.test(collector), false);
   assert.match(collector, /resource\/redact:[\s\S]*http\.request\.header\.authorization/u);
   assert.match(collector, /attributes\/redact:[\s\S]*refresh_token/u);
 
@@ -77,8 +80,10 @@ test('Loki keeps high-cardinality identity and trace values out of index labels'
   assert.equal((loki.match(/^auth_enabled:/gmu) ?? []).length, 1);
   assert.match(loki, /allow_structured_metadata: true/u);
   assert.match(loki, /retention_enabled: true/u);
-  const labels = loki.match(/default_resource_attributes_as_index_labels:\n([\s\S]*?)\ningester:/u)?.[1] ?? '';
+  assert.match(loki, /ignore_defaults: true/u);
+  const labels = loki.match(/action: index_label\n\s+attributes:\n([\s\S]*?)(?=\n\s+- action:|\nanalytics:)/u)?.[1] ?? '';
   assert.match(labels, /service\.name/u);
+  assert.match(labels, /service\.namespace/u);
   assert.match(labels, /deployment\.environment\.name/u);
   for (const forbidden of ['service.instance.id', 'k8s.pod.name', 'trace_id', 'span_id']) {
     assert.equal(new RegExp(`^\\s*-\\s+${forbidden.replaceAll('.', '\\.')}$`, 'mu').test(labels), false);

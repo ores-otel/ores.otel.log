@@ -7,10 +7,12 @@ receivers:
     protocols:
       grpc:
         endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 8
       http:
         endpoint: 0.0.0.0:4318
-        cors:
-          allowed_origins: []
+        max_request_body_size: 8388608
+        # Distributed clients use their authenticated application transport;
+        # direct browser OTLP is intentionally not enabled with CORS.
 
 processors:
   memory_limiter:
