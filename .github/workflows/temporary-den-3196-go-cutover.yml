@@ -1,0 +1,159 @@
+name: Temporary DEN-3196 canonical Go cutover
+
+on:
+  push:
+    branches:
+      - agent/den-3196-canonical-go-cutover
+    paths:
+      - .github/workflows/temporary-den-3196-go-cutover.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: den-3196-canonical-go-cutover
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.repository == 'ores-otel/ores.otel.log' &&
+      github.ref == 'refs/heads/agent/den-3196-canonical-go-cutover'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact feature branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: agent/den-3196-canonical-go-cutover
+          fetch-depth: 0
+
+      - name: Apply the semantic repository cutover
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old = "github.com/ORESoftware/next-loggers.ts/sdk/go"
+          new = "github.com/ores-otel/ores.otel.log/sdk/go"
+          paths = [
+              Path("sdk/go/go.mod"),
+              Path("sdk/go/README.md"),
+              Path("sdk/go/.zpkg-smoke.sh"),
+              Path(".zpkg.toml"),
+              Path("docs/CLI.md"),
+              Path("docs/RELEASING.md"),
+              Path("src/cli/package-catalog.ts"),
+              Path("tests/zpkg.test.mjs"),
+              Path(".github/workflows/release-native.yml"),
+          ]
+          for path in paths:
+              text = path.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count == 0:
+                  raise SystemExit(f"expected legacy Go module reference in {path}")
+              path.write_text(text.replace(old, new), encoding="utf-8")
+              print(f"updated {path}: {count} reference(s)")
+
+          release = Path(".github/workflows/release-native.yml")
+          text = release.read_text(encoding="utf-8")
+          legacy_dart = "      - run: dart run test/conformance.dart\n        working-directory: sdk/dart"
+          canonical_dart = "      - run: dart test\n        working-directory: sdk/dart"
+          if text.count(legacy_dart) != 1:
+              raise SystemExit("expected exactly one obsolete Dart release test command")
+          release.write_text(text.replace(legacy_dart, canonical_dart), encoding="utf-8")
+
+          migration = Path("MIGRATION.md")
+          text = migration.read_text(encoding="utf-8")
+          old_claim = "The new repository was initialized from the complete legacy Git history, including branches and tags."
+          new_claim = (
+              "The new repository was initialized from the complete legacy Git history and every branch "
+              "present at cutover. Direct verification found no tags or releases in either repository, "
+              "so none were omitted from the migration."
+          )
+          if text.count(old_claim) != 1:
+              raise SystemExit("expected one legacy migration-history claim")
+          migration.write_text(text.replace(old_claim, new_claim), encoding="utf-8")
+
+          validator = Path("scripts/validate-contracts.py")
+          text = validator.read_text(encoding="utf-8")
+          marker = "\ndef validate_migration(registry: Registry[Any], manifests: list[dict[str, Any]]) -> int:\n"
+          function = r'''
+
+def validate_repository_identity(manifests: list[dict[str, Any]]) -> None:
+    """Keep canonical and legacy Go module identities explicit during migration."""
+    go_manifest = next((manifest for manifest in manifests if manifest["language"] == "go"), None)
+    if go_manifest is None:
+        raise Failure("Go SDK manifest is missing")
+    repository_context = (
+        os.environ.get("ORES_OTEL_SOURCE_REPOSITORY")
+        or os.environ.get("EXPECTED_REPOSITORY")
+        or os.environ.get("GITHUB_REPOSITORY")
+        or CANONICAL
+    )
+    package_names = go_manifest["packages"]
+    expected = (
+        package_names["legacyName"]
+        if repository_context == LEGACY
+        else package_names["canonicalName"]
+    )
+    go_mod = ROOT / "sdk" / "go" / "go.mod"
+    first_line = go_mod.read_text(encoding="utf-8").splitlines()[0]
+    if first_line != f"module {expected}":
+        raise Failure(
+            "Go module identity does not match the source repository context: "
+            f"repository={repository_context!r}, expected={expected!r}, observed={first_line!r}"
+        )
+'''
+          if marker not in text:
+              raise SystemExit("validate_migration insertion point not found")
+          if "def validate_repository_identity(" in text:
+              raise SystemExit("repository identity validator already exists")
+          text = text.replace(marker, function + marker, 1)
+          old_main = "        manifest_count, manifests = validate_manifests(registry)\n        repositories = validate_migration(registry, manifests)"
+          new_main = "        manifest_count, manifests = validate_manifests(registry)\n        validate_repository_identity(manifests)\n        repositories = validate_migration(registry, manifests)"
+          if text.count(old_main) != 1:
+              raise SystemExit("validator main call site not found")
+          validator.write_text(text.replace(old_main, new_main), encoding="utf-8")
+          PY
+
+          python3 -m py_compile scripts/validate-contracts.py
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('contracts/sdk-manifests/go.json').read_text())
+          expected = manifest['packages']['canonicalName']
+          observed = Path('sdk/go/go.mod').read_text().splitlines()[0].removeprefix('module ')
+          assert observed == expected, (observed, expected)
+          assert manifest['packages']['legacyName'] == 'github.com/ORESoftware/next-loggers.ts/sdk/go'
+          PY
+          ! grep -RFn --exclude=go.json 'github.com/ORESoftware/next-loggers.ts/sdk/go' \
+            sdk/go .zpkg.toml docs/CLI.md docs/RELEASING.md src/cli/package-catalog.ts \
+            tests/zpkg.test.mjs .github/workflows/release-native.yml
+          grep -Fq 'github.com/ores-otel/ores.otel.log/sdk/go' sdk/go/go.mod
+          grep -Fq 'dart test' .github/workflows/release-native.yml
+          ! grep -Fq 'dart run test/conformance.dart' .github/workflows/release-native.yml
+          git diff --check
+
+      - name: Commit the reviewed cutover and remove the one-run workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name ORESoftware
+          git config user.email alex@oresoftware.com
+          git rm .github/workflows/temporary-den-3196-go-cutover.yml
+          git add \
+            sdk/go/go.mod \
+            sdk/go/README.md \
+            sdk/go/.zpkg-smoke.sh \
+            .zpkg.toml \
+            docs/CLI.md \
+            docs/RELEASING.md \
+            src/cli/package-catalog.ts \
+            tests/zpkg.test.mjs \
+            .github/workflows/release-native.yml \
+            MIGRATION.md \
+            scripts/validate-contracts.py
+          git commit -m 'fix(DEN-3196): cut over canonical Go module metadata'
+          git push origin HEAD:agent/den-3196-canonical-go-cutover
