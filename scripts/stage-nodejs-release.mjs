@@ -1,4 +1,4 @@
-import { access, chmod, copyFile, cp, mkdir, readFile, rm } from 'node:fs/promises';
+import { access, chmod, copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -8,17 +8,16 @@ const targetRoot = join(repositoryRoot, 'sdk', 'nodejs');
 
 const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'));
 const rootPackage = await readJson(join(repositoryRoot, 'package.json'));
-const releasePackage = await readJson(join(targetRoot, 'package.json'));
-
-if (rootPackage.name !== releasePackage.name || rootPackage.version !== releasePackage.version) {
-  throw new Error(
-    `sdk/nodejs/package.json drift: expected ${rootPackage.name}@${rootPackage.version}, ` +
-      `found ${releasePackage.name}@${releasePackage.version}`,
-  );
-}
+const { scripts: _scripts, devDependencies: _devDependencies, ...releasePackage } = rootPackage;
+releasePackage.files = ['dist', 'src', '.cli-flags.toml', 'README.md', 'LICENSE'];
+releasePackage.repository = {
+  ...rootPackage.repository,
+  directory: 'sdk/nodejs',
+};
 
 await access(join(repositoryRoot, 'dist', 'cli', 'main.js'));
 await mkdir(targetRoot, { recursive: true });
+await writeFile(join(targetRoot, 'package.json'), `${JSON.stringify(releasePackage, null, 2)}\n`);
 
 for (const generated of ['dist', 'src', 'README.md', 'LICENSE', '.cli-flags.toml']) {
   await rm(join(targetRoot, generated), { recursive: true, force: true });

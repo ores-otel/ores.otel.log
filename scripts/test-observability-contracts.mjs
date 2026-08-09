@@ -26,7 +26,7 @@ const requiredFiles = [
   'src/wasm-logger.ts',
   'src/observability.ts',
   'sdk/go/context.go',
-  'sdk/rust-otel/src/lib.rs',
+  'sdk/rust/src/context.rs',
   'sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java',
   'sdk/dart/lib/next_loggers.dart',
   'sdk/erlang/src/next_loggers.erl',
@@ -41,9 +41,13 @@ const packageJson = JSON.parse(await text('package.json'));
 for (const subpath of ['./otel', './prometheus', './loki', './wasm', './observability']) {
   assert.ok(packageJson.exports[subpath], `missing package export ${subpath}`);
 }
-for (const path of ['sdk', 'contracts', 'docs']) {
+for (const path of ['contracts', 'docs']) {
   assert.ok(packageJson.files.includes(path), `npm package omits ${path}`);
 }
+assert.ok(
+  packageJson.files.some(path => path.startsWith('sdk/')),
+  'npm package omits native SDK sources',
+);
 
 const barrel = await text('src/observability.ts');
 for (const moduleName of ['otel', 'prometheus', 'loki', 'wasm-logger']) {
@@ -56,8 +60,8 @@ for (const moduleName of ['otel', 'prometheus', 'loki', 'wasm-logger']) {
 
 const strategies = [
   ['sdk/go/context.go', /context\.Context/, 'Go must propagate context explicitly'],
-  ['sdk/rust-otel/src/lib.rs', /thread_local!/, 'Rust must declare thread-local sync context'],
-  ['sdk/rust-otel/src/lib.rs', /PhantomData<Rc<\(\)>>/, 'Rust scope must remain non-Send/non-Sync'],
+  ['sdk/rust/src/context.rs', /thread_local!/, 'Rust must declare thread-local sync context'],
+  ['sdk/rust/src/context.rs', /PhantomData<Rc<\(\)>>/, 'Rust scope must remain non-Send/non-Sync'],
   ['sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java', /ThreadLocal<Deque<TraceContext>>/, 'Java must use guarded thread-local context'],
   ['sdk/dart/lib/next_loggers.dart', /runZoned\(/, 'Dart must propagate context through Zones'],
   ['sdk/erlang/src/next_loggers.erl', /erlang:get\(\?CONTEXT_KEY\)/, 'Erlang must use process-local context'],
@@ -70,7 +74,7 @@ for (const [path, pattern, message] of strategies) {
 const schemaFiles = [
   'src/base-logger.ts',
   'sdk/go/logger.go',
-  'sdk/rust/src/lib.rs',
+  'sdk/rust/src/core.rs',
   'sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java',
   'sdk/dart/lib/next_loggers.dart',
   'sdk/erlang/src/next_loggers.erl',

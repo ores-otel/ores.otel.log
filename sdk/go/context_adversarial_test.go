@@ -163,15 +163,15 @@ func TestConcurrentContextsNeverCrossContaminate(t *testing.T) {
 }
 
 type adversarialSpan struct {
-	ctx              TraceContext
-	status           int
-	description      string
-	recorded         error
-	ended            int
-	panicContext     bool
-	panicRecord      bool
-	panicStatus      bool
-	panicEnd         bool
+	ctx          TraceContext
+	status       int
+	description  string
+	recorded     error
+	ended        int
+	panicContext bool
+	panicRecord  bool
+	panicStatus  bool
+	panicEnd     bool
 }
 
 func (span *adversarialSpan) LogContext() TraceContext {
@@ -180,6 +180,7 @@ func (span *adversarialSpan) LogContext() TraceContext {
 	}
 	return span.ctx
 }
+func (span *adversarialSpan) IsRecording() bool { return true }
 func (span *adversarialSpan) RecordError(err error) {
 	if span.panicRecord {
 		panic("record unavailable")
@@ -322,6 +323,7 @@ func TestCallbackPanicIdentityAndLifecycle(t *testing.T) {
 }
 
 type alwaysFailTransport struct{ err error }
+
 func (transport alwaysFailTransport) Write(LogRecord) error { return transport.err }
 
 func TestLifecycleLoggingFailuresDoNotReplaceApplicationResult(t *testing.T) {

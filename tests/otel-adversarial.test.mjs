@@ -108,7 +108,11 @@ test('non-recording spans correlate logs but do not receive events or status upd
   let events = 0;
   let statuses = 0;
   const span = {
-    spanContext: () => ({ traceId: 'trace-1', spanId: 'span-1', traceFlags: 1 }),
+    spanContext: () => ({
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: 1,
+    }),
     isRecording: () => false,
     addEvent() {
       events += 1;
@@ -123,8 +127,8 @@ test('non-recording spans correlate logs but do not receive events or status upd
   });
   transport.write(record({ level: 'ERROR' }));
   assert.equal(emitted.length, 1);
-  assert.equal(emitted[0].attributes['trace.id'], 'trace-1');
-  assert.equal(emitted[0].attributes['span.id'], 'span-1');
+  assert.equal(emitted[0].attributes['trace.id'], '0123456789abcdef0123456789abcdef');
+  assert.equal(emitted[0].attributes['span.id'], '0123456789abcdef');
   assert.equal(events, 0);
   assert.equal(statuses, 0);
 });
@@ -155,7 +159,11 @@ test('log exporter failure does not suppress span events or metrics in fail-open
   const events = [];
   const metrics = [];
   const span = {
-    spanContext: () => ({ traceId: 'trace-1', spanId: 'span-1', traceFlags: 1 }),
+    spanContext: () => ({
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: 1,
+    }),
     isRecording: () => true,
     addEvent: (...args) => events.push(args),
   };
@@ -284,8 +292,8 @@ test('structured error records are converted back to Error objects for spans', (
 test('context provider tolerates broken trace-state serialization', () => {
   const provider = createOpenTelemetryContextProvider(() => ({
     spanContext: () => ({
-      traceId: 'trace-1',
-      spanId: 'span-1',
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
       traceFlags: 1,
       traceState: {
         serialize() {
@@ -297,10 +305,10 @@ test('context provider tolerates broken trace-state serialization', () => {
     addEvent() {},
   }));
   assert.deepEqual(provider(), {
-    traceId: 'trace-1',
-    traceIds: ['trace-1'],
+    traceId: '0123456789abcdef0123456789abcdef',
+    traceIds: ['0123456789abcdef0123456789abcdef'],
     fields: {
-      'otel.span_id': 'span-1',
+      'otel.span_id': '0123456789abcdef',
       'otel.trace_flags': 1,
     },
     tags: ['otel'],

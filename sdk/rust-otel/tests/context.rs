@@ -20,8 +20,7 @@ fn thread_local_context_is_scoped_and_explicit_context_reaches_records() {
     };
     with_context(context.clone(), || {
         assert_eq!(current_context(), Some(context.clone()));
-        logger
-            .info_context(&context, vec![json!("inside")])
+        LoggerContextExt::info_context(&logger, &context, vec![json!("inside")])
             .send()
             .unwrap();
     });
@@ -38,6 +37,7 @@ struct State {
     ended: usize,
     recorded: String,
     fail_lifecycle: bool,
+    recording: Option<bool>,
 }
 
 struct FakeSpan(Arc<Mutex<State>>);
@@ -49,6 +49,9 @@ impl Span for FakeSpan {
             trace_flags: 1,
             ..TraceContext::default()
         }
+    }
+    fn is_recording(&self) -> bool {
+        self.0.lock().unwrap().recording.unwrap_or(true)
     }
     fn record_error(&mut self, error: &str) {
         let mut state = self.0.lock().unwrap();
@@ -93,6 +96,45 @@ fn explicit_span_is_wrapped() {
     let state = state.lock().unwrap();
     assert_eq!(state.status, 1);
     assert_eq!(state.ended, 1);
+}
+
+#[test]
+fn sampled_out_span_keeps_correlation_without_recording_mutations() {
+    let state = Arc::new(Mutex::new(State {
+        recording: Some(false),
+        ..State::default()
+    }));
+    let transport = Arc::new(MemoryTransport::default());
+    let logger = Logger::new(Options {
+        console: false,
+        max_level: next_loggers::LogLevel::Debug,
+        transports: vec![transport.clone()],
+        ..Options::default()
+    });
+    let trace = with_span(
+        &logger,
+        &FakeTracer(state.clone()),
+        "sampled-out",
+        JsonObject::new(),
+        |_| {
+            let context = current_context().unwrap();
+            LoggerContextExt::info_context(&logger, &context, vec![json!("inside sampled-out")])
+                .send()
+                .unwrap();
+            Ok(context.trace_id)
+        },
+    )
+    .unwrap();
+    assert_eq!(trace, "trace-span");
+    let state = state.lock().unwrap();
+    assert_eq!(state.status, 0);
+    assert!(state.recorded.is_empty());
+    assert_eq!(state.ended, 1);
+    assert!(transport
+        .records()
+        .iter()
+        .any(|record| record.message == "inside sampled-out"
+            && record.trace_id.as_deref() == Some("trace-span")));
 }
 
 #[test]

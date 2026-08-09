@@ -117,7 +117,10 @@ fn apply_context_merges_every_correlation_field() {
     assert_eq!(record.trace_id.as_deref(), Some("trace-1"));
     assert_eq!(record.fields.get("otel.span_id"), Some(&json!("span-1")));
     assert_eq!(record.fields.get("otel.trace_flags"), Some(&json!(1)));
-    assert_eq!(record.fields.get("otel.trace_state"), Some(&json!("vendor=value")));
+    assert_eq!(
+        record.fields.get("otel.trace_state"),
+        Some(&json!("vendor=value"))
+    );
     assert_eq!(record.fields.get("route"), Some(&json!("/pay")));
     assert_eq!(record.fields.get("event"), Some(&json!(true)));
     assert!(record.tags.contains(&"otel".to_string()));
@@ -236,10 +239,7 @@ fn callback_panics_are_recorded_ended_and_rethrown_unchanged() {
 #[test]
 fn tracer_error_and_panic_both_fall_back_to_a_noop_span() {
     let (logger, memory) = logger_with_memory();
-    for (panic_start, error_start, expected) in [
-        (false, true, 31usize),
-        (true, false, 37usize),
-    ] {
+    for (panic_start, error_start, expected) in [(false, true, 31usize), (true, false, 37usize)] {
         let value = with_span(
             &logger,
             &SharedTracer {
@@ -254,12 +254,14 @@ fn tracer_error_and_panic_both_fall_back_to_a_noop_span() {
         .unwrap();
         assert_eq!(value, expected);
     }
-    assert!(memory
-        .records()
-        .iter()
-        .filter(|record| record.message.contains("start span"))
-        .count()
-        >= 2);
+    assert!(
+        memory
+            .records()
+            .iter()
+            .filter(|record| record.message.contains("start span"))
+            .count()
+            >= 2
+    );
 }
 
 #[test]
@@ -330,12 +332,12 @@ fn explicit_context_methods_cover_all_log_levels() {
         ..TraceContext::default()
     };
     let events = [
-        logger.trace_context(&context, vec![json!("trace")]),
-        logger.debug_context(&context, vec![json!("debug")]),
-        logger.info_context(&context, vec![json!("info")]),
-        logger.warn_context(&context, vec![json!("warn")]),
-        logger.error_context(&context, vec![json!("error")]),
-        logger.fatal_context(&context, vec![json!("fatal")]),
+        LoggerContextExt::trace_context(&logger, &context, vec![json!("trace")]),
+        LoggerContextExt::debug_context(&logger, &context, vec![json!("debug")]),
+        LoggerContextExt::info_context(&logger, &context, vec![json!("info")]),
+        LoggerContextExt::warn_context(&logger, &context, vec![json!("warn")]),
+        LoggerContextExt::error_context(&logger, &context, vec![json!("error")]),
+        LoggerContextExt::fatal_context(&logger, &context, vec![json!("fatal")]),
     ];
     for event in events {
         event.send().unwrap();

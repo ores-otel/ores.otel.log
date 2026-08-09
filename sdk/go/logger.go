@@ -88,6 +88,10 @@ type Transport interface {
 	Write(LogRecord) error
 }
 
+type openTelemetryTransport interface {
+	IsOpenTelemetry() bool
+}
+
 type Flusher interface {
 	Flush() error
 }
@@ -186,6 +190,8 @@ func (transport *OpenTelemetryTransport) Write(record LogRecord) error {
 	})
 }
 
+func (transport *OpenTelemetryTransport) IsOpenTelemetry() bool { return true }
+
 type SupabaseSender func(LogRecord) error
 
 // SupabaseTransport delegates delivery to an application-owned authenticated
@@ -214,9 +220,11 @@ type Options struct {
 	LoggedInUser map[string]any
 	Transports   []Transport
 	Console      bool
-	Output       io.Writer
-	IDFactory    func() string
-	Clock        func() string
+	// OtelEnabled controls the default OTEL route. Nil means enabled.
+	OtelEnabled *bool
+	Output      io.Writer
+	IDFactory   func() string
+	Clock       func() string
 }
 
 type Logger struct {
@@ -228,6 +236,7 @@ type Logger struct {
 	CurrentUser   map[string]any
 	Transports    []Transport
 	Console       bool
+	OtelEnabled   bool
 	Output        io.Writer
 	IDFactory     func() string
 	Clock         func() string
@@ -259,6 +268,10 @@ func NewLogger(options Options) *Logger {
 			return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		}
 	}
+	otelEnabled := true
+	if options.OtelEnabled != nil {
+		otelEnabled = *options.OtelEnabled
+	}
 	return &Logger{
 		AppName:       options.AppName,
 		Name:          options.Name,
@@ -268,6 +281,7 @@ func NewLogger(options Options) *Logger {
 		CurrentUser:   cloneMap(options.LoggedInUser),
 		Transports:    append([]Transport(nil), options.Transports...),
 		Console:       options.Console,
+		OtelEnabled:   otelEnabled,
 		Output:        options.Output,
 		IDFactory:     options.IDFactory,
 		Clock:         options.Clock,
@@ -349,6 +363,7 @@ type Event struct {
 	Context      []any
 	Meta         []any
 	StackTrace   []string
+	OtelEnabled  *bool
 
 	mu     sync.Mutex
 	sent   bool
@@ -404,6 +419,47 @@ func (event *Event) AddFields(fields map[string]any) *Event {
 	}
 	return event
 }
+
+func (event *Event) WithOtel(enabled bool) *Event {
+	event.OtelEnabled = &enabled
+	return event
+}
+
+func (event *Event) WithOTel(enabled bool) *Event { return event.WithOtel(enabled) }
+func (event *Event) UseOtel() *Event              { return event.WithOtel(true) }
+func (event *Event) UseOTel() *Event              { return event.UseOtel() }
+func (event *Event) NotOtel() *Event              { return event.WithOtel(false) }
+func (event *Event) NotOTel() *Event              { return event.NotOtel() }
+
+func (event *Event) ResetOtel() *Event {
+	event.OtelEnabled = nil
+	return event
+}
+
+func (event *Event) ResetOTel() *Event { return event.ResetOtel() }
+
+func (event *Event) IsOtelEnabled(fallback bool) bool {
+	if event.OtelEnabled == nil {
+		return fallback
+	}
+	return *event.OtelEnabled
+}
+
+func (event *Event) IsOTelEnabled(fallback bool) bool { return event.IsOtelEnabled(fallback) }
+
+func (logger *Logger) UseOtel() *Logger {
+	logger.OtelEnabled = true
+	return logger
+}
+
+func (logger *Logger) UseOTel() *Logger { return logger.UseOtel() }
+
+func (logger *Logger) NotOtel() *Logger {
+	logger.OtelEnabled = false
+	return logger
+}
+
+func (logger *Logger) NotOTel() *Logger { return logger.NotOtel() }
 
 func appendUnique(values []string, value string) []string {
 	for _, existing := range values {
@@ -570,6 +626,9 @@ func (logger *Logger) emit(event *Event, store bool) error {
 	}
 	var failures []error
 	for _, transport := range logger.Transports {
+		if marker, ok := transport.(openTelemetryTransport); ok && marker.IsOpenTelemetry() && !event.IsOtelEnabled(logger.OtelEnabled) {
+			continue
+		}
 		if err := transport.Write(record); err != nil {
 			failures = append(failures, err)
 		}

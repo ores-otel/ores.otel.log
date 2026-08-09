@@ -16,10 +16,12 @@ nested_context_restoration_test() ->
 
 context_restores_after_exception_test() ->
     Token = make_ref(),
-    Result = catch next_loggers:with_context(
+    Result = try next_loggers:with_context(
         #{trace_id => <<"panic">>},
         fun() -> throw(Token) end
-    ),
+    ) catch
+        throw:Caught -> Caught
+    end,
     ?assertEqual(Token, Result),
     ?assertEqual(undefined, next_loggers:current_context()).
 
@@ -201,7 +203,7 @@ start_failure_and_invalid_result_use_noop_span_test() ->
         71,
         next_loggers:with_span(
             Logger, Failing, <<"failure">>, #{}, fun(Span) ->
-                ?assertEqual(noop_span, Span),
+                ?assert(Span =:= noop_span),
                 71
             end
         )
@@ -210,13 +212,37 @@ start_failure_and_invalid_result_use_noop_span_test() ->
         73,
         next_loggers:with_span(
             Logger, Invalid, <<"invalid">>, #{}, fun(Span) ->
-                ?assertEqual(noop_span, Span),
+                ?assert(Span =:= noop_span),
                 73
             end
         )
     ),
     ?assert(receive_bridge_operation(<<"start span">>)),
     ?assert(receive_bridge_operation(<<"start span">>)).
+
+sampled_out_spans_correlate_without_recording_mutations_test() ->
+    Parent = self(),
+    Logger = logger(debug),
+    Tracer = (stable_tracer(Parent))#{
+        is_recording => fun(_Span) -> false end
+    },
+    ?assertEqual(
+        77,
+        next_loggers:with_span(
+            Logger,
+            Tracer,
+            <<"sampled-out">>,
+            #{},
+            fun(_Span) ->
+                ?assert(maps:get(trace_id, next_loggers:current_context()) =:= <<"trace-span">>),
+                {ok, _} = next_loggers:send(next_loggers:info(Logger, [<<"inside sampled-out">>])),
+                77
+            end
+        )
+    ),
+    receive {status, _, _} -> ?assert(false) after 25 -> ok end,
+    receive {recorded, _, _} -> ?assert(false) after 25 -> ok end,
+    receive ended -> ok after 1000 -> ?assert(false) end.
 
 lifecycle_failures_never_replace_success_test() ->
     Logger = logger(debug),

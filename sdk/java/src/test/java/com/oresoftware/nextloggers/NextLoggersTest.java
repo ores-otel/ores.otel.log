@@ -12,6 +12,7 @@ public final class NextLoggersTest {
     contextFlowsIntoRecord();
     threadLocalContextIsIsolated();
     explicitSpanLifecycleIsWrapped();
+    sampledOutSpanCorrelatesWithoutRecordingMutations();
     telemetryFailuresDoNotReplaceApplicationResult();
     jsonMatchesWireShape();
   }
@@ -37,7 +38,7 @@ public final class NextLoggersTest {
     } finally {
       scope.close();
     }
-    NextLoggers.LogRecord record = transport.records().getFirst();
+    NextLoggers.LogRecord record = transport.records().get(0);
     assert record.traceId().equals("trace-1");
     assert record.fields().get("otel.span_id").equals("span-1");
     assert record.fields().get("route").equals("/pay");
@@ -50,7 +51,7 @@ public final class NextLoggersTest {
     CountDownLatch go = new CountDownLatch(1);
     AtomicReference<String> left = new AtomicReference<>();
     AtomicReference<String> right = new AtomicReference<>();
-    Thread first = Thread.ofPlatform().start(() -> {
+    Thread first = new Thread(() -> {
       NextLoggers.Scope scope = NextLoggers.withContext(new NextLoggers.TraceContext("left", "s1", 1));
       try {
         ready.countDown(); await(go); left.set(NextLoggers.currentContext().traceId());
@@ -58,7 +59,7 @@ public final class NextLoggersTest {
         scope.close();
       }
     });
-    Thread second = Thread.ofPlatform().start(() -> {
+    Thread second = new Thread(() -> {
       NextLoggers.Scope scope = NextLoggers.withContext(new NextLoggers.TraceContext("right", "s2", 1));
       try {
         ready.countDown(); await(go); right.set(NextLoggers.currentContext().traceId());
@@ -66,6 +67,7 @@ public final class NextLoggersTest {
         scope.close();
       }
     });
+    first.start(); second.start();
     ready.await(); go.countDown(); first.join(); second.join();
     assert left.get().equals("left");
     assert right.get().equals("right");
@@ -116,6 +118,28 @@ public final class NextLoggersTest {
     assert transport.records().stream().anyMatch(record -> record.message().contains("start span"));
   }
 
+  private static void sampledOutSpanCorrelatesWithoutRecordingMutations() throws Exception {
+    NextLoggers.MemoryTransport ordinary = new NextLoggers.MemoryTransport();
+    java.util.List<NextLoggers.LogRecord> exported = new java.util.ArrayList<>();
+    NextLoggers.Logger logger = new NextLoggers.Logger(new NextLoggers.Options()
+        .appName("payments")
+        .minimumLevel(NextLoggers.Level.DEBUG)
+        .console(false)
+        .transports(java.util.List.of(ordinary, new NextLoggers.OtelTransport(exported::add))));
+    FakeSpan sampledOut = new FakeSpan();
+    sampledOut.recording = false;
+    int result = NextLoggers.withSpan(
+        logger, (name, attributes) -> sampledOut, "sampled-out", Map.of(), ignored -> {
+          logger.info("inside").notOtel().send();
+          return 17;
+        });
+    assert result == 17;
+    assert sampledOut.status == 0;
+    assert sampledOut.recorded == null;
+    assert ordinary.records().stream().anyMatch(record -> record.traceId().equals("trace-span"));
+    assert exported.stream().noneMatch(record -> record.message().equals("inside"));
+  }
+
   private static void jsonMatchesWireShape() {
     NextLoggers.MemoryTransport transport = new NextLoggers.MemoryTransport();
     NextLoggers.Logger logger = logger(transport);
@@ -134,7 +158,9 @@ public final class NextLoggersTest {
     int ended;
     Throwable recorded;
     boolean failLifecycle;
+    boolean recording = true;
     @Override public NextLoggers.TraceContext context() { return new NextLoggers.TraceContext("trace-span", "span-span", 1); }
+    @Override public boolean isRecording() { return recording; }
     @Override public void recordException(Throwable error) {
       if (failLifecycle) throw new IllegalStateException("record unavailable");
       recorded = error;

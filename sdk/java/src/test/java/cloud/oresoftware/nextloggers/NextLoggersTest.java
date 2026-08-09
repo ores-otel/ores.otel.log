@@ -51,6 +51,49 @@ public final class NextLoggersTest {
     assert NextLoggers.toJson(record).contains("\"schema\":\"next-loggers/v1\"");
     assert NextLoggers.currentContext() == null : "context was not restored";
 
+    int otelBefore = otel.size();
+    int ordinaryBefore = supabase.size();
+    logger.log(NextLoggers.Level.INFO, "ordinary only", Map.of(), false);
+    assert otel.size() == otelBefore : "per-event OTEL opt-out was ignored";
+    assert supabase.size() == ordinaryBefore + 1 : "ordinary transport was incorrectly skipped";
+
+    final int[] statusCalls = {0};
+    NextLoggers.OtelSpan sampledOut =
+        new NextLoggers.OtelSpan() {
+          @Override
+          public NextLoggers.Context context() {
+            return NextLoggers.Context.trace(
+                "fedcba9876543210fedcba9876543210", "fedcba9876543210");
+          }
+
+          @Override
+          public boolean isRecording() {
+            return false;
+          }
+
+          @Override
+          public void recordException(Throwable error) {
+            throw new AssertionError("sampled-out span recorded an exception");
+          }
+
+          @Override
+          public void setStatus(int code, String description) {
+            statusCalls[0] += 1;
+          }
+
+          @Override
+          public void end() {}
+        };
+    String correlated =
+        NextLoggers.withSpan(
+            logger,
+            (name, attributes) -> sampledOut,
+            "sampled-out",
+            Map.of(),
+            span -> String.valueOf(logger.info("inside sampled-out", Map.of()).get("traceId")));
+    assert correlated.equals("fedcba9876543210fedcba9876543210");
+    assert statusCalls[0] == 0 : "sampled-out span received recording-only mutations";
+
     ExecutorService pool = Executors.newFixedThreadPool(2);
     try {
       List<Callable<String>> calls =

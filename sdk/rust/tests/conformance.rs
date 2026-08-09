@@ -160,3 +160,44 @@ fn explicit_opentelemetry_and_supabase_transports_work() {
     assert_eq!(supabase[0].schema, "next-loggers/v1");
     assert_eq!(supabase[0].message, "payment failed");
 }
+
+#[test]
+fn per_event_otel_routing_preserves_normal_logging() {
+    let memory = Arc::new(MemoryTransport::default());
+    let otel = Arc::new(Mutex::new(Vec::<OpenTelemetryLogRecord>::new()));
+    let sink = otel.clone();
+    let logger = Logger::new(Options {
+        console: false,
+        transports: vec![
+            memory.clone() as Arc<dyn Transport>,
+            Arc::new(OpenTelemetryTransport::new(move |record| {
+                sink.lock().unwrap().push(record);
+                Ok(())
+            })) as Arc<dyn Transport>,
+        ],
+        ..Options::default()
+    });
+
+    logger.info(vec![json!("default")]).send().unwrap();
+    logger
+        .info(vec![json!("ordinary-only")])
+        .not_otel()
+        .send()
+        .unwrap();
+    logger.not_otel();
+    logger.info(vec![json!("logger-off")]).send().unwrap();
+    logger
+        .info(vec![json!("override")])
+        .use_otel()
+        .send()
+        .unwrap();
+
+    assert_eq!(memory.records().len(), 4);
+    let otel = otel.lock().unwrap();
+    assert_eq!(
+        otel.iter()
+            .map(|record| record.body.as_str())
+            .collect::<Vec<_>>(),
+        vec!["default", "override"]
+    );
+}

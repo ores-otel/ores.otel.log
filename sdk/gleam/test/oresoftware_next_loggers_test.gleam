@@ -1,7 +1,7 @@
 import gleam/erlang/process
 import gleam/json
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import oresoftware_next_loggers as logging
@@ -17,6 +17,12 @@ type Captured {
 
 type AuditEvent {
   AuditEvent(logging.LogEvent)
+}
+
+type SpanCall {
+  StatusSet
+  ExceptionRecorded
+  SpanEnded
 }
 
 pub fn main() {
@@ -180,4 +186,89 @@ pub fn explicit_otel_and_supabase_transports_test() {
     process.receive(supabase_subject, within: 1000)
   record.schema |> should.equal("next-loggers/v1")
   record.message |> should.equal("cart updated")
+}
+
+pub fn per_event_otel_routing_test() {
+  let otel_subject = process.new_subject()
+  let ordinary_subject = process.new_subject()
+  let otel_transport =
+    logging.otel_transport(fn(record) {
+      process.send(otel_subject, OtelWritten(record))
+      Ok(Nil)
+    })
+  let logger =
+    logging.new(
+      fixture_options(),
+      logging.fanout_transport([transport(ordinary_subject), otel_transport]),
+    )
+
+  let assert Ok(_) =
+    logging.info(logger, "ordinary-only", [json.string("ordinary-only")])
+    |> logging.not_otel
+    |> logging.send
+  let assert Ok(Written(ordinary_only)) =
+    process.receive(ordinary_subject, within: 1000)
+  ordinary_only.message |> should.equal("ordinary-only")
+  process.receive(otel_subject, within: 10)
+  |> should.equal(Error(Nil))
+
+  let assert Ok(_) =
+    logging.info(logger, "telemetry", [json.string("telemetry")])
+    |> logging.use_otel
+    |> logging.send
+  let assert Ok(Written(ordinary_telemetry)) =
+    process.receive(ordinary_subject, within: 1000)
+  ordinary_telemetry.message |> should.equal("telemetry")
+  let assert Ok(OtelWritten(record)) =
+    process.receive(otel_subject, within: 1000)
+  record.body |> should.equal("telemetry")
+}
+
+pub fn sampled_out_span_correlates_without_recording_mutations_test() {
+  let log_subject = process.new_subject()
+  let span_subject = process.new_subject()
+  let logger = logging.new(fixture_options(), transport(log_subject))
+  let context =
+    logging.OtelSpanContext(
+      trace_id: Some("fedcba9876543210fedcba9876543210"),
+      span_id: Some("fedcba9876543210"),
+      trace_flags: 0,
+      trace_state: None,
+      fields: [],
+      tags: [],
+    )
+  let span =
+    logging.OtelSpan(
+      context:,
+      is_recording: fn() { Ok(False) },
+      record_exception: fn(_) {
+        process.send(span_subject, ExceptionRecorded)
+        Ok(Nil)
+      },
+      set_status: fn(_, _) {
+        process.send(span_subject, StatusSet)
+        Ok(Nil)
+      },
+      end: fn() {
+        process.send(span_subject, SpanEnded)
+        Ok(Nil)
+      },
+    )
+  let tracer = logging.OtelTracer(start: fn(_, _) { Ok(span) })
+
+  let assert Ok(trace_id) =
+    logging.with_span(logger, tracer, "sampled-out", [], fn(_, span_context) {
+      let assert Ok(_) =
+        logging.info(logger, "inside sampled-out", [])
+        |> logging.apply_span_context(span_context)
+        |> logging.send
+      let assert logging.OtelSpanContext(trace_id: Some(trace_id), ..) =
+        span_context
+      Ok(trace_id)
+    })
+
+  trace_id |> should.equal("fedcba9876543210fedcba9876543210")
+  let assert Ok(SpanEnded) = process.receive(span_subject, within: 1000)
+  process.receive(span_subject, within: 10)
+  |> should.equal(Error(Nil))
 }

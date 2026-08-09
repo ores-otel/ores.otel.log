@@ -176,3 +176,39 @@ func TestExplicitOpenTelemetryAndSupabaseTransports(t *testing.T) {
 		t.Fatalf("unexpected Supabase record: %#v", supabase[0])
 	}
 }
+
+func TestPerEventOpenTelemetryRoutingPreservesNormalLogging(t *testing.T) {
+	memory := &MemoryTransport{}
+	otel := make([]OpenTelemetryLogRecord, 0)
+	logger := NewLogger(Options{
+		Console: false,
+		Transports: []Transport{
+			memory,
+			NewOpenTelemetryTransport(func(record OpenTelemetryLogRecord) error {
+				otel = append(otel, record)
+				return nil
+			}),
+		},
+	})
+
+	if err := logger.Info("default").Send(); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Info("ordinary-only").NotOtel().Send(); err != nil {
+		t.Fatal(err)
+	}
+	logger.NotOtel()
+	if err := logger.Info("logger-off").Send(); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Info("override").UseOtel().Send(); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(memory.Records) != 4 {
+		t.Fatalf("ordinary records = %d", len(memory.Records))
+	}
+	if len(otel) != 2 || otel[0].Body != "default" || otel[1].Body != "override" {
+		t.Fatalf("unexpected OTEL routing: %#v", otel)
+	}
+}

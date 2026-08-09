@@ -40,6 +40,8 @@ pub type LogRecord {
     meta: List(Json),
     errors: List(Json),
     stack_trace: List(String),
+    otel_enabled: Bool,
+    otel_default: Bool,
   )
 }
 
@@ -53,8 +55,42 @@ pub type OtelLogRecord {
   )
 }
 
+/// Explicit correlation data supplied by an application-owned OTEL span.
+pub type OtelSpanContext {
+  OtelSpanContext(
+    trace_id: Option(String),
+    span_id: Option(String),
+    trace_flags: Int,
+    trace_state: Option(String),
+    fields: JsonObject,
+    tags: List(String),
+  )
+}
+
+/// Structural span bridge. No provider or automatic instrumentation is owned
+/// by this package.
+pub type OtelSpan {
+  OtelSpan(
+    context: OtelSpanContext,
+    is_recording: fn() -> Result(Bool, String),
+    record_exception: fn(String) -> Result(Nil, String),
+    set_status: fn(Int, String) -> Result(Nil, String),
+    end: fn() -> Result(Nil, String),
+  )
+}
+
+pub type OtelTracer {
+  OtelTracer(start: fn(String, JsonObject) -> Result(OtelSpan, String))
+}
+
 pub type Transport {
   Transport(
+    write: fn(LogRecord) -> Result(Nil, String),
+    flush: fn() -> Result(Nil, String),
+    flush_on_exit: fn(List(LogRecord)) -> Result(Nil, String),
+    close: fn() -> Result(Nil, String),
+  )
+  OpenTelemetryTransport(
     write: fn(LogRecord) -> Result(Nil, String),
     flush: fn() -> Result(Nil, String),
     flush_on_exit: fn(List(LogRecord)) -> Result(Nil, String),
@@ -71,6 +107,7 @@ pub type Options {
     fields: JsonObject,
     id_generator: fn() -> String,
     clock: fn() -> String,
+    otel_enabled: Bool,
   )
 }
 
@@ -114,6 +151,7 @@ pub fn options(
     fields: [],
     id_generator:,
     clock:,
+    otel_enabled: True,
   )
 }
 
@@ -131,7 +169,7 @@ pub fn noop_transport() -> Transport {
 pub fn otel_transport(
   sink: fn(OtelLogRecord) -> Result(Nil, String),
 ) -> Transport {
-  Transport(
+  OpenTelemetryTransport(
     write: fn(record) { sink(to_otel_record(record)) },
     flush: fn() { Ok(Nil) },
     flush_on_exit: fn(_) { Ok(Nil) },
@@ -151,6 +189,58 @@ pub fn supabase_transport(
   )
 }
 
+/// Fan out one structured record to ordinary and OTEL transports. Per-event
+/// OTEL routing is honored without suppressing ordinary sinks.
+pub fn fanout_transport(transports: List(Transport)) -> Transport {
+  Transport(
+    write: fn(record) { write_transports(transports, record) },
+    flush: fn() {
+      each_transport(transports, fn(transport) { transport.flush() })
+    },
+    flush_on_exit: fn(records) {
+      each_transport(transports, fn(transport) {
+        transport.flush_on_exit(records)
+      })
+    },
+    close: fn() {
+      each_transport(transports, fn(transport) { transport.close() })
+    },
+  )
+}
+
+fn write_transports(
+  transports: List(Transport),
+  record: LogRecord,
+) -> Result(Nil, String) {
+  case transports {
+    [] -> Ok(Nil)
+    [transport, ..rest] -> {
+      let result = case transport {
+        OpenTelemetryTransport(..) if record.otel_enabled == False -> Ok(Nil)
+        _ -> transport.write(record)
+      }
+      case result {
+        Ok(Nil) -> write_transports(rest, record)
+        Error(reason) -> Error(reason)
+      }
+    }
+  }
+}
+
+fn each_transport(
+  transports: List(Transport),
+  action: fn(Transport) -> Result(Nil, String),
+) -> Result(Nil, String) {
+  case transports {
+    [] -> Ok(Nil)
+    [transport, ..rest] ->
+      case action(transport) {
+        Ok(Nil) -> each_transport(rest, action)
+        Error(reason) -> Error(reason)
+      }
+  }
+}
+
 pub fn to_otel_record(record: LogRecord) -> OtelLogRecord {
   let base_attributes = [
     #("service.name", json.string(record.app_name)),
@@ -166,6 +256,160 @@ pub fn to_otel_record(record: LogRecord) -> OtelLogRecord {
     severity_number: otel_severity_number(record.level),
     timestamp: record.timestamp,
     attributes:,
+  )
+}
+
+/// Apply sampled or unsampled span correlation to an ordinary log event.
+pub fn apply_span_context(
+  event: LogEvent,
+  context: OtelSpanContext,
+) -> LogEvent {
+  let OtelSpanContext(
+    trace_id:,
+    span_id:,
+    trace_flags:,
+    trace_state:,
+    fields:,
+    tags:,
+  ) = context
+  let event = add_fields(event, fields)
+  let event = add_fields(event, [#("otel.trace_flags", json.int(trace_flags))])
+  let event = case span_id {
+    Some(value) -> add_fields(event, [#("otel.span_id", json.string(value))])
+    None -> event
+  }
+  let event = case trace_state {
+    Some(value) ->
+      add_fields(event, [#("otel.trace_state", json.string(value))])
+    None -> event
+  }
+  let event = case trace_id {
+    Some(value) -> add_trace(event, value)
+    None -> event
+  }
+  add_tags(event, ["otel", ..tags])
+}
+
+/// Run a Result-returning application callback inside an explicit host-owned
+/// span. Lifecycle logs use the normal logger; OTEL callback failures fail open.
+pub fn with_span(
+  logger: Logger,
+  tracer: OtelTracer,
+  name: String,
+  attributes: JsonObject,
+  callback: fn(OtelSpan, OtelSpanContext) -> Result(value, error),
+) -> Result(value, error) {
+  let OtelTracer(start:) = tracer
+  case start(name, attributes) {
+    Ok(span) -> run_span(logger, span, name, callback)
+    Error(reason) -> {
+      let context = empty_span_context()
+      send_span_lifecycle(logger, context, Warn, name, "start", Some(reason))
+      callback(noop_span(), context)
+    }
+  }
+}
+
+fn run_span(
+  logger: Logger,
+  span: OtelSpan,
+  name: String,
+  callback: fn(OtelSpan, OtelSpanContext) -> Result(value, error),
+) -> Result(value, error) {
+  let OtelSpan(
+    context:,
+    is_recording:,
+    record_exception:,
+    set_status:,
+    end: end_span,
+  ) = span
+  send_span_lifecycle(logger, context, Debug, name, "start", None)
+  let result = callback(span, context)
+  let recording = case is_recording() {
+    Ok(value) -> value
+    Error(reason) -> {
+      send_span_lifecycle(
+        logger,
+        context,
+        Warn,
+        name,
+        "recording",
+        Some(reason),
+      )
+      False
+    }
+  }
+  case result {
+    Ok(value) -> {
+      case recording {
+        True -> {
+          let _ = set_status(1, "")
+          Nil
+        }
+        False -> Nil
+      }
+      send_span_lifecycle(logger, context, Debug, name, "end", None)
+      let _ = end_span()
+      Ok(value)
+    }
+    Error(application_error) -> {
+      case recording {
+        True -> {
+          let _ = record_exception("application callback returned Error")
+          let _ = set_status(2, "application callback returned Error")
+          Nil
+        }
+        False -> Nil
+      }
+      send_span_lifecycle(logger, context, ErrorLevel, name, "error", None)
+      let _ = end_span()
+      Error(application_error)
+    }
+  }
+}
+
+fn send_span_lifecycle(
+  logger: Logger,
+  context: OtelSpanContext,
+  level: Level,
+  name: String,
+  phase: String,
+  bridge_error: Option(String),
+) -> Nil {
+  let event =
+    event(logger, level, "OpenTelemetry span " <> phase <> ": " <> name, [])
+  let event = apply_span_context(event, context)
+  let fields = [
+    #("otel.span_name", json.string(name)),
+    #("otel.span_phase", json.string(phase)),
+  ]
+  let fields = case bridge_error {
+    Some(reason) ->
+      list.append(fields, [#("otel.bridge_error", json.string(reason))])
+    None -> fields
+  }
+  let _ = event |> add_fields(fields) |> add_tags(["otel-span"]) |> send
+  Nil
+}
+
+fn empty_span_context() -> OtelSpanContext {
+  OtelSpanContext(
+    trace_id: None,
+    span_id: None,
+    trace_flags: 0,
+    trace_state: None,
+    fields: [],
+    tags: [],
+  )
+}
+
+fn noop_span() -> OtelSpan {
+  OtelSpan(
+    context: empty_span_context(),
+    is_recording: fn() { Ok(False) },
+    record_exception: fn(_) { Ok(Nil) },
+    set_status: fn(_, _) { Ok(Nil) },
+    end: fn() { Ok(Nil) },
   )
 }
 
@@ -214,8 +458,16 @@ fn event(
   values: List(Json),
 ) -> LogEvent {
   let Logger(subject:, options:) = logger
-  let Options(app_name:, runtime:, name:, fields:, id_generator:, clock:, ..) =
-    options
+  let Options(
+    app_name:,
+    runtime:,
+    name:,
+    fields:,
+    id_generator:,
+    clock:,
+    otel_enabled:,
+    ..,
+  ) = options
   let record =
     LogRecord(
       schema:,
@@ -238,6 +490,8 @@ fn event(
       meta: [],
       errors: [],
       stack_trace: [],
+      otel_enabled:,
+      otel_default: otel_enabled,
     )
   actor.send(subject, Track(record))
   LogEvent(subject:, record:, sent: False)
@@ -250,6 +504,37 @@ pub fn add_fields(event: LogEvent, fields: JsonObject) -> LogEvent {
     record: LogRecord(..record, fields: list.append(record.fields, fields)),
     sent:,
   ))
+}
+
+pub fn use_otel(event: LogEvent) -> LogEvent {
+  with_otel(event, True)
+}
+
+pub fn not_otel(event: LogEvent) -> LogEvent {
+  with_otel(event, False)
+}
+
+pub fn with_otel(event: LogEvent, enabled: Bool) -> LogEvent {
+  let LogEvent(subject:, record:, sent:) = event
+  update(LogEvent(
+    subject:,
+    record: LogRecord(..record, otel_enabled: enabled),
+    sent:,
+  ))
+}
+
+pub fn reset_otel(event: LogEvent) -> LogEvent {
+  let LogEvent(subject:, record:, sent:) = event
+  update(LogEvent(
+    subject:,
+    record: LogRecord(..record, otel_enabled: record.otel_default),
+    sent:,
+  ))
+}
+
+pub fn is_otel_enabled(event: LogEvent) -> Bool {
+  let LogEvent(record:, ..) = event
+  record.otel_enabled
 }
 
 pub fn add_user(event: LogEvent, user: JsonObject) -> LogEvent {
@@ -487,7 +772,12 @@ fn handle_message(
               )
             }
             True -> {
-              case transport.write(record) {
+              let written = case transport {
+                OpenTelemetryTransport(..) if record.otel_enabled == False ->
+                  Ok(Nil)
+                _ -> transport.write(record)
+              }
+              case written {
                 Ok(Nil) -> {
                   process.send(reply, Ok(True))
                   actor.continue(

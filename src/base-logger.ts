@@ -56,6 +56,8 @@ export interface LogRecord {
 
 export interface LogTransport {
   readonly name?: string;
+  /** Marks an explicit OpenTelemetry sink for per-event routing. */
+  readonly otel?: boolean;
   write(record: LogRecord): void | Promise<void>;
   flush?(): void | Promise<void>;
   flushOnExit?(records: readonly LogRecord[]): void | Promise<void>;
@@ -174,6 +176,8 @@ export interface LoggerOptions {
   loggedInUser?: LogUser;
   console?: boolean;
   autoSend?: boolean;
+  /** Default OpenTelemetry routing policy for events from this logger. Default true. */
+  otel?: boolean;
   transports?: LogTransport | LogTransport[];
   http?: HttpTransportOptions;
   supabase?: SupabaseRealtimeOptions;
@@ -1026,6 +1030,7 @@ export class LogEvent {
   protected stackTrace: string[] = [];
   protected sendPromise: Promise<void> | null = null;
   protected record: LogRecord | null = null;
+  protected otelEnabled: boolean | undefined;
 
   constructor(logger: BaseLogger, level: LogLevel, values: LogArgument[]) {
     this.logger = logger;
@@ -1036,6 +1041,31 @@ export class LogEvent {
   addFields(fields: LogFields): this {
     Object.assign(this.fields, fields);
     return this;
+  }
+
+  /** Explicitly route this event to configured OTEL transports. */
+  useOtel(): this {
+    return this.withOtel(true);
+  }
+
+  /** Keep normal logging sinks while skipping OTEL transports for this event. */
+  notOtel(): this {
+    return this.withOtel(false);
+  }
+
+  withOtel(enabled: boolean): this {
+    this.otelEnabled = enabled;
+    return this;
+  }
+
+  /** Restore the logger-level OTEL routing default. */
+  resetOtel(): this {
+    this.otelEnabled = undefined;
+    return this;
+  }
+
+  isOtelEnabled(fallback = true): boolean {
+    return this.otelEnabled ?? fallback;
   }
 
   addTrace(id: string, options?: { makeFirst?: boolean }): this {
@@ -1368,6 +1398,28 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
     return this.maxLevel;
   }
 
+  isOtelEnabled(): boolean {
+    return this.options.otel ?? true;
+  }
+
+  setOtelEnabled(enabled: boolean): this {
+    (this.options as LoggerOptions).otel = enabled;
+    return this;
+  }
+
+  useOtel(): this {
+    return this.setOtelEnabled(true);
+  }
+
+  notOtel(): this {
+    return this.setOtelEnabled(false);
+  }
+
+  /** Snapshot used by explicit decorators without exposing mutable internals. */
+  getTransports(): readonly LogTransport[] {
+    return [...this.transports];
+  }
+
   anew(options: LoggerOptions = {}): BaseLogger<TEvent> {
     return new BaseLogger<TEvent>(
       {
@@ -1449,7 +1501,12 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
         return;
       }
       const results = await Promise.allSettled(
-        this.transports.map(async (transport) => transport.write(record)),
+        this.transports.map(async (transport) => {
+          if (transport.otel === true && !event.isOtelEnabled(this.isOtelEnabled())) {
+            return;
+          }
+          await transport.write(record);
+        }),
       );
       for (let index = 0; index < results.length; index += 1) {
         const result = results[index];

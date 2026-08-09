@@ -44,8 +44,8 @@ function memoryLogger(options = {}) {
 function span(overrides = {}) {
   return {
     spanContext: () => ({
-      traceId: 'trace-matrix',
-      spanId: 'span-matrix',
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
       traceFlags: 1,
     }),
     isRecording: () => true,
@@ -161,8 +161,8 @@ test('isRecording failures disable span mutation while retaining readable correl
     logger: { emit: (value) => emitted.push(value) },
     activeSpan: () => active,
   }).write(record());
-  assert.equal(emitted[0].attributes['trace.id'], 'trace-matrix');
-  assert.equal(emitted[0].attributes['span.id'], 'span-matrix');
+  assert.equal(emitted[0].attributes['trace.id'], '0123456789abcdef0123456789abcdef');
+  assert.equal(emitted[0].attributes['span.id'], '0123456789abcdef');
   assert.equal(events, 0);
 });
 
@@ -276,10 +276,25 @@ test('non-finite serialized numeric fields become OTEL-safe JSON text', () => {
   assert.equal(attributes['next_logger.field.infinity'], 'null');
 });
 
-test('context provider returns undefined for no span and non-recording spans', () => {
+test('context provider correlates valid non-recording spans by default', () => {
   assert.equal(createOpenTelemetryContextProvider(() => undefined)(), undefined);
-  assert.equal(
+  assert.deepEqual(
     createOpenTelemetryContextProvider(() => span({ isRecording: () => false }))(),
+    {
+      traceId: '0123456789abcdef0123456789abcdef',
+      traceIds: ['0123456789abcdef0123456789abcdef'],
+      fields: {
+        'otel.span_id': '0123456789abcdef',
+        'otel.trace_flags': 1,
+      },
+      tags: ['otel'],
+    },
+  );
+  assert.equal(
+    createOpenTelemetryContextProvider(
+      () => span({ isRecording: () => false }),
+      { requireRecordingSpan: true },
+    )(),
     undefined,
   );
 });
@@ -288,18 +303,18 @@ test('context provider preserves string trace state', () => {
   const provider = createOpenTelemetryContextProvider(() =>
     span({
       spanContext: () => ({
-        traceId: 'trace',
-        spanId: 'span',
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
         traceFlags: 3,
         traceState: 'vendor=state',
       }),
     }),
   );
   assert.deepEqual(provider(), {
-    traceId: 'trace',
-    traceIds: ['trace'],
+    traceId: '0123456789abcdef0123456789abcdef',
+    traceIds: ['0123456789abcdef0123456789abcdef'],
     fields: {
-      'otel.span_id': 'span',
+      'otel.span_id': '0123456789abcdef',
       'otel.trace_flags': 3,
       'otel.trace_state': 'vendor=state',
     },

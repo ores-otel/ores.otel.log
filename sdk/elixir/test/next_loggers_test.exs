@@ -61,4 +61,27 @@ defmodule ORESoftware.NextLoggersTest do
 
     assert traces == ["trace-a", "trace-b"]
   end
+
+  test "per-event OTEL routing preserves ordinary transports" do
+    parent = self()
+
+    logger =
+      NextLoggers.new("routing",
+        transports: [
+          fn record ->
+            send(parent, {:ordinary, record["message"]})
+            :ok
+          end,
+          NextLoggers.otel_transport(fn record -> send(parent, {:otel, record["body"]}) end)
+        ]
+      )
+
+    NextLoggers.log(logger, "INFO", "default", %{})
+    NextLoggers.log(logger, "INFO", "ordinary-only", %{}, otel: false)
+
+    assert_receive {:ordinary, "default"}
+    assert_receive {:otel, "default"}
+    assert_receive {:ordinary, "ordinary-only"}
+    refute_receive {:otel, "ordinary-only"}, 20
+  end
 end

@@ -21,8 +21,8 @@ function activeSpan() {
     state,
     span: {
       spanContext: () => ({
-        traceId: 'trace-e2e',
-        spanId: 'span-e2e',
+        traceId: '0123456789abcdef0123456789abcdef',
+        spanId: '0123456789abcdef',
         traceFlags: 1,
         traceState: 'vendor=value',
       }),
@@ -94,13 +94,13 @@ test('one logger fans a correlated record out to OTEL, Prometheus, and Loki', as
     .send();
 
   assert.equal(records.length, 1);
-  assert.equal(records[0].traceId, 'trace-e2e');
-  assert.equal(records[0].fields['otel.span_id'], 'span-e2e');
+  assert.equal(records[0].traceId, '0123456789abcdef0123456789abcdef');
+  assert.equal(records[0].fields['otel.span_id'], '0123456789abcdef');
   assert.equal(records[0].fields.orderId, 'order-42');
 
   assert.equal(otelLogs.length, 1);
-  assert.equal(otelLogs[0].attributes['trace.id'], 'trace-e2e');
-  assert.equal(otelLogs[0].attributes['span.id'], 'span-e2e');
+  assert.equal(otelLogs[0].attributes['trace.id'], '0123456789abcdef0123456789abcdef');
+  assert.equal(otelLogs[0].attributes['span.id'], '0123456789abcdef');
   assert.equal(
     otelLogs[0].attributes['next_logger.field.orderId'],
     'order-42',
@@ -112,7 +112,7 @@ test('one logger fans a correlated record out to OTEL, Prometheus, and Loki', as
 
   const prometheusOutput = prometheus.registry.render();
   assert.match(prometheusOutput, /app_name="checkout"/);
-  assert.doesNotMatch(prometheusOutput, /trace-e2e/);
+  assert.doesNotMatch(prometheusOutput, /0123456789abcdef0123456789abcdef/);
   assert.doesNotMatch(prometheusOutput, /order-42/);
   assert.doesNotMatch(prometheusOutput, /customer-9/);
 
@@ -127,7 +127,7 @@ test('one logger fans a correlated record out to OTEL, Prometheus, and Loki', as
   });
   assert.equal('traceId' in lokiStream.stream, false);
   const lokiRecord = JSON.parse(lokiStream.values[0][1]);
-  assert.equal(lokiRecord.traceId, 'trace-e2e');
+  assert.equal(lokiRecord.traceId, '0123456789abcdef0123456789abcdef');
   assert.equal(lokiRecord.fields.orderId, 'order-42');
 
   await loki.close();
@@ -163,7 +163,7 @@ test('ERROR fanout increments both error metrics and marks the active span', asy
   );
   assert.equal(state.events.length, 1);
   assert.equal(state.exceptions.length, 1);
-  assert.deepEqual(state.statuses, [[{ code: 2, message: 'invoice failed Error: invoice declined' }]]);
+  assert.deepEqual(state.statuses, [[{ code: 2, message: 'invoice failed invoice declined' }]]);
 
   const output = prometheus.registry.render();
   assert.match(output, /next_loggers_error_records_total.* 1/);
@@ -201,12 +201,12 @@ test('WASM records use the exact same fanout transports and correlation policy',
   assert.equal(host.imports.next_loggers.emit_json(128, payload.length), 0);
   await host.flush();
 
-  assert.equal(memoryRecords[0].traceId, 'trace-e2e');
+  assert.equal(memoryRecords[0].traceId, '0123456789abcdef0123456789abcdef');
   assert.equal(memoryRecords[0].tags.includes('wasm'), true);
   assert.equal(otelLogs[0].attributes['next_logger.field.frameId'], 'frame-high-cardinality');
   const output = prometheus.registry.render();
   assert.doesNotMatch(output, /frame-high-cardinality/);
-  assert.doesNotMatch(output, /trace-e2e/);
+  assert.doesNotMatch(output, /0123456789abcdef0123456789abcdef/);
 });
 
 test('custom Prometheus registry can coexist with logger metrics and application metrics', async () => {

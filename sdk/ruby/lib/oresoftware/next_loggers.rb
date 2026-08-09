@@ -69,6 +69,79 @@ module ORESoftware
       )
     end
 
+    def with_span(logger, tracer, name, attributes = {})
+      span = begin
+        tracer.start_span(name.to_s, attributes.dup)
+      rescue StandardError => error
+        safe_log(logger, :warn, "OpenTelemetry start span failed", "otel.bridge_error" => error.message)
+        return yield nil
+      end
+      context = begin
+        span.respond_to?(:context) ? normalize_context(span.context) : Context.new
+      rescue StandardError => error
+        safe_log(logger, :warn, "OpenTelemetry read span context failed", "otel.bridge_error" => error.message)
+        Context.new
+      end
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      with_context(context) do
+        safe_log(logger, :debug, "span started: #{name}", "otel.span_name" => name.to_s, "otel.span_phase" => "start")
+        begin
+          result = yield span
+          if span_recording?(span)
+            safe_span_call(logger, name, "set success status") { span.set_status(1, "") if span.respond_to?(:set_status) }
+          end
+          safe_log(
+            logger,
+            :debug,
+            "span completed: #{name}",
+            "otel.span_name" => name.to_s,
+            "otel.span_phase" => "end",
+            "otel.duration_ms" => (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000
+          )
+          result
+        rescue Exception => error # rubocop:disable Lint/RescueException
+          if span_recording?(span)
+            safe_span_call(logger, name, "record exception") { span.record_exception(error) if span.respond_to?(:record_exception) }
+            safe_span_call(logger, name, "set error status") { span.set_status(2, error.message) if span.respond_to?(:set_status) }
+          end
+          safe_log(logger, :error, "span failed: #{name}", "otel.span_name" => name.to_s, "otel.span_phase" => "error")
+          raise
+        ensure
+          begin
+            span.end if span.respond_to?(:end)
+          rescue StandardError => error
+            safe_log(logger, :warn, "OpenTelemetry end span failed", "otel.span_name" => name.to_s, "otel.bridge_error" => error.message)
+          end
+        end
+      end
+    end
+
+    def span_recording?(span)
+      !span.respond_to?(:recording?) || span.recording?
+    rescue StandardError
+      false
+    end
+
+    def safe_log(logger, level, message, fields)
+      logger.public_send(level, message, fields)
+    rescue StandardError
+      nil
+    end
+
+    def safe_span_call(logger, name, operation)
+      yield
+    rescue StandardError => error
+      safe_log(
+        logger,
+        :warn,
+        "OpenTelemetry #{operation} failed",
+        "otel.span_name" => name.to_s,
+        "otel.bridge_error" => error.message
+      )
+      nil
+    end
+
     # Application-owned OTEL sink. No global provider or runtime patching occurs.
     class OtelTransport
       def initialize(&sink)
@@ -99,6 +172,10 @@ module ORESoftware
           }.freeze
         )
       end
+
+      def open_telemetry?
+        true
+      end
     end
 
     # Client-safe Supabase transport; the application supplies its sender.
@@ -121,6 +198,7 @@ module ORESoftware
         runtime: "ruby",
         fields: {},
         transports: [],
+        otel: true,
         id_factory: -> { SecureRandom.uuid },
         clock: -> { Time.now.utc.iso8601(3) }
       )
@@ -133,11 +211,28 @@ module ORESoftware
         @runtime = runtime.to_s.strip.empty? ? "ruby" : runtime.to_s
         @fields = stringify_keys(fields).freeze
         @transports = Array(transports).freeze
+        @otel_enabled = !!otel
         @id_factory = id_factory
         @clock = clock
       end
 
-      def log(level, message, fields = {})
+      def use_otel
+        @otel_enabled = true
+        self
+      end
+
+      def not_otel
+        @otel_enabled = false
+        self
+      end
+
+      def otel_enabled
+        @otel_enabled
+      end
+
+      alias otel_enabled? otel_enabled
+
+      def log(level, message, fields = {}, otel: nil)
         level_name = level.to_s.upcase
         raise ArgumentError, "unsupported level: #{level}" unless LEVELS.include?(level_name)
 
@@ -172,6 +267,8 @@ module ORESoftware
         record.freeze
 
         @transports.each do |transport|
+          next if transport.respond_to?(:open_telemetry?) && transport.open_telemetry? && !(otel.nil? ? @otel_enabled : otel)
+
           if transport.respond_to?(:write)
             transport.write(record)
           elsif transport.respond_to?(:call)
@@ -184,8 +281,9 @@ module ORESoftware
       end
 
       LEVELS.each do |level|
-        define_method(level.downcase) do |message, fields = {}|
-          log(level, message, fields)
+        define_method(level.downcase) do |message, fields = {}, otel: nil, **field_keywords|
+          merged_fields = fields.merge(field_keywords)
+          log(level, message, merged_fields, otel: otel)
         end
       end
 

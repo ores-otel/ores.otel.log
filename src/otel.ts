@@ -35,6 +35,10 @@ export interface OtelAttributeLimits {
   maxAttributeValueLength?: number;
   /** Primitive array items retained per attribute. Defaults to 64. */
   maxArrayLength?: number;
+  /** @deprecated Use maxAttributeValueLength. Zero preserves the legacy unbounded behavior. */
+  maxAttributeLength?: number;
+  /** @deprecated Use maxArrayLength. */
+  maxAttributeArrayLength?: number;
 }
 
 const TRACE_ID = /^[0-9a-f]{32}$/iu;
@@ -67,7 +71,27 @@ function isValidTraceFlags(value: unknown): value is number {
 
 function boundedString(value: string, maximum = DEFAULT_VALUE_LIMIT): string {
   const limit = positiveInteger(maximum, DEFAULT_VALUE_LIMIT);
-  return value.length <= limit ? value : `${value.slice(0, Math.max(0, limit - 1))}…`;
+  const marker = '…[truncated]';
+  const suffix = limit < marker.length ? '…' : marker;
+  return value.length <= limit
+    ? value
+    : `${value.slice(0, Math.max(0, limit - suffix.length))}${suffix}`;
+}
+
+function normalizedLimits(limits: OtelAttributeLimits): OtelAttributeLimits {
+  const legacyValue = limits.maxAttributeLength;
+  const legacyArray = limits.maxAttributeArrayLength;
+  const valueLimit = limits.maxAttributeValueLength ?? (
+    legacyValue === 0 ? Number.MAX_SAFE_INTEGER : legacyValue
+  );
+  const arrayLimit = limits.maxArrayLength ?? (
+    legacyArray === undefined ? undefined : Math.max(1, Math.floor(legacyArray))
+  );
+  return {
+    ...limits,
+    ...(valueLimit === undefined ? {} : { maxAttributeValueLength: valueLimit }),
+    ...(arrayLimit === undefined ? {} : { maxArrayLength: arrayLimit }),
+  };
 }
 
 function stableJson(value: unknown): string {
@@ -121,7 +145,8 @@ class AttributeBuilder {
   private readonly maximum: number;
 
   constructor(private readonly limits: OtelAttributeLimits) {
-    this.maximum = positiveInteger(limits.maxAttributes, DEFAULT_ATTRIBUTE_LIMIT);
+    this.limits = normalizedLimits(limits);
+    this.maximum = positiveInteger(this.limits.maxAttributes, DEFAULT_ATTRIBUTE_LIMIT);
   }
 
   set(name: string, value: SerializedValue | OtelAttributeValue | undefined): void {
@@ -217,12 +242,27 @@ export interface OpenTelemetryTransportOptions extends OtelAttributeLimits {
   recordMetric?: (name: string, value: number, attributes: OtelAttributes) => void;
   /** Optional diagnostic hook for bridge side effects other than logger.emit(). */
   onBridgeError?: (error: unknown, operation: string) => void;
+  /** Fail open by default so optional telemetry cannot replace application behavior. */
+  failOpen?: boolean;
+  /** @deprecated Use onBridgeError. Retained for native/legacy bridge compatibility. */
+  onError?: (error: unknown, operation: string, record: LogRecord) => void;
 }
 
 export interface OpenTelemetryContextProviderOptions {
   /** Require a recording span. Defaults to false so sampled-out traces still correlate logs. */
   requireRecordingSpan?: boolean;
   onBridgeError?: (error: unknown, operation: string) => void;
+}
+
+export interface WithOpenTelemetrySpanOptions extends OtelStartSpanOptions {
+  /** Set false to suppress successful start/completion records. Default DEBUG. */
+  lifecycleLevel?: Lowercase<LogLevel> | LogLevel | false;
+  logFields?: LogFields;
+  tags?: readonly string[];
+  okStatusCode?: number;
+  errorStatusCode?: number;
+  /** Throw when the tracer cannot start. Default false: run with a no-op span. */
+  failOnStartError?: boolean;
 }
 
 const SEVERITY_NUMBER: Record<LogLevel, number> = {
@@ -246,6 +286,15 @@ const LEVEL_METHOD: Readonly<
 };
 
 const ERROR_LEVELS = new Set<LogLevel>(['ERROR', 'FATAL']);
+const DEFAULT_METRIC_ATTRIBUTES = [
+  'service.name',
+  'next_logger.runtime',
+  'next_logger.level',
+  'deployment.environment',
+  'deployment.environment.name',
+  'service.namespace',
+  'service.version',
+] as const;
 const FORBIDDEN_METRIC_ATTRIBUTES = new Set([
   'trace.id',
   'span.id',
@@ -254,6 +303,15 @@ const FORBIDDEN_METRIC_ATTRIBUTES = new Set([
   OTEL_FIELD_KEYS.parentSpanId,
   OTEL_FIELD_KEYS.traceState,
 ]);
+
+const NOOP_SPAN: OtelSpanLike = Object.freeze({
+  spanContext: () => ({ traceId: '', spanId: '', traceFlags: 0 }),
+  isRecording: () => false,
+  addEvent: () => undefined,
+  recordException: () => undefined,
+  setStatus: () => undefined,
+  end: () => undefined,
+});
 
 function reportDiagnostic(
   callback: ((error: unknown, operation: string) => void) | undefined,
@@ -342,6 +400,9 @@ function addRecordAttributes(
     'attributes' | 'includeFields' | 'includeValues'
   >,
 ): void {
+  for (const [key, value] of Object.entries(options.attributes ?? {})) {
+    builder.set(key, value);
+  }
   builder.set('log.record.uid', record.id);
   builder.set('service.name', record.appName);
   builder.set('next_logger.schema', record.schema);
@@ -352,9 +413,6 @@ function addRecordAttributes(
   if (record.routineId) builder.set('next_logger.routine_id', record.routineId);
   if (record.tags?.length) builder.set('next_logger.tags', record.tags);
 
-  for (const [key, value] of Object.entries(options.attributes ?? {})) {
-    builder.set(key, value);
-  }
   if (options.includeFields ?? true) {
     for (const [key, value] of Object.entries(record.fields)) {
       builder.set(`next_logger.field.${key}`, value);
@@ -407,7 +465,7 @@ export function logRecordToOtelAttributes(
       'maxAttributeValueLength' | 'maxArrayLength'
   > = {},
 ): OtelAttributes {
-  const builder = new AttributeBuilder(options);
+  const builder = new AttributeBuilder(normalizedLimits(options));
   addRecordAttributes(builder, record, options);
   return builder.values;
 }
@@ -421,13 +479,22 @@ function metricAttributes(record: LogRecord, options: OpenTelemetryTransportOpti
   builder.set('service.name', record.appName);
   builder.set('next_logger.runtime', String(record.runtime));
   builder.set('next_logger.level', record.level);
+  for (const [key, value] of Object.entries(options.attributes ?? {})) {
+    if (!FORBIDDEN_METRIC_ATTRIBUTES.has(key) && !key.startsWith('next_logger.field.')) {
+      builder.set(key, value);
+    }
+  }
   for (const [key, value] of Object.entries(options.metricAttributes ?? {})) {
     if (FORBIDDEN_METRIC_ATTRIBUTES.has(key) || key.startsWith('next_logger.field.')) {
       continue;
     }
     builder.set(key, value);
   }
-  return builder.values;
+  const allowed = options.metricAttributeKeys ?? [
+    ...DEFAULT_METRIC_ATTRIBUTES,
+    ...Object.keys(options.metricAttributes ?? {}),
+  ];
+  return selectMetricAttributes(builder.values, allowed);
 }
 
 function selectMetricAttributes(
@@ -442,36 +509,6 @@ function selectMetricAttributes(
     }
   }
   return selected;
-}
-
-function isRecording(span: OtelSpanLike): boolean {
-  try {
-    return span.isRecording?.() !== false;
-  } catch {
-    return false;
-  }
-}
-
-function selectMetricAttributes(
-  attributes: OtelAttributes,
-  allowed: readonly string[] | undefined,
-): OtelAttributes {
-  const selected: OtelAttributes = {};
-  for (const key of allowed ?? DEFAULT_METRIC_ATTRIBUTES) {
-    const value = attributes[key];
-    if (value !== undefined) {
-      selected[key] = value;
-    }
-  }
-  return selected;
-}
-
-function isRecording(span: OtelSpanLike): boolean {
-  try {
-    return span.isRecording?.() !== false;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -546,10 +583,25 @@ export function createOpenTelemetryContextProvider(
  */
 export class OpenTelemetryTransport implements LogTransport {
   readonly name = 'opentelemetry';
+  readonly otel = true;
 
   constructor(private readonly options: OpenTelemetryTransportOptions) {
     if (!options?.logger || typeof options.logger.emit !== 'function') {
-      throw new TypeError('OpenTelemetryTransport requires logger.emit()');
+      throw new TypeError('OpenTelemetryTransport requires an injected OTEL logger with emit()');
+    }
+  }
+
+  private diagnostic(
+    error: unknown,
+    bridgeOperation: string,
+    legacyOperation: string,
+    record: LogRecord,
+  ): void {
+    reportDiagnostic(this.options.onBridgeError, error, bridgeOperation);
+    try {
+      this.options.onError?.(error, legacyOperation, record);
+    } catch {
+      // Legacy diagnostics are isolated for the same reason as onBridgeError.
     }
   }
 
@@ -558,7 +610,7 @@ export class OpenTelemetryTransport implements LogTransport {
     try {
       span = this.options.activeSpan?.() ?? undefined;
     } catch (error) {
-      reportDiagnostic(this.options.onBridgeError, error, 'active-span');
+      this.diagnostic(error, 'active-span', 'read active span', record);
     }
 
     let spanContext: OtelSpanContextLike | undefined;
@@ -569,17 +621,17 @@ export class OpenTelemetryTransport implements LogTransport {
           spanContext = candidate;
         }
       } catch (error) {
-        reportDiagnostic(this.options.onBridgeError, error, 'span-context');
+        this.diagnostic(error, 'span-context', 'read span context', record);
       }
     }
 
-    const builder = new AttributeBuilder(this.options);
+    const builder = new AttributeBuilder(normalizedLimits(this.options));
     addRecordAttributes(builder, record, this.options);
     addCorrelationAttributes(
       builder,
       record,
       spanContext,
-      (error) => reportDiagnostic(this.options.onBridgeError, error, 'trace-state'),
+      (error) => this.diagnostic(error, 'trace-state', 'serialize trace state', record),
     );
     const attributes = builder.values;
 
@@ -587,29 +639,35 @@ export class OpenTelemetryTransport implements LogTransport {
     try {
       activeContext = this.options.activeContext?.();
     } catch (error) {
-      reportDiagnostic(this.options.onBridgeError, error, 'active-context');
+      this.diagnostic(error, 'active-context', 'read active context', record);
     }
 
     const timestamp = safeDate(record.timestamp);
-    this.options.logger.emit({
-      body: record.message,
-      severityNumber: SEVERITY_NUMBER[record.level],
-      severityText: record.level,
-      attributes,
-      timestamp,
-      ...(activeContext !== undefined ? { context: activeContext } : {}),
-    });
+    let emitFailure: unknown;
+    try {
+      this.options.logger.emit({
+        body: record.message,
+        severityNumber: SEVERITY_NUMBER[record.level],
+        severityText: record.level,
+        attributes,
+        timestamp,
+        ...(activeContext !== undefined ? { context: activeContext } : {}),
+      });
+    } catch (error) {
+      emitFailure = error;
+      this.diagnostic(error, 'logger.emit', 'emit log', record);
+    }
 
     if (span && (this.options.emitSpanEvents ?? true)) {
       const recording = safeIsRecording(
         span,
-        (error) => reportDiagnostic(this.options.onBridgeError, error, 'is-recording'),
+        (error) => this.diagnostic(error, 'is-recording', 'check span recording state', record),
       );
       if (recording) {
         try {
           span.addEvent(`log.${record.level.toLowerCase()}`, attributes, timestamp);
         } catch (error) {
-          reportDiagnostic(this.options.onBridgeError, error, 'span-event');
+          this.diagnostic(error, 'span-event', 'add span event', record);
         }
         if (ERROR_LEVELS.has(record.level)) {
           const exception = errorFromRecord(record);
@@ -617,13 +675,13 @@ export class OpenTelemetryTransport implements LogTransport {
             try {
               span.recordException?.(exception, timestamp);
             } catch (error) {
-              reportDiagnostic(this.options.onBridgeError, error, 'record-exception');
+              this.diagnostic(error, 'record-exception', 'record exception', record);
             }
           }
           try {
             span.setStatus?.({ code: 2, message: boundedString(record.message, 1_024) });
           } catch (error) {
-            reportDiagnostic(this.options.onBridgeError, error, 'span-status');
+            this.diagnostic(error, 'span-status', 'set span status', record);
           }
         }
       }
@@ -632,11 +690,19 @@ export class OpenTelemetryTransport implements LogTransport {
     const labels = metricAttributes(record, this.options);
     try {
       this.options.recordMetric?.('next_loggers.records', 1, labels);
-      if (ERROR_LEVELS.has(record.level)) {
-        this.options.recordMetric?.('next_loggers.errors', 1, labels);
-      }
     } catch (error) {
-      reportDiagnostic(this.options.onBridgeError, error, 'metric');
+      this.diagnostic(error, 'metric', 'record log metric', record);
+    }
+    if (ERROR_LEVELS.has(record.level)) {
+      try {
+        this.options.recordMetric?.('next_loggers.errors', 1, labels);
+      } catch (error) {
+        this.diagnostic(error, 'metric', 'record error metric', record);
+      }
+    }
+
+    if (emitFailure !== undefined && this.options.failOpen === false) {
+      throw emitFailure;
     }
   }
 }
@@ -645,6 +711,44 @@ export function createOpenTelemetryTransport(
   options: OpenTelemetryTransportOptions,
 ): OpenTelemetryTransport {
   return new OpenTelemetryTransport(options);
+}
+
+/**
+ * Returns a child logger that preserves normal transports and context while
+ * adding an explicit application-owned OTEL transport/context bridge.
+ */
+export function withOpenTelemetry(
+  logger: BaseLogger,
+  options: OpenTelemetryTransportOptions,
+): BaseLogger {
+  const otelContext = options.activeSpan
+    ? createOpenTelemetryContextProvider(options.activeSpan)
+    : undefined;
+  return logger.anew({
+    transports: [...logger.getTransports(), createOpenTelemetryTransport(options)],
+    ...(otelContext
+      ? {
+          contextProvider: () => {
+            const inherited = logger.getContext();
+            const telemetry = otelContext();
+            if (!inherited) return telemetry;
+            if (!telemetry) return inherited;
+            return {
+              ...inherited,
+              ...telemetry,
+              loggedInUser: { ...inherited.loggedInUser, ...telemetry.loggedInUser },
+              users: [...(inherited.users ?? []), ...(telemetry.users ?? [])],
+              fields: { ...inherited.fields, ...telemetry.fields },
+              traceIds: Array.from(new Set([
+                ...(inherited.traceIds ?? []),
+                ...(telemetry.traceIds ?? []),
+              ])),
+              tags: Array.from(new Set([...(inherited.tags ?? []), ...(telemetry.tags ?? [])])),
+            };
+          },
+        }
+      : {}),
+  });
 }
 
 function normalizeLifecycleLevel(
@@ -758,13 +862,15 @@ export async function withOpenTelemetrySpan<T>(
       }
       try {
         const result = await callback(span);
-        await invokeSpanSafely(
-          logger,
-          'set success status',
-          () => span.setStatus?.({ code: okStatusCode }),
-          contextFields,
-          tags,
-        );
+        if (safeIsRecording(span, () => undefined)) {
+          await invokeSpanSafely(
+            logger,
+            'set success status',
+            () => span.setStatus?.({ code: okStatusCode }),
+            contextFields,
+            tags,
+          );
+        }
         if (lifecycleLevel !== false) {
           await logSafely(
             logger,
@@ -784,29 +890,31 @@ export async function withOpenTelemetrySpan<T>(
         }
         return result;
       } catch (error) {
-        await invokeSpanSafely(
-          logger,
-          'record exception',
-          () => {
-            span.recordException?.(
-              error instanceof Error ? error : { message: String(error) },
-            );
-          },
-          contextFields,
-          tags,
-        );
-        await invokeSpanSafely(
-          logger,
-          'set error status',
-          () => {
-            span.setStatus?.({
-              code: errorStatusCode,
-              ...(error instanceof Error && error.message ? { message: error.message } : {}),
-            });
-          },
-          contextFields,
-          tags,
-        );
+        if (safeIsRecording(span, () => undefined)) {
+          await invokeSpanSafely(
+            logger,
+            'record exception',
+            () => {
+              span.recordException?.(
+                error instanceof Error ? error : { message: String(error) },
+              );
+            },
+            contextFields,
+            tags,
+          );
+          await invokeSpanSafely(
+            logger,
+            'set error status',
+            () => {
+              span.setStatus?.({
+                code: errorStatusCode,
+                ...(error instanceof Error && error.message ? { message: error.message } : {}),
+              });
+            },
+            contextFields,
+            tags,
+          );
+        }
         await logSafely(
           logger,
           'ERROR',

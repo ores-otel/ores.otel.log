@@ -85,8 +85,54 @@ pub struct OtelLogRecord {
     pub attributes: BTreeMap<String, String>,
 }
 
+/// Structural bridge to an OpenTelemetry span owned by the WASM host.
+pub trait OpenTelemetrySpan: Send + Sync {
+    fn context(&self) -> Result<LogContext, String>;
+    fn is_recording(&self) -> Result<bool, String>;
+    fn record_exception(&self, error: &str) -> Result<(), String>;
+    fn set_status(&self, code: u8, description: &str) -> Result<(), String>;
+    fn end(&self) -> Result<(), String>;
+}
+
+/// The host injects its tracer; this crate never creates or installs a provider.
+pub trait OpenTelemetryTracer {
+    fn start_span(
+        &self,
+        name: &str,
+        attributes: &BTreeMap<String, String>,
+    ) -> Result<Box<dyn OpenTelemetrySpan>, String>;
+}
+
+struct NoopOpenTelemetrySpan;
+
+impl OpenTelemetrySpan for NoopOpenTelemetrySpan {
+    fn context(&self) -> Result<LogContext, String> {
+        Ok(LogContext::default())
+    }
+
+    fn is_recording(&self) -> Result<bool, String> {
+        Ok(false)
+    }
+
+    fn record_exception(&self, _error: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn set_status(&self, _code: u8, _description: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn end(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
 pub trait Transport: Send + Sync {
     fn write(&self, record: &LogRecord) -> Result<(), String>;
+
+    fn is_open_telemetry(&self) -> bool {
+        false
+    }
 }
 
 pub struct OpenTelemetryTransport<F>
@@ -109,6 +155,10 @@ impl<F> Transport for OpenTelemetryTransport<F>
 where
     F: Fn(OtelLogRecord) -> Result<(), String> + Send + Sync,
 {
+    fn is_open_telemetry(&self) -> bool {
+        true
+    }
+
     fn write(&self, record: &LogRecord) -> Result<(), String> {
         let mut attributes = BTreeMap::from([
             ("service.name".to_string(), record.app_name.clone()),
@@ -165,6 +215,7 @@ pub struct Logger {
     transports: Vec<Arc<dyn Transport>>,
     id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     clock: Arc<dyn Fn() -> String + Send + Sync>,
+    otel_enabled: bool,
 }
 
 impl Logger {
@@ -183,6 +234,7 @@ impl Logger {
             // WASM hosts should inject an RFC3339 clock. This deterministic
             // fallback is safe on targets without wall-clock capabilities.
             clock: Arc::new(|| "1970-01-01T00:00:00.000Z".to_string()),
+            otel_enabled: true,
         })
     }
 
@@ -198,6 +250,11 @@ impl Logger {
 
     pub fn with_transport<T: Transport + 'static>(mut self, transport: Arc<T>) -> Self {
         self.transports.push(transport);
+        self
+    }
+
+    pub fn with_otel_enabled(mut self, enabled: bool) -> Self {
+        self.otel_enabled = enabled;
         self
     }
 
@@ -223,6 +280,17 @@ impl Logger {
         message: impl Into<String>,
         context: Option<&LogContext>,
         event_fields: BTreeMap<String, String>,
+    ) -> Result<LogRecord, String> {
+        self.log_with_otel(level, message, context, event_fields, None)
+    }
+
+    pub fn log_with_otel(
+        &self,
+        level: LogLevel,
+        message: impl Into<String>,
+        context: Option<&LogContext>,
+        event_fields: BTreeMap<String, String>,
+        otel: Option<bool>,
     ) -> Result<LogRecord, String> {
         let message = message.into();
         let mut fields = self.fields.clone();
@@ -261,6 +329,9 @@ impl Logger {
             tags,
         };
         for transport in &self.transports {
+            if transport.is_open_telemetry() && !otel.unwrap_or(self.otel_enabled) {
+                continue;
+            }
             transport.write(&record)?;
         }
         Ok(record)
@@ -281,6 +352,145 @@ impl Logger {
     ) -> Result<LogRecord, String> {
         self.log(LogLevel::Error, message, context, BTreeMap::new())
     }
+
+    pub fn info_with_otel(
+        &self,
+        message: impl Into<String>,
+        context: Option<&LogContext>,
+        otel: bool,
+    ) -> Result<LogRecord, String> {
+        self.log_with_otel(
+            LogLevel::Info,
+            message,
+            context,
+            BTreeMap::new(),
+            Some(otel),
+        )
+    }
+}
+
+/// Run application work inside a host-owned span while emitting ordinary
+/// lifecycle logs. OTEL failures fail open and cannot replace `callback`'s
+/// result. Sampled-out spans still provide correlation context, but receive no
+/// status or exception mutations.
+pub fn with_span<T, E, F>(
+    logger: &Logger,
+    tracer: &dyn OpenTelemetryTracer,
+    name: &str,
+    attributes: BTreeMap<String, String>,
+    callback: F,
+) -> Result<T, E>
+where
+    E: std::fmt::Display,
+    F: FnOnce(&dyn OpenTelemetrySpan, &LogContext) -> Result<T, E>,
+{
+    let span = match tracer.start_span(name, &attributes) {
+        Ok(span) => span,
+        Err(error) => {
+            log_span_lifecycle(logger, None, LogLevel::Warn, name, "start", Some(&error));
+            Box::new(NoopOpenTelemetrySpan)
+        }
+    };
+    let context = match span.context() {
+        Ok(context) => context,
+        Err(error) => {
+            log_span_lifecycle(logger, None, LogLevel::Warn, name, "context", Some(&error));
+            LogContext::default()
+        }
+    };
+    log_span_lifecycle(logger, Some(&context), LogLevel::Debug, name, "start", None);
+
+    let result = callback(span.as_ref(), &context);
+    let recording = match span.is_recording() {
+        Ok(recording) => recording,
+        Err(error) => {
+            log_span_lifecycle(
+                logger,
+                Some(&context),
+                LogLevel::Warn,
+                name,
+                "recording",
+                Some(&error),
+            );
+            false
+        }
+    };
+    match &result {
+        Ok(_) => {
+            if recording {
+                if let Err(error) = span.set_status(1, "") {
+                    log_span_lifecycle(
+                        logger,
+                        Some(&context),
+                        LogLevel::Warn,
+                        name,
+                        "status",
+                        Some(&error),
+                    );
+                }
+            }
+            log_span_lifecycle(logger, Some(&context), LogLevel::Debug, name, "end", None);
+        }
+        Err(application_error) => {
+            if recording {
+                if let Err(error) = span.record_exception(&application_error.to_string()) {
+                    log_span_lifecycle(
+                        logger,
+                        Some(&context),
+                        LogLevel::Warn,
+                        name,
+                        "exception",
+                        Some(&error),
+                    );
+                }
+                if let Err(error) = span.set_status(2, &application_error.to_string()) {
+                    log_span_lifecycle(
+                        logger,
+                        Some(&context),
+                        LogLevel::Warn,
+                        name,
+                        "status",
+                        Some(&error),
+                    );
+                }
+            }
+            log_span_lifecycle(logger, Some(&context), LogLevel::Error, name, "error", None);
+        }
+    }
+    if let Err(error) = span.end() {
+        log_span_lifecycle(
+            logger,
+            Some(&context),
+            LogLevel::Warn,
+            name,
+            "end",
+            Some(&error),
+        );
+    }
+    result
+}
+
+fn log_span_lifecycle(
+    logger: &Logger,
+    context: Option<&LogContext>,
+    level: LogLevel,
+    name: &str,
+    phase: &str,
+    error: Option<&str>,
+) {
+    let mut fields = BTreeMap::from([
+        ("otel.span_name".to_string(), name.to_string()),
+        ("otel.span_phase".to_string(), phase.to_string()),
+    ]);
+    if let Some(error) = error {
+        fields.insert("otel.bridge_error".to_string(), error.to_string());
+    }
+    let _ = logger.log(
+        level,
+        format!("OpenTelemetry span {phase}: {name}"),
+        context,
+        fields,
+    );
 }
 
 fn unique(values: Vec<String>) -> Vec<String> {

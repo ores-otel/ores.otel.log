@@ -22,31 +22,83 @@
   },
   "api": {
     "logger": {
-      "trace": ["trace"],
-      "debug": ["debug"],
-      "info": ["info", "log"],
-      "warn": ["warn"],
-      "error": ["error"],
-      "fatal": ["fatal"],
-      "flush": ["flush"],
-      "flushOnExit": ["flush_on_exit"],
-      "close": ["close"]
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
     },
     "event": {
-      "addFields": ["add_fields"],
-      "addTrace": ["add_trace", "add_trace_id"],
-      "addRoutineId": ["add_routine_id"],
-      "addTags": ["add_tags"],
-      "addContext": ["add_context"],
-      "addMeta": ["add_meta"],
-      "addUser": ["add_user_info", "add_logged_in_user_info"],
-      "send": ["send"]
+      "addFields": [
+        "add_fields"
+      ],
+      "addTrace": [
+        "add_trace",
+        "add_trace_id"
+      ],
+      "addRoutineId": [
+        "add_routine_id"
+      ],
+      "addTags": [
+        "add_tags"
+      ],
+      "addContext": [
+        "add_context"
+      ],
+      "addMeta": [
+        "add_meta"
+      ],
+      "addUser": [
+        "add_user_info",
+        "add_logged_in_user_info"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "use_otel",
+        "not_otel",
+        "with_otel",
+        "reset_otel",
+        "is_otel_enabled"
+      ]
     },
     "transport": {
-      "write": ["write"],
-      "flush": ["flush"],
-      "flushOnExit": ["flush_on_exit"],
-      "close": ["close"]
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
     }
   },
   "context": {
@@ -55,11 +107,26 @@
     "propagation": "async",
     "isolation": "concurrent-safe",
     "symbols": {
-      "run": ["run_with_log_context", "run_with_log_context_async", "log_context"],
-      "current": ["get_log_context"],
-      "update": ["update_log_context", "merge_log_context"],
-      "apply": ["apply_log_context", "ContextLogger"],
-      "withSpan": ["with_span", "with_span_async"]
+      "run": [
+        "run_with_log_context",
+        "run_with_log_context_async",
+        "log_context"
+      ],
+      "current": [
+        "get_log_context"
+      ],
+      "update": [
+        "update_log_context",
+        "merge_log_context"
+      ],
+      "apply": [
+        "apply_log_context",
+        "ContextLogger"
+      ],
+      "withSpan": [
+        "with_span",
+        "with_span_async"
+      ]
     },
     "mergesLoggedInUser": true,
     "mergesFields": true,
@@ -68,7 +135,12 @@
   },
   "telemetry": {
     "opentelemetry": {
-      "adapterSymbols": ["OpenTelemetryTransport", "OtelTransport", "with_span", "with_span_async"],
+      "adapterSymbols": [
+        "OpenTelemetryTransport",
+        "OtelTransport",
+        "with_span",
+        "with_span_async"
+      ],
       "explicit": true,
       "automaticInstrumentation": false,
       "monkeyPatching": false,
@@ -78,7 +150,9 @@
       "recordingSpanEventsOnly": true
     },
     "supabase": {
-      "adapterSymbols": ["SupabaseTransport"],
+      "adapterSymbols": [
+        "SupabaseTransport"
+      ],
       "authenticatedSender": true,
       "durableBatchSchema": "next-loggers/batch/v1",
       "allowsDistributedSecrets": false,

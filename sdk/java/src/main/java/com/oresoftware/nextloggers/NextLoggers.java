@@ -56,7 +56,7 @@ public final class NextLoggers {
     Objects.requireNonNull(context, "context");
     Deque<TraceContext> stack = CONTEXT.get();
     stack.push(context);
-    return new Scope(Thread.currentThread().threadId(), stack);
+    return new Scope(Thread.currentThread().getId(), stack);
   }
 
   public static TraceContext currentContext() {
@@ -77,7 +77,7 @@ public final class NextLoggers {
     @Override
     public void close() {
       if (closed) return;
-      if (Thread.currentThread().threadId() != threadId) {
+      if (Thread.currentThread().getId() != threadId) {
         throw new IllegalStateException("next-loggers context scope closed on a different thread");
       }
       if (stack.isEmpty()) {
@@ -91,8 +91,28 @@ public final class NextLoggers {
 
   public interface Transport {
     void write(LogRecord record) throws Exception;
+    default boolean isOpenTelemetry() { return false; }
     default void flush() throws Exception {}
     default void close() throws Exception {}
+  }
+
+  /** Explicit application-owned OTEL log adapter; it never installs a global provider. */
+  public static final class OtelTransport implements Transport {
+    private final java.util.function.Consumer<LogRecord> sink;
+
+    public OtelTransport(java.util.function.Consumer<LogRecord> sink) {
+      this.sink = Objects.requireNonNull(sink, "sink");
+    }
+
+    @Override
+    public void write(LogRecord record) {
+      sink.accept(record);
+    }
+
+    @Override
+    public boolean isOpenTelemetry() {
+      return true;
+    }
   }
 
   public static final class MemoryTransport implements Transport {
@@ -193,6 +213,7 @@ public final class NextLoggers {
     public Map<String, Object> loggedInUser = Map.of();
     public List<Transport> transports = List.of();
     public boolean console = true;
+    public boolean otelEnabled = true;
     public Supplier<String> idFactory = () -> UUID.randomUUID().toString();
     public Clock clock = Clock.systemUTC();
 
@@ -205,6 +226,7 @@ public final class NextLoggers {
     public Options transports(List<Transport> value) { transports = value; return this; }
     public Options transport(Transport value) { transports = List.of(value); return this; }
     public Options console(boolean value) { console = value; return this; }
+    public Options otelEnabled(boolean value) { otelEnabled = value; return this; }
     public Options idFactory(Supplier<String> value) { idFactory = value; return this; }
     public Options clock(Clock value) { clock = value; return this; }
   }
@@ -220,6 +242,7 @@ public final class NextLoggers {
     private final Map<String, Object> fields;
     private final Map<String, Object> currentUser;
     private final List<Transport> transports;
+    private volatile boolean otelEnabled;
     private volatile boolean closed;
 
     public Logger(Options options) {
@@ -234,6 +257,7 @@ public final class NextLoggers {
       fields = Collections.synchronizedMap(mutableCopy(options.fields));
       currentUser = Collections.synchronizedMap(mutableCopy(options.loggedInUser));
       transports = List.copyOf(options.transports == null ? List.of() : options.transports);
+      otelEnabled = options.otelEnabled;
     }
 
     public Event trace(Object... values) { return event(Level.TRACE, values); }
@@ -258,17 +282,22 @@ public final class NextLoggers {
       return this;
     }
 
+    public boolean isOtelEnabled() { return otelEnabled; }
+    public Logger useOtel() { otelEnabled = true; return this; }
+    public Logger notOtel() { otelEnabled = false; return this; }
+
     private boolean enabled(Level level) {
       return level.ordinal() >= minimumLevel.ordinal();
     }
 
-    private void emit(LogRecord record) {
+    private void emit(LogRecord record, boolean eventOtelEnabled) {
       if (!enabled(record.level())) return;
       if (console) {
         System.out.printf("[%s] [%s] [%s] %s%n", record.timestamp(), record.level(), appName, record.message());
       }
       RuntimeException failure = null;
       for (Transport transport : transports) {
+        if (transport.isOpenTelemetry() && !eventOtelEnabled) continue;
         try {
           transport.write(record);
         } catch (Exception error) {
@@ -327,6 +356,7 @@ public final class NextLoggers {
     private String routineId = "";
     private LogRecord record;
     private boolean sent;
+    private Boolean otelEnabled;
 
     private Event(Logger logger, Level level, List<Object> values) {
       this.logger = logger;
@@ -352,6 +382,13 @@ public final class NextLoggers {
     public Event addMeta(Object value) { meta.add(value); return this; }
     public Event addUser(Map<String, Object> value) { users.add(immutableCopy(value)); return this; }
     public Event setLoggedInUser(Map<String, Object> value) { if (value != null) loggedInUser.putAll(value); return this; }
+    public Event useOtel() { otelEnabled = true; return this; }
+    public Event notOtel() { otelEnabled = false; return this; }
+    public Event withOtel(boolean value) { otelEnabled = value; return this; }
+    public Event resetOtel() { otelEnabled = null; return this; }
+    public boolean isOtelEnabled() {
+      return otelEnabled == null ? logger.isOtelEnabled() : otelEnabled;
+    }
 
     public synchronized LogRecord toRecord() {
       if (record != null) return record;
@@ -405,13 +442,14 @@ public final class NextLoggers {
       if (sent) return toRecord();
       sent = true;
       LogRecord value = toRecord();
-      logger.emit(value);
+      logger.emit(value, isOtelEnabled());
       return value;
     }
   }
 
   public interface OtelSpan {
     TraceContext context();
+    default boolean isRecording() { return true; }
     void recordException(Throwable error);
     void setStatus(int code, String description);
     void end();
@@ -429,6 +467,7 @@ public final class NextLoggers {
   private static final OtelSpan NOOP_SPAN = new OtelSpan() {
     private final TraceContext context = new TraceContext("", "", 0);
     @Override public TraceContext context() { return context; }
+    @Override public boolean isRecording() { return false; }
     @Override public void recordException(Throwable error) {}
     @Override public void setStatus(int code, String description) {}
     @Override public void end() {}
@@ -468,7 +507,9 @@ public final class NextLoggers {
           .addTags("otel-span"));
       try {
         T result = callback.apply(span);
-        invokeSpanSafely(logger, span, name, "set success status", () -> span.setStatus(1, ""));
+        if (spanRecordingSafely(logger, span, name)) {
+          invokeSpanSafely(logger, span, name, "set success status", () -> span.setStatus(1, ""));
+        }
         sendSafely(logger.debug("span completed:", name)
             .addFields(Map.of(
                 "otel.span_name", name,
@@ -477,13 +518,15 @@ public final class NextLoggers {
             .addTags("otel-span"));
         return result;
       } catch (Throwable error) {
-        invokeSpanSafely(logger, span, name, "record exception", () -> span.recordException(error));
-        invokeSpanSafely(
-            logger,
-            span,
-            name,
-            "set error status",
-            () -> span.setStatus(2, error.getMessage() == null ? "" : error.getMessage()));
+        if (spanRecordingSafely(logger, span, name)) {
+          invokeSpanSafely(logger, span, name, "record exception", () -> span.recordException(error));
+          invokeSpanSafely(
+              logger,
+              span,
+              name,
+              "set error status",
+              () -> span.setStatus(2, error.getMessage() == null ? "" : error.getMessage()));
+        }
         sendSafely(logger.error("span failed:", name, error)
             .addFields(Map.of(
                 "otel.span_name", name,
@@ -507,6 +550,15 @@ public final class NextLoggers {
       action.run();
     } catch (Throwable error) {
       logBridgeFailure(logger, operation, name, error);
+    }
+  }
+
+  private static boolean spanRecordingSafely(Logger logger, OtelSpan span, String name) {
+    try {
+      return span.isRecording();
+    } catch (Throwable error) {
+      logBridgeFailure(logger, "read recording state", name, error);
+      return false;
     }
   }
 

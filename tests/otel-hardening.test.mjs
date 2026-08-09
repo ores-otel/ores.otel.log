@@ -29,7 +29,11 @@ test('OTEL transport fails open and reports individual exporter operations', asy
   const metrics = [];
   const memory = [];
   const span = {
-    spanContext: () => ({ traceId: 'trace-1', spanId: 'span-1', traceFlags: 1 }),
+    spanContext: () => ({
+      traceId: '0123456789abcdef0123456789abcdef',
+      spanId: '0123456789abcdef',
+      traceFlags: 1,
+    }),
     isRecording: () => true,
     addEvent() { throw new Error('event unavailable'); },
     recordException() { throw new Error('exception unavailable'); },

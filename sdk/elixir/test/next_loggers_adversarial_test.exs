@@ -191,7 +191,9 @@ defmodule ORESoftware.NextLoggersAdversarialTest do
 
     logger =
       NextLoggers.new("supabase",
-        transports: [NextLoggers.supabase_transport(fn value -> send(owner, {:supabase, value}) end)]
+        transports: [
+          NextLoggers.supabase_transport(fn value -> send(owner, {:supabase, value}) end)
+        ]
       )
 
     record = NextLoggers.info(logger, "client", %{"safe" => true})

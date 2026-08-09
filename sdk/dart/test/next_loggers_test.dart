@@ -29,7 +29,8 @@ void main() {
     expect(currentLogContext(), isNull);
   });
 
-  test('Supabase transport batches client records through injected sender', () async {
+  test('Supabase transport batches client records through injected sender',
+      () async {
     final batches = <List<JsonMap>>[];
     final transport = SupabaseTransport(batchSize: 2, sendBatch: batches.add);
     final logger = Logger(console: false, transports: [transport]);

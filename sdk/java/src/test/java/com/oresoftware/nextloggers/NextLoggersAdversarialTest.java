@@ -37,6 +37,7 @@ public final class NextLoggersAdversarialTest {
             .clock(Clock.fixed(Instant.parse("2026-01-02T03:04:05Z"), ZoneOffset.UTC)));
   }
 
+  @SuppressWarnings("try")
   private static void nestedScopesRestoreParents() {
     assert NextLoggers.currentContext() == null;
     NextLoggers.TraceContext parent = new NextLoggers.TraceContext("parent", "span-parent", 1);
@@ -55,13 +56,14 @@ public final class NextLoggersAdversarialTest {
     NextLoggers.Scope scope = NextLoggers.withContext(
         new NextLoggers.TraceContext("owner", "span", 1));
     AtomicReference<Throwable> failure = new AtomicReference<>();
-    Thread thread = Thread.ofPlatform().start(() -> {
+    Thread thread = new Thread(() -> {
       try {
         scope.close();
       } catch (Throwable error) {
         failure.set(error);
       }
     });
+    thread.start();
     thread.join();
     assert failure.get() instanceof IllegalStateException;
     assert failure.get().getMessage().contains("different thread");
@@ -84,12 +86,13 @@ public final class NextLoggersAdversarialTest {
     tags.set(0, "mutated");
     assert context.baggage().get("tenant").equals("acme");
     assert context.fields().get("route").equals("/pay");
-    assert context.tags().getFirst().equals("request");
+    assert context.tags().get(0).equals("request");
     assertThrows(UnsupportedOperationException.class, () -> context.baggage().put("x", "y"));
     assertThrows(UnsupportedOperationException.class, () -> context.fields().put("x", true));
     assertThrows(UnsupportedOperationException.class, () -> context.tags().add("x"));
   }
 
+  @SuppressWarnings("try")
   private static void explicitTraceRemainsPrimary() {
     NextLoggers.MemoryTransport memory = new NextLoggers.MemoryTransport();
     NextLoggers.Logger logger = logger(NextLoggers.Level.TRACE, List.of(memory));
@@ -97,7 +100,7 @@ public final class NextLoggersAdversarialTest {
         new NextLoggers.TraceContext("ambient", "ambient-span", 1))) {
       logger.info("inside").addTrace("explicit").send();
     }
-    NextLoggers.LogRecord record = memory.records().getFirst();
+    NextLoggers.LogRecord record = memory.records().get(0);
     assert record.traceId().equals("explicit");
     assert record.traceIds().equals(List.of("explicit", "ambient"));
     assert record.fields().get("otel.span_id").equals("ambient-span");
@@ -136,7 +139,7 @@ public final class NextLoggersAdversarialTest {
     RuntimeException error = assertThrows(RuntimeException.class, () -> logger.error("fanout").send());
     assert error.getSuppressed().length == 2;
     assert memory.records().size() == 1;
-    assert memory.records().getFirst().message().equals("fanout");
+    assert memory.records().get(0).message().equals("fanout");
   }
 
   private static void jsonEscapesControlCharacters() {
@@ -150,6 +153,7 @@ public final class NextLoggersAdversarialTest {
     assert !json.contains("newline\n tab");
   }
 
+  @SuppressWarnings("try")
   private static void parallelContextsNeverCrossContaminate() throws Exception {
     final int count = 50;
     NextLoggers.MemoryTransport memory = new NextLoggers.MemoryTransport();
@@ -159,7 +163,7 @@ public final class NextLoggersAdversarialTest {
     List<Thread> threads = new ArrayList<>();
     for (int index = 0; index < count; index++) {
       final int value = index;
-      threads.add(Thread.ofPlatform().start(() -> {
+      Thread thread = new Thread(() -> {
         String trace = "trace-" + value;
         try (NextLoggers.Scope ignored = NextLoggers.withContext(
             new NextLoggers.TraceContext(trace, "span-" + value, 1))) {
@@ -167,7 +171,9 @@ public final class NextLoggersAdversarialTest {
           await(start);
           logger.info("message-" + value).send();
         }
-      }));
+      });
+      thread.start();
+      threads.add(thread);
     }
     ready.await();
     start.countDown();

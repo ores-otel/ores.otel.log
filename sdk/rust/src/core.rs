@@ -110,6 +110,10 @@ impl From<serde_json::Error> for LoggerError {
 pub trait Transport: Send + Sync {
     fn write(&self, record: &LogRecord) -> Result<(), LoggerError>;
 
+    fn is_open_telemetry(&self) -> bool {
+        false
+    }
+
     fn flush(&self) -> Result<(), LoggerError> {
         Ok(())
     }
@@ -152,6 +156,10 @@ impl OpenTelemetryTransport {
 }
 
 impl Transport for OpenTelemetryTransport {
+    fn is_open_telemetry(&self) -> bool {
+        true
+    }
+
     fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
         let mut attributes = JsonObject::from_iter([
             (
@@ -296,6 +304,7 @@ pub struct Options {
     pub logged_in_user: JsonObject,
     pub transports: Vec<Arc<dyn Transport>>,
     pub console: bool,
+    pub otel_enabled: bool,
     pub id_factory: Arc<dyn Fn() -> String + Send + Sync>,
     pub clock: Arc<dyn Fn() -> String + Send + Sync>,
 }
@@ -311,6 +320,7 @@ impl Default for Options {
             logged_in_user: JsonObject::new(),
             transports: Vec::new(),
             console: true,
+            otel_enabled: true,
             id_factory: Arc::new(default_id),
             clock: Arc::new(default_clock),
         }
@@ -358,6 +368,7 @@ struct LoggerInner {
     unsent: Mutex<HashMap<u64, Arc<Mutex<EventState>>>>,
     next_event: AtomicU64,
     closed: AtomicBool,
+    otel_enabled: AtomicBool,
 }
 
 impl Logger {
@@ -377,6 +388,7 @@ impl Logger {
                 unsent: Mutex::new(HashMap::new()),
                 next_event: AtomicU64::new(1),
                 closed: AtomicBool::new(false),
+                otel_enabled: AtomicBool::new(options.otel_enabled),
             }),
         }
     }
@@ -446,6 +458,16 @@ impl Logger {
         self
     }
 
+    pub fn use_otel(&self) -> &Self {
+        self.inner.otel_enabled.store(true, Ordering::Release);
+        self
+    }
+
+    pub fn not_otel(&self) -> &Self {
+        self.inner.otel_enabled.store(false, Ordering::Release);
+        self
+    }
+
     fn emit(&self, event: &Event, store: bool) -> Result<Option<LogRecord>, LoggerError> {
         self.inner
             .unsent
@@ -468,7 +490,12 @@ impl Logger {
             );
         }
         if store {
+            let default_otel = self.inner.otel_enabled.load(Ordering::Acquire);
+            let event_otel = event.is_otel_enabled(default_otel)?;
             for transport in &self.inner.transports {
+                if transport.is_open_telemetry() && !event_otel {
+                    continue;
+                }
                 transport.write(&record)?;
             }
         }
@@ -545,6 +572,7 @@ struct EventState {
     stack_trace: Vec<String>,
     sent: bool,
     record: Option<LogRecord>,
+    otel_enabled: Option<bool>,
 }
 
 impl EventState {
@@ -565,6 +593,7 @@ impl EventState {
             stack_trace: Vec::new(),
             sent: false,
             record: None,
+            otel_enabled: None,
         }
     }
 }
@@ -590,6 +619,39 @@ impl Event {
             .fields
             .extend(fields);
         self
+    }
+
+    pub fn with_otel(self, enabled: bool) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .otel_enabled = Some(enabled);
+        self
+    }
+
+    pub fn use_otel(self) -> Self {
+        self.with_otel(true)
+    }
+
+    pub fn not_otel(self) -> Self {
+        self.with_otel(false)
+    }
+
+    pub fn reset_otel(self) -> Self {
+        self.state
+            .lock()
+            .expect("event state poisoned")
+            .otel_enabled = None;
+        self
+    }
+
+    pub fn is_otel_enabled(&self, fallback: bool) -> Result<bool, LoggerError> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|error| LoggerError(error.to_string()))?
+            .otel_enabled
+            .unwrap_or(fallback))
     }
 
     pub fn add_trace(self, trace_id: impl Into<String>, make_first: bool) -> Self {

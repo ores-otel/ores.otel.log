@@ -45,7 +45,8 @@ void main() {
       expect(() => context.tags.add('x'), throwsUnsupportedError);
     });
 
-    test('100 concurrent async operations never cross-contaminate traces', () async {
+    test('100 concurrent async operations never cross-contaminate traces',
+        () async {
       final memory = MemoryTransport();
       final logger = Logger(
         minimumLevel: LogLevel.trace,
@@ -80,7 +81,8 @@ void main() {
       expect(currentLogContext(), isNull);
     });
 
-    test('explicit trace remains primary while ambient trace is retained', () async {
+    test('explicit trace remains primary while ambient trace is retained',
+        () async {
       final memory = MemoryTransport();
       final logger = Logger(console: false, transports: [memory]);
 
@@ -118,7 +120,8 @@ void main() {
       );
     });
 
-    test('send is idempotent and returns the cached immutable record', () async {
+    test('send is idempotent and returns the cached immutable record',
+        () async {
       final memory = MemoryTransport();
       final logger = Logger(console: false, transports: [memory]);
       final event = logger.info('once').addFields({'value': 1});
@@ -132,7 +135,8 @@ void main() {
       expect(() => first!.fields['later'] = true, throwsUnsupportedError);
     });
 
-    test('transport failures are aggregated after all transports receive data', () async {
+    test('transport failures are aggregated after all transports receive data',
+        () async {
       final memory = MemoryTransport();
       final first = _FailingTransport(StateError('first'));
       final second = _FailingTransport(ArgumentError('second'));
@@ -156,7 +160,8 @@ void main() {
       expect(() => logger.info('after close'), throwsStateError);
     });
 
-    test('wire JSON omits empty optionals and escapes control characters', () async {
+    test('wire JSON omits empty optionals and escapes control characters',
+        () async {
       final memory = MemoryTransport();
       final logger = Logger(
         appName: 'wire',
@@ -177,7 +182,8 @@ void main() {
   });
 
   group('Supabase transport', () {
-    test('batches in insertion order and serializes the shared wire schema', () async {
+    test('batches in insertion order and serializes the shared wire schema',
+        () async {
       final batches = <List<JsonMap>>[];
       final transport = SupabaseTransport(
         batchSize: 3,
@@ -220,7 +226,8 @@ void main() {
       await transport.close();
     });
 
-    test('failed batches are requeued without reordering or data loss', () async {
+    test('failed batches are requeued without reordering or data loss',
+        () async {
       final attempts = <List<String>>[];
       var fail = true;
       final transport = SupabaseTransport(
@@ -249,7 +256,9 @@ void main() {
       await transport.close();
     });
 
-    test('bounded queue drops the oldest queued record during an in-flight send', () async {
+    test(
+        'bounded queue drops the oldest queued record during an in-flight send',
+        () async {
       final firstGate = Completer<void>();
       final dropped = <String>[];
       final sent = <String>[];
@@ -338,7 +347,8 @@ void main() {
   });
 
   group('explicit OpenTelemetry bridge', () {
-    test('successful lifecycle propagates Zone context through async work', () async {
+    test('successful lifecycle propagates Zone context through async work',
+        () async {
       final memory = MemoryTransport();
       final logger = Logger(
         minimumLevel: LogLevel.debug,
@@ -361,13 +371,16 @@ void main() {
       expect(span.status, 1);
       expect(span.ended, 1);
       expect(
-        memory.records.singleWhere((record) => record.message == 'inside span').traceId,
+        memory.records
+            .singleWhere((record) => record.message == 'inside span')
+            .traceId,
         'trace-span',
       );
       expect(currentLogContext(), isNull);
     });
 
-    test('callback error identity and stack are preserved after reporting', () async {
+    test('callback error identity and stack are preserved after reporting',
+        () async {
       final memory = MemoryTransport();
       final logger = Logger(
         minimumLevel: LogLevel.debug,
@@ -399,6 +412,36 @@ void main() {
       expect(span.ended, 1);
     });
 
+    test('sampled-out spans correlate logs without recording mutations',
+        () async {
+      final memory = MemoryTransport();
+      final logger = Logger(
+        minimumLevel: LogLevel.debug,
+        console: false,
+        transports: [memory],
+      );
+      final span = _TestSpan()..recording = false;
+      final result = await withOtelSpan(
+        logger,
+        _TestTracer(span),
+        'sampled-out',
+        (_) async {
+          await logger.info('inside sampled-out').send();
+          return 49;
+        },
+      );
+      expect(result, 49);
+      expect(span.status, 0);
+      expect(span.recorded, isNull);
+      expect(
+        memory.records
+            .singleWhere((record) => record.message == 'inside sampled-out')
+            .traceId,
+        'trace-span',
+      );
+      expect(span.ended, 1);
+    });
+
     test('broken span context falls back to an empty Zone context', () async {
       final memory = MemoryTransport();
       final logger = Logger(
@@ -419,13 +462,15 @@ void main() {
       expect(value, 53);
       expect(
         memory.records.any(
-          (record) => record.fields['otel.bridge_operation'] == 'read span context',
+          (record) =>
+              record.fields['otel.bridge_operation'] == 'read span context',
         ),
         isTrue,
       );
     });
 
-    test('start, status, record, and end failures never replace app results', () async {
+    test('start, status, record, and end failures never replace app results',
+        () async {
       final memory = MemoryTransport();
       final logger = Logger(
         minimumLevel: LogLevel.debug,
@@ -451,7 +496,11 @@ void main() {
         },
       );
       expect(fallback, 61);
-      for (final operation in ['set success status', 'end span', 'start span']) {
+      for (final operation in [
+        'set success status',
+        'end span',
+        'start span'
+      ]) {
         expect(
           memory.records.any(
             (record) => record.fields['otel.bridge_operation'] == operation,
@@ -523,12 +572,16 @@ class _FailingTracer implements OtelTracer {
   }
 }
 
-class _TestSpan implements OtelSpan {
+class _TestSpan implements OtelSpan, RecordingOtelSpan {
   int status = 0;
   int ended = 0;
   Object? recorded;
   bool failContext = false;
   bool failLifecycle = false;
+  bool recording = true;
+
+  @override
+  bool get isRecording => recording;
 
   @override
   LogContext get context {

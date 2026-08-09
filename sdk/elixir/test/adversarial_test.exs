@@ -39,7 +39,7 @@ defmodule NextLoggersAdversarialTest do
     pids =
       for index <- 1..count do
         spawn(fn ->
-          trace = "trace-#{String.pad_leading(Integer.to_string(index), 3, "0")}" 
+          trace = "trace-#{String.pad_leading(Integer.to_string(index), 3, "0")}"
 
           NextLoggers.with_context(%{trace_id: trace}, fn ->
             Process.sleep(rem(index, 5))
@@ -181,6 +181,7 @@ defmodule NextLoggersAdversarialTest do
     assert {actual, stacktrace} = caught
     assert actual.id == expected.id
     assert actual.message == "declined"
+
     assert Enum.any?(stacktrace, fn {module, _function, _arity, _metadata} ->
              module == __MODULE__
            end)
@@ -251,6 +252,30 @@ defmodule NextLoggersAdversarialTest do
 
     assert bridge_failure?("start span")
     assert bridge_failure?("start span")
+  end
+
+  test "sampled-out spans correlate without recording-only mutations" do
+    logger = logger(:debug)
+
+    tracer =
+      stable_tracer(self())
+      |> Map.put(:is_recording, fn _span -> false end)
+
+    assert 77 ==
+             NextLoggers.with_span(logger, tracer, "sampled-out", %{}, fn _span ->
+               assert NextLoggers.current_context().trace_id == "trace-span"
+
+               assert {:ok, _} =
+                        logger
+                        |> NextLoggers.info(["inside sampled-out"])
+                        |> NextLoggers.send()
+
+               77
+             end)
+
+    refute_receive {:status, _, _}, 25
+    refute_receive {:recorded, _, _}, 25
+    assert_receive :ended
   end
 
   test "status, exception, end, and logger sink failures never replace success" do

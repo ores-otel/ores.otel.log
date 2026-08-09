@@ -22,31 +22,83 @@
   },
   "api": {
     "logger": {
-      "trace": ["trace"],
-      "debug": ["debug"],
-      "info": ["info", "log"],
-      "warn": ["warn"],
-      "error": ["error"],
-      "fatal": ["fatal"],
-      "flush": ["flush"],
-      "flushOnExit": ["flushOnExit"],
-      "close": ["close"]
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flushOnExit"
+      ],
+      "close": [
+        "close"
+      ]
     },
     "event": {
-      "addFields": ["addFields"],
-      "addTrace": ["addTrace", "addTraceId"],
-      "addRoutineId": ["addRoutineId"],
-      "addTags": ["addTags"],
-      "addContext": ["addContext"],
-      "addMeta": ["addMeta"],
-      "addUser": ["addUserInfo", "addLoggedInUserInfo"],
-      "send": ["send"]
+      "addFields": [
+        "addFields"
+      ],
+      "addTrace": [
+        "addTrace",
+        "addTraceId"
+      ],
+      "addRoutineId": [
+        "addRoutineId"
+      ],
+      "addTags": [
+        "addTags"
+      ],
+      "addContext": [
+        "addContext"
+      ],
+      "addMeta": [
+        "addMeta"
+      ],
+      "addUser": [
+        "addUserInfo",
+        "addLoggedInUserInfo"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "useOtel",
+        "notOtel",
+        "withOtel",
+        "resetOtel",
+        "isOtelEnabled"
+      ]
     },
     "transport": {
-      "write": ["write"],
-      "flush": ["flush"],
-      "flushOnExit": ["flushOnExit"],
-      "close": ["close"]
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flushOnExit"
+      ],
+      "close": [
+        "close"
+      ]
     }
   },
   "context": {
@@ -55,11 +107,21 @@
     "propagation": "async",
     "isolation": "concurrent-safe",
     "symbols": {
-      "run": ["runWithLogContext"],
-      "current": ["getLogContext"],
-      "update": ["updateLogContext"],
-      "apply": ["setLogContextProvider"],
-      "withSpan": ["withSpan"]
+      "run": [
+        "runWithLogContext"
+      ],
+      "current": [
+        "getLogContext"
+      ],
+      "update": [
+        "updateLogContext"
+      ],
+      "apply": [
+        "setLogContextProvider"
+      ],
+      "withSpan": [
+        "withOpenTelemetrySpan"
+      ]
     },
     "mergesLoggedInUser": true,
     "mergesFields": true,
@@ -71,7 +133,9 @@
       "adapterSymbols": [
         "OpenTelemetryTransport",
         "createOpenTelemetryTransport",
-        "createOpenTelemetryContextProvider"
+        "createOpenTelemetryContextProvider",
+        "withOpenTelemetry",
+        "withOpenTelemetrySpan"
       ],
       "explicit": true,
       "automaticInstrumentation": false,
@@ -82,7 +146,10 @@
       "recordingSpanEventsOnly": true
     },
     "supabase": {
-      "adapterSymbols": ["SupabaseIngestTransport", "createSupabaseIngestTransport"],
+      "adapterSymbols": [
+        "SupabaseIngestTransport",
+        "createSupabaseIngestTransport"
+      ],
       "authenticatedSender": true,
       "durableBatchSchema": "next-loggers/batch/v1",
       "allowsDistributedSecrets": false,

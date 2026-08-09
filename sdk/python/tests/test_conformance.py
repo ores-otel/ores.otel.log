@@ -30,6 +30,25 @@ class AuditLogger(Logger):
 
 
 class LoggerContractTests(unittest.TestCase):
+    def test_per_event_otel_routing_preserves_normal_logging(self):
+        memory = MemoryTransport()
+        otel = []
+        logger = Logger(
+            transports=[memory, OpenTelemetryTransport(otel.append)],
+            console=False,
+        )
+
+        logger.info("default").send()
+        logger.info("ordinary-only").not_otel().send()
+        logger.not_otel()
+        logger.info("logger-off").send()
+        logger.info("override").use_otel().send()
+
+        self.assertEqual([record.message for record in memory.records], [
+            "default", "ordinary-only", "logger-off", "override"
+        ])
+        self.assertEqual([record["body"] for record in otel], ["default", "override"])
+
     def test_matches_shared_record_fixture(self):
         transport = MemoryTransport()
         logger = Logger(
