@@ -30,17 +30,21 @@ jobs:
         uses: dart-lang/setup-dart@v1
         with:
           sdk: 3.12.2
-      - name: Format the two CI-reported sources
+      - name: Resolve package language configuration
+        working-directory: sdk/dart
+        run: dart pub get
+      - name: Format the two CI-reported sources in package context
+        working-directory: sdk/dart
         run: |
           set -euo pipefail
-          dart format sdk/dart/lib/next_loggers.dart sdk/dart/lib/shutdown.dart
+          dart format lib/next_loggers.dart lib/shutdown.dart
           git diff --check
       - name: Commit only reviewed Dart formatting
         run: |
           set -euo pipefail
           changed="$(git diff --name-only)"
           if [[ -z "$changed" ]]; then
-            echo 'Dart sources are already formatted for 3.12.2.'
+            echo 'Dart sources are already formatted for 3.12.2 in package context.'
             exit 0
           fi
           unexpected="$(printf '%s\n' "$changed" | grep -Ev '^sdk/dart/lib/(next_loggers|shutdown)\.dart$' || true)"
