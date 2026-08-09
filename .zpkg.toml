@@ -93,7 +93,7 @@ adapter = "go"
 
 [targets.golang.native]
 registry = "go-modules"
-package = "github.com/ORESoftware/next-loggers.ts/sdk/go"
+package = "github.com/ores-otel/ores.otel.log/sdk/go"
 tag_format = "sdk/go/v{version}"
 
 [targets.rust]

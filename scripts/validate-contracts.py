@@ -164,6 +164,31 @@ def validate_manifests(registry: Registry[Any]) -> tuple[int, list[dict[str, Any
     return len(manifests), manifests
 
 
+def validate_repository_identity(manifests: list[dict[str, Any]]) -> None:
+    """Keep canonical and legacy Go module identities explicit during migration."""
+    go_manifest = next((manifest for manifest in manifests if manifest["language"] == "go"), None)
+    if go_manifest is None:
+        raise Failure("Go SDK manifest is missing")
+    repository_context = (
+        os.environ.get("ORES_OTEL_SOURCE_REPOSITORY")
+        or os.environ.get("EXPECTED_REPOSITORY")
+        or os.environ.get("GITHUB_REPOSITORY")
+        or CANONICAL
+    )
+    package_names = go_manifest["package"]
+    expected = (
+        package_names["legacyName"]
+        if repository_context == LEGACY
+        else package_names["canonicalName"]
+    )
+    go_mod = ROOT / "sdk" / "go" / "go.mod"
+    first_line = go_mod.read_text(encoding="utf-8").splitlines()[0]
+    if first_line != f"module {expected}":
+        raise Failure(
+            "Go module identity does not match the source repository context: "
+            f"repository={repository_context!r}, expected={expected!r}, observed={first_line!r}"
+        )
+
 def validate_migration(registry: Registry[Any], manifests: list[dict[str, Any]]) -> int:
     aliases = load(CONTRACTS / "migration" / "repository-aliases.json")
     matrix = load(CONTRACTS / "migration" / "test-repository-matrix.json")
@@ -201,6 +226,7 @@ def main() -> int:
         registry = registry_for(documents)
         fixtures = validate_fixtures(registry)
         manifest_count, manifests = validate_manifests(registry)
+        validate_repository_identity(manifests)
         repositories = validate_migration(registry, manifests)
     except Failure as error:
         print(f"contract validation failed: {error}", file=sys.stderr)

@@ -26,7 +26,7 @@ Run `next-loggers --help` or `next-loggers <command> --help` for the complete ge
 | `zed` | Zed package family | `oresoftware/next-loggers` | `vX.Y.Z` | `zed-pkg` |
 | `nodejs` | JavaScript / TypeScript | npm `@oresoftware/next-loggers` | `sdk/nodejs/vX.Y.Z` | `npm` |
 | `python` | Python | PyPI `oresoftware-next-loggers` | `sdk/python/vX.Y.Z` | `pypi` |
-| `golang` | Go | `github.com/ORESoftware/next-loggers.ts/sdk/go` | `sdk/go/vX.Y.Z` | `go-modules` |
+| `golang` | Go | `github.com/ores-otel/ores.otel.log/sdk/go` | `sdk/go/vX.Y.Z` | `go-modules` |
 | `rust` | Rust | crates.io `oresoftware-next-loggers` | `sdk/rust/vX.Y.Z` | `crates-io` |
 | `wasm` | Rust / WebAssembly | crates.io `oresoftware-next-loggers-wasm` | `sdk/wasm/vX.Y.Z` | `crates-io` |
 | `java` | Java | Maven Central `io.github.oresoftware:next-loggers` | `sdk/java/vX.Y.Z` | `maven-central` |

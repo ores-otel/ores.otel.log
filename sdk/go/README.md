@@ -6,7 +6,7 @@ Native Go implementation of the shared `next-loggers/v1` contract.
 package main
 
 import (
-	nextloggers "github.com/ORESoftware/next-loggers.ts/sdk/go"
+	nextloggers "github.com/ores-otel/ores.otel.log/sdk/go"
 )
 
 func main() {

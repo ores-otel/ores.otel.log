@@ -93,7 +93,7 @@ export const PACKAGE_RELEASES: readonly PackageRelease[] = [
     target: 'golang',
     language: 'Go',
     registry: 'go-modules',
-    packageName: 'github.com/ORESoftware/next-loggers.ts/sdk/go',
+    packageName: 'github.com/ores-otel/ores.otel.log/sdk/go',
     directory: 'sdk/go',
     tagFormat: 'sdk/go/v{version}',
     environment: 'go-modules',
