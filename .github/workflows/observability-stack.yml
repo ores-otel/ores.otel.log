@@ -1,0 +1,100 @@
+name: Observability stack
+
+on:
+  pull_request:
+    paths:
+      - observability/**
+      - scripts/smoke-observability.mjs
+      - scripts/validate-observability-stack.mjs
+      - .github/workflows/observability-stack.yml
+  push:
+    branches: [main]
+    paths:
+      - observability/**
+      - scripts/smoke-observability.mjs
+      - scripts/validate-observability-stack.mjs
+      - .github/workflows/observability-stack.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observability-stack-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GRAFANA_ADMIN_USER: admin
+      GRAFANA_ADMIN_PASSWORD: ci-only-observability-password
+      GRAFANA_SECRET_KEY: ci-only-observability-secret-key-32-chars
+      DEPLOYMENT_ENVIRONMENT: ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Validate static security and cardinality invariants
+        run: node scripts/validate-observability-stack.mjs
+
+      - name: Render Compose configuration
+        run: docker compose -f observability/docker-compose.yml config --quiet
+
+      - name: Pull pinned images
+        run: docker compose -f observability/docker-compose.yml pull --quiet
+
+      - name: Validate backend configurations
+        run: |
+          set -euo pipefail
+          docker compose -f observability/docker-compose.yml run --rm --no-deps \
+            otel-collector validate --config=/etc/otelcol-contrib/config.yaml
+          docker compose -f observability/docker-compose.yml run --rm --no-deps \
+            loki -verify-config=true -config.file=/etc/loki/config.yaml
+          docker compose -f observability/docker-compose.yml run --rm --no-deps \
+            --entrypoint /bin/promtool prometheus \
+            check config /etc/prometheus/prometheus.yml
+
+      - name: Start stack and run correlated signal smoke test
+        run: |
+          set -euo pipefail
+          cleanup() {
+            code=$?
+            trap - EXIT
+            if [ "$code" -ne 0 ]; then
+              docker compose -f observability/docker-compose.yml ps || true
+              docker compose -f observability/docker-compose.yml logs --no-color || true
+            fi
+            docker compose -f observability/docker-compose.yml down -v --remove-orphans || true
+            exit "$code"
+          }
+          trap cleanup EXIT
+
+          docker compose -f observability/docker-compose.yml up -d
+
+          wait_for() {
+            name=$1
+            url=$2
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent --show-error --max-time 2 "$url" >/dev/null; then
+                echo "$name is ready"
+                return 0
+              fi
+              sleep 2
+            done
+            echo "$name did not become ready: $url" >&2
+            return 1
+          }
+
+          wait_for collector http://127.0.0.1:13133/
+          wait_for loki http://127.0.0.1:3100/ready
+          wait_for tempo http://127.0.0.1:3200/ready
+          wait_for prometheus http://127.0.0.1:9090/-/ready
+          wait_for grafana http://127.0.0.1:3000/api/health
+
+          node scripts/smoke-observability.mjs

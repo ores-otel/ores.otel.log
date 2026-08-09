@@ -91,6 +91,30 @@ not take ownership of application OTEL or Supabase clients, so provider startup,
 authentication, retries, flush, and shutdown remain explicit at the application
 boundary.
 
+### Per-event routing
+
+OTEL delivery defaults to enabled. Disabling it for one event skips only the
+transport marked as OpenTelemetry; console, file, memory, Supabase, Loki, and
+other application transports still receive the normal `next-loggers/v1`
+record. The setting can be changed on the logger and overridden on an event.
+
+The fluent event names are `useOtel`, `notOtel`, `withOtel`, `resetOtel`, and
+`isOtelEnabled` in TypeScript, Dart, and Java; their idiomatic snake-case or
+exported equivalents are used by Elixir, Erlang, Gleam, Go, Python, and Rust.
+Ruby accepts the per-call `otel:` keyword and exposes logger-level
+`use_otel`/`not_otel`; the WASM host API uses `log_with_otel` and
+`info_with_otel`. The machine-readable symbol mapping for every SDK is in
+[`contracts/sdk-manifests`](../contracts/sdk-manifests).
+
+### Explicit span wrappers
+
+Applications can inject their existing tracer/span objects through
+`withOpenTelemetrySpan` (TypeScript), `withOtelSpan` (Dart), `withSpan` (Java),
+`with_span` (Elixir, Erlang, Gleam, Python, Ruby, Rust, and WASM), or `WithSpan`
+(Go). These helpers emit ordinary lifecycle records and wrap only the supplied
+OTEL methods. They never create a provider, install instrumentation, or take
+over global context.
+
 ## Context and sampling semantics
 
 - Node.js, Bun, and Deno can use the package's explicit `AsyncLocalStorage`

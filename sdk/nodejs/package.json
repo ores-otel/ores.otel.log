@@ -97,6 +97,14 @@
       "types": "./dist/otel.d.ts",
       "default": "./dist/otel.js"
     },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
+    },
     "./prometheus": {
       "types": "./dist/prometheus.d.ts",
       "default": "./dist/prometheus.js"
@@ -104,6 +112,10 @@
     "./supabase-ingest": {
       "types": "./dist/supabase-ingest.d.ts",
       "default": "./dist/supabase-ingest.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
     },
     "./config": {
       "types": "./dist/config.d.ts",

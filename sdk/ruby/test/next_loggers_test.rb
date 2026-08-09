@@ -4,6 +4,24 @@ require "minitest/autorun"
 require_relative "../lib/oresoftware/next_loggers"
 
 class NextLoggersTest < Minitest::Test
+  def test_per_event_otel_routing_preserves_ordinary_logging
+    ordinary = []
+    otel = []
+    logger = ORESoftware::NextLoggers::Logger.new(
+      app_name: "routing",
+      transports: [->(record) { ordinary << record }, ORESoftware::NextLoggers::OtelTransport.new { |record| otel << record }]
+    )
+
+    logger.info("default")
+    logger.info("ordinary-only", {}, otel: false)
+    logger.not_otel
+    logger.info("logger-off")
+    logger.info("override", {}, otel: true)
+
+    assert_equal %w[default ordinary-only logger-off override], ordinary.map { |record| record.fetch("message") }
+    assert_equal %w[default override], otel.map { |record| record.fetch("body") }
+  end
+
   def test_context_flows_to_otel_and_supabase_and_is_restored
     otel = []
     supabase = []
@@ -56,5 +74,46 @@ class NextLoggersTest < Minitest::Test
     threads.each(&:join)
 
     assert_equal %w[trace-a trace-b], [traces.pop, traces.pop].sort
+  end
+
+  def test_sampled_out_span_correlates_without_recording_mutations
+    records = []
+    logger = ORESoftware::NextLoggers::Logger.new(
+      app_name: "spans",
+      transports: [->(record) { records << record }]
+    )
+    span = Struct.new(:status_calls, :exception_calls, :ended) do
+      def context
+        { trace_id: "fedcba9876543210fedcba9876543210", span_id: "fedcba9876543210", trace_flags: 0 }
+      end
+
+      def recording?
+        false
+      end
+
+      def set_status(*)
+        self.status_calls += 1
+      end
+
+      def record_exception(*)
+        self.exception_calls += 1
+      end
+
+      def end
+        self.ended += 1
+      end
+    end.new(0, 0, 0)
+    tracer = Object.new
+    tracer.define_singleton_method(:start_span) { |_name, _attributes| span }
+
+    result = ORESoftware::NextLoggers.with_span(logger, tracer, "sampled-out") do
+      logger.info("inside sampled-out").fetch("traceId")
+    end
+
+    assert_equal "fedcba9876543210fedcba9876543210", result
+    assert_equal 0, span.status_calls
+    assert_equal 0, span.exception_calls
+    assert_equal 1, span.ended
+    assert records.any? { |record| record.fetch("message") == "inside sampled-out" }
   end
 end

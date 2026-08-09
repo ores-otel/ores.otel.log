@@ -164,7 +164,9 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		return event
 	}
 	if value.TraceID != "" {
-		event.AddTrace(value.TraceID, true)
+		// Ambient context augments an event but must not replace an explicit
+		// event-level primary trace chosen by the caller.
+		event.AddTrace(value.TraceID)
 	}
 	for _, traceID := range value.TraceIDs {
 		event.AddTrace(traceID)

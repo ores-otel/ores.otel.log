@@ -261,6 +261,7 @@ test('optional bridge failures are isolated while primary log delivery remains a
     ['record-exception', 'exception recording unavailable'],
     ['span-status', 'status unavailable'],
     ['metric', 'metric unavailable'],
+    ['metric', 'metric unavailable'],
   ]);
 
   const primary = createOpenTelemetryTransport({
@@ -269,6 +270,7 @@ test('optional bridge failures are isolated while primary log delivery remains a
         throw new Error('collector down');
       },
     },
+    failOpen: false,
   });
   assert.throws(() => primary.write(record()), /collector down/);
 });

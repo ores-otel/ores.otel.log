@@ -43,7 +43,7 @@ process_context_and_transports_test() ->
     after 1000 ->
         ?assert(false)
     end,
-    ?assertEqual(#{}, next_loggers:current_context()).
+    ?assertEqual(undefined, next_loggers:current_context()).
 
 concurrent_processes_keep_context_isolated_test() ->
     Parent = self(),

@@ -86,6 +86,10 @@ func startSpan(ctx context.Context, logger *Logger, tracer Tracer, name string, 
 	}
 	if startedSpan != nil {
 		span = startedSpan
+	} else {
+		sendBridgeLog(logger.WarnContext(ctx, "OpenTelemetry start span returned nil:", name).
+			AddFields(map[string]any{"otel.bridge_operation": "start span", "otel.span_name": name}).
+			AddTags("otel-span", "otel-bridge-error"))
 	}
 	return spanCtx, span
 }

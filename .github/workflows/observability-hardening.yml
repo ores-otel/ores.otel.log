@@ -1,0 +1,188 @@
+name: Observability hardening
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "sdk/**"
+      - "scripts/test-observability-contracts.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/observability-hardening.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "sdk/**"
+      - "scripts/test-observability-contracts.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/observability-hardening.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: observability-hardening-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript adversarial and integration suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:contracts
+      - name: Repeat concurrency-sensitive observability tests
+        run: |
+          for iteration in $(seq 1 10); do
+            echo "observability stress iteration ${iteration}"
+            node --test \
+              tests/loki-adversarial.test.mjs \
+              tests/otel-adversarial.test.mjs \
+              tests/wasm-adversarial.test.mjs \
+              tests/observability-integration.test.mjs
+          done
+
+  node-matrix:
+    name: Observability package exports on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node --test tests/*observability*.test.mjs tests/*adversarial.test.mjs
+
+  go:
+    name: Go context and OTEL race suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: false
+      - name: Format check
+        working-directory: sdk/go
+        run: test -z "$(gofmt -l .)"
+      - name: Full race suite
+        working-directory: sdk/go
+        run: go test -race -count=1 ./...
+      - name: Repeat context concurrency and panic paths
+        working-directory: sdk/go
+        run: |
+          go test -race -count=20 -run 'TestConcurrentContextsNeverCrossContaminate|TestCallbackPanicIdentityAndLifecycle|TestLifecycleLoggingFailuresDoNotReplaceApplicationResult' ./...
+
+  rust:
+    name: Rust context and OTEL companion
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format base crate
+        run: cargo fmt --manifest-path sdk/rust/Cargo.toml -- --check
+      - name: Test base crate
+        run: cargo test --manifest-path sdk/rust/Cargo.toml --all-targets
+      - name: Format OTEL companion
+        run: cargo fmt --manifest-path sdk/rust-otel/Cargo.toml -- --check
+      - name: Lint OTEL companion
+        run: cargo clippy --manifest-path sdk/rust-otel/Cargo.toml --all-targets -- -D warnings
+      - name: Test OTEL companion
+        run: cargo test --manifest-path sdk/rust-otel/Cargo.toml --all-targets
+      - name: Repeat unwind and thread-local isolation paths
+        run: |
+          for iteration in $(seq 1 20); do
+            cargo test --manifest-path sdk/rust-otel/Cargo.toml \
+              thread_local_contexts_never_cross_contaminate -- --exact
+            cargo test --manifest-path sdk/rust-otel/Cargo.toml \
+              callback_panics_are_recorded_ended_and_rethrown_unchanged -- --exact
+          done
+
+  java:
+    name: Java 21 thread-local and OTEL suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Compile with all warnings as errors and run both suites
+        working-directory: sdk/java
+        run: bash test.sh build
+      - name: Repeat cross-thread context isolation
+        working-directory: sdk/java
+        run: |
+          for iteration in $(seq 1 20); do
+            java -ea -cp build com.oresoftware.nextloggers.NextLoggersAdversarialTest
+          done
+
+  dart:
+    name: Dart Zone, Supabase, and OTEL suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - name: Resolve package
+        working-directory: sdk/dart
+        run: dart pub get
+      - name: Format check
+        working-directory: sdk/dart
+        run: dart format --output=none --set-exit-if-changed .
+      - name: Analyze
+        working-directory: sdk/dart
+        run: dart analyze --fatal-infos
+      - name: Test
+        working-directory: sdk/dart
+        run: dart test --reporter expanded
+      - name: Repeat Zone and backpressure paths
+        working-directory: sdk/dart
+        run: |
+          for iteration in $(seq 1 10); do
+            dart test test/adversarial_test.dart --name '100 concurrent async operations|bounded queue drops'
+          done
+
+  beam:
+    name: Erlang and Elixir process-local context suites
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          elixir-version: "1.18"
+      - name: Erlang compile and EUnit
+        working-directory: sdk/erlang
+        run: bash test.sh
+      - name: Elixir format, warnings, and ExUnit
+        working-directory: sdk/elixir
+        run: bash test.sh

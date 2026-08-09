@@ -11,6 +11,33 @@
   "files": [
     "dist",
     "src",
+    "sdk/dart/lib",
+    "sdk/dart/pubspec.yaml",
+    "sdk/elixir/lib",
+    "sdk/elixir/mix.exs",
+    "sdk/erlang/src",
+    "sdk/erlang/rebar.config",
+    "sdk/gleam/src",
+    "sdk/gleam/gleam.toml",
+    "sdk/gleam/manifest.toml",
+    "sdk/go/*.go",
+    "sdk/go/go.mod",
+    "sdk/java/src/main",
+    "sdk/java/pom.xml",
+    "sdk/python/src",
+    "sdk/python/pyproject.toml",
+    "sdk/ruby/lib",
+    "sdk/ruby/oresoftware-next-loggers.gemspec",
+    "sdk/rust/src",
+    "sdk/rust/Cargo.toml",
+    "sdk/rust/Cargo.lock",
+    "sdk/rust-otel/src",
+    "sdk/rust-otel/Cargo.toml",
+    "sdk/wasm/src",
+    "sdk/wasm/Cargo.toml",
+    "sdk/wasm/Cargo.lock",
+    "contracts",
+    "docs",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -97,6 +124,14 @@
       "types": "./dist/otel.d.ts",
       "default": "./dist/otel.js"
     },
+    "./loki": {
+      "types": "./dist/loki.d.ts",
+      "default": "./dist/loki.js"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "default": "./dist/observability.js"
+    },
     "./prometheus": {
       "types": "./dist/prometheus.d.ts",
       "default": "./dist/prometheus.js"
@@ -104,6 +139,10 @@
     "./supabase-ingest": {
       "types": "./dist/supabase-ingest.d.ts",
       "default": "./dist/supabase-ingest.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm-logger.d.ts",
+      "default": "./dist/wasm-logger.js"
     },
     "./config": {
       "types": "./dist/config.d.ts",
@@ -120,11 +159,12 @@
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:contracts": "node scripts/test-observability-contracts.mjs",
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
-    "test:all": "npm test && npm run test:runtimes && npm run test:polyglot",
+    "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
-    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack --dry-run --json --prefix sdk/nodejs",
+    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack ./sdk/nodejs --dry-run --json",
     "prepack": "npm test"
   },
   "engines": {

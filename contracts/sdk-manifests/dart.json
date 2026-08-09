@@ -22,31 +22,83 @@
   },
   "api": {
     "logger": {
-      "trace": ["trace"],
-      "debug": ["debug"],
-      "info": ["info", "log"],
-      "warn": ["warn"],
-      "error": ["error"],
-      "fatal": ["fatal"],
-      "flush": ["flush"],
-      "flushOnExit": ["flushOnExit"],
-      "close": ["close"]
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flushOnExit"
+      ],
+      "close": [
+        "close"
+      ]
     },
     "event": {
-      "addFields": ["addFields"],
-      "addTrace": ["addTrace", "addTraceId"],
-      "addRoutineId": ["addRoutineId"],
-      "addTags": ["addTags"],
-      "addContext": ["addContext"],
-      "addMeta": ["addMeta"],
-      "addUser": ["addUserInfo", "addLoggedInUserInfo"],
-      "send": ["send"]
+      "addFields": [
+        "addFields"
+      ],
+      "addTrace": [
+        "addTrace",
+        "addTraceId"
+      ],
+      "addRoutineId": [
+        "addRoutineId"
+      ],
+      "addTags": [
+        "addTags"
+      ],
+      "addContext": [
+        "addContext"
+      ],
+      "addMeta": [
+        "addMeta"
+      ],
+      "addUser": [
+        "addUserInfo",
+        "addLoggedInUserInfo"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "useOtel",
+        "notOtel",
+        "withOtel",
+        "resetOtel",
+        "isOtelEnabled"
+      ]
     },
     "transport": {
-      "write": ["write"],
-      "flush": ["flush"],
-      "flushOnExit": ["flushOnExit"],
-      "close": ["close"]
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flushOnExit"
+      ],
+      "close": [
+        "close"
+      ]
     }
   },
   "context": {
@@ -55,11 +107,21 @@
     "propagation": "zone",
     "isolation": "concurrent-safe",
     "symbols": {
-      "run": ["withLogContext"],
-      "current": ["currentLogContext"],
-      "update": ["updateLogContext"],
-      "apply": ["LogEvent.applyContext"],
-      "withSpan": ["withSpan"]
+      "run": [
+        "withLogContext"
+      ],
+      "current": [
+        "currentLogContext"
+      ],
+      "update": [
+        "updateLogContext"
+      ],
+      "apply": [
+        "LogEvent.applyContext"
+      ],
+      "withSpan": [
+        "withOtelSpan"
+      ]
     },
     "mergesLoggedInUser": true,
     "mergesFields": true,
@@ -68,17 +130,22 @@
   },
   "telemetry": {
     "opentelemetry": {
-      "adapterSymbols": ["OpenTelemetryTransport"],
+      "adapterSymbols": [
+        "OpenTelemetryTransport",
+        "withOtelSpan"
+      ],
       "explicit": true,
       "automaticInstrumentation": false,
       "monkeyPatching": false,
       "ownsProvider": false,
       "wrapsLoggerCalls": true,
-      "sampledOutCorrelation": false,
-      "recordingSpanEventsOnly": false
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
     },
     "supabase": {
-      "adapterSymbols": ["SupabaseTransport"],
+      "adapterSymbols": [
+        "SupabaseTransport"
+      ],
       "authenticatedSender": true,
       "durableBatchSchema": "next-loggers/batch/v1",
       "allowsDistributedSecrets": false,
@@ -100,8 +167,6 @@
     "ready": false,
     "blockers": [
       "Expand Zone context to the complete canonical user, baggage, map-merge, and trace-ID merge contract.",
-      "Add an explicit application-owned span wrapper with sampled-out correlation and recording-only mutations.",
-      "Add durable authenticated Supabase batch, retry, flush-on-exit, and close lifecycle parity.",
       "Validate Dart-emitted records directly against the canonical JSON Schema."
     ]
   }

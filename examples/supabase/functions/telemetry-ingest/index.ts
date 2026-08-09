@@ -1,92 +1,179 @@
-import { withSupabase } from 'npm:@supabase/server@^1';
+import { createSupabaseContext } from '@supabase/server';
 
-const BATCH_SCHEMA = 'next-loggers/batch/v1';
-const MAX_BODY_BYTES = 512 * 1_024;
-const MAX_RECORDS = 100;
-const BATCH_ID = /^[a-zA-Z0-9._:-]{1,128}$/u;
+const MAX_BODY_BYTES = 512 * 1024;
+const MAX_BATCH_RECORDS = 100;
+const BATCH_ID = /^nl-[0-9]+-[0-9a-f]{16}$/u;
+const encoder = new TextEncoder();
 
-interface TelemetryBatch {
-  schema: typeof BATCH_SCHEMA;
-  batchId: string;
-  sentAt: string;
-  records: unknown[];
+function allowedOrigins(): Set<string> {
+  return new Set(
+    (Deno.env.get('TELEMETRY_ALLOWED_ORIGINS') ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
 }
 
-function json(body: unknown, status: number): Response {
-  return Response.json(body, {
-    status,
-    headers: {
-      'cache-control': 'no-store',
-    },
+function corsHeaders(request: Request): Headers | null {
+  const origin = request.headers.get('origin');
+  if (!origin) {
+    return new Headers();
+  }
+  if (!allowedOrigins().has(origin)) {
+    return null;
+  }
+  return new Headers({
+    'access-control-allow-origin': origin,
+    'access-control-allow-methods': 'POST, OPTIONS',
+    'access-control-allow-headers': [
+      'authorization',
+      'apikey',
+      'content-type',
+      'x-client-info',
+      'x-next-loggers-schema',
+      'x-next-loggers-batch-id',
+    ].join(', '),
+    'access-control-max-age': '600',
+    vary: 'origin',
   });
 }
 
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
+function json(
+  request: Request,
+  value: unknown,
+  status: number,
+  extraHeaders?: HeadersInit,
+): Response {
+  const headers = corsHeaders(request) ?? new Headers();
+  headers.set('content-type', 'application/json; charset=utf-8');
+  headers.set('cache-control', 'no-store');
+  for (const [name, headerValue] of new Headers(extraHeaders)) {
+    headers.set(name, headerValue);
+  }
+  return new Response(JSON.stringify(value), { status, headers });
 }
 
-function parseBatch(value: unknown): TelemetryBatch | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
+function object(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function positiveRateLimit(): number {
+  const parsed = Number.parseInt(Deno.env.get('TELEMETRY_MAX_RECORDS_PER_MINUTE') ?? '1000', 10);
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100_000 ? parsed : 1_000;
+}
+
+async function ingest(request: Request, ctx: Awaited<ReturnType<typeof createSupabaseContext>>['data']): Promise<Response> {
+  if (!ctx) {
+    return json(request, { error: 'unauthorized' }, 401);
   }
-  const candidate = value as Partial<TelemetryBatch>;
+  const cors = corsHeaders(request);
+  if (cors === null) {
+    return json(request, { error: 'origin_not_allowed' }, 403);
+  }
+  if (request.method !== 'POST') {
+    return json(request, { error: 'method_not_allowed' }, 405, { allow: 'POST, OPTIONS' });
+  }
+  const contentType = request.headers.get('content-type')?.split(';', 1)[0]?.trim();
+  if (contentType !== 'application/json') {
+    return json(request, { error: 'content_type_must_be_application_json' }, 415);
+  }
+  const declaredLength = Number.parseInt(request.headers.get('content-length') ?? '0', 10);
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
+    return json(request, { error: 'payload_too_large' }, 413);
+  }
+
+  const rawBody = await request.text();
+  if (encoder.encode(rawBody).byteLength > MAX_BODY_BYTES) {
+    return json(request, { error: 'payload_too_large' }, 413);
+  }
+
+  let body: unknown;
+  try {
+    body = JSON.parse(rawBody);
+  } catch {
+    return json(request, { error: 'invalid_json' }, 400);
+  }
+  if (!object(body)) {
+    return json(request, { error: 'invalid_batch' }, 400);
+  }
+
+  const schema = body.schema;
+  const batchId = body.batchId;
+  const sentAt = body.sentAt;
+  const records = body.records;
   if (
-    candidate.schema !== BATCH_SCHEMA ||
-    typeof candidate.batchId !== 'string' ||
-    !BATCH_ID.test(candidate.batchId) ||
-    typeof candidate.sentAt !== 'string' ||
-    Number.isNaN(Date.parse(candidate.sentAt)) ||
-    !Array.isArray(candidate.records) ||
-    candidate.records.length < 1 ||
-    candidate.records.length > MAX_RECORDS
+    schema !== 'next-loggers/batch/v1' ||
+    typeof batchId !== 'string' ||
+    !BATCH_ID.test(batchId) ||
+    typeof sentAt !== 'string' ||
+    sentAt.length < 20 ||
+    sentAt.length > 64 ||
+    !Number.isFinite(Date.parse(sentAt)) ||
+    !Array.isArray(records) ||
+    records.length < 1 ||
+    records.length > MAX_BATCH_RECORDS ||
+    Number.parseInt(batchId.split('-')[1] ?? '', 10) !== records.length
   ) {
-    return undefined;
+    return json(request, { error: 'invalid_batch' }, 400);
   }
-  return candidate as TelemetryBatch;
+  if (request.headers.get('x-next-loggers-schema') !== schema) {
+    return json(request, { error: 'schema_header_mismatch' }, 400);
+  }
+  if (request.headers.get('x-next-loggers-batch-id') !== batchId) {
+    return json(request, { error: 'batch_id_header_mismatch' }, 400);
+  }
+
+  const userId = ctx.userClaims?.id;
+  if (typeof userId !== 'string' || !userId) {
+    return json(request, { error: 'authenticated_user_missing' }, 401);
+  }
+
+  const { data, error } = await ctx.supabaseAdmin.rpc('ingest_next_logger_records', {
+    p_user_id: userId,
+    p_batch_id: batchId,
+    p_records: records,
+    p_max_records_per_minute: positiveRateLimit(),
+  });
+
+  if (error) {
+    // Never include the batch, bearer token, or raw Postgres error details in
+    // the response. The platform request ID is enough to correlate server-side
+    // diagnostics emitted through a separate, non-recursive logger pipeline.
+    const requestId = Deno.env.get('SB_EXECUTION_ID') ?? crypto.randomUUID();
+    if (error.code === 'P0001') {
+      return json(request, { error: 'rate_limited', requestId }, 429, {
+        'retry-after': '60',
+        'x-request-id': requestId,
+      });
+    }
+    if (error.code === '22023') {
+      return json(request, { error: 'invalid_batch', requestId }, 400, {
+        'x-request-id': requestId,
+      });
+    }
+    return json(request, { error: 'ingest_unavailable', requestId }, 503, {
+      'retry-after': '1',
+      'x-request-id': requestId,
+    });
+  }
+
+  return json(request, data, 202);
 }
 
 export default {
-  fetch: withSupabase({ auth: 'user' }, async (request, context) => {
-    if (request.method !== 'POST') {
-      return json({ error: 'method_not_allowed' }, 405);
+  async fetch(request: Request): Promise<Response> {
+    const cors = corsHeaders(request);
+    if (cors === null) {
+      return json(request, { error: 'origin_not_allowed' }, 403);
     }
-    if (!request.headers.get('content-type')?.toLowerCase().includes('application/json')) {
-      return json({ error: 'content_type_must_be_json' }, 415);
-    }
-    const declaredLength = Number(request.headers.get('content-length') ?? 0);
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
-      return json({ error: 'request_too_large' }, 413);
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: cors });
     }
 
-    const raw = await request.text();
-    if (byteLength(raw) > MAX_BODY_BYTES) {
-      return json({ error: 'request_too_large' }, 413);
+    const { data: ctx, error } = await createSupabaseContext(request, { auth: 'user' });
+    if (error || !ctx) {
+      return json(request, { error: 'unauthorized' }, error?.status ?? 401);
     }
-
-    let decoded: unknown;
-    try {
-      decoded = JSON.parse(raw);
-    } catch {
-      return json({ error: 'invalid_json' }, 400);
-    }
-    const batch = parseBatch(decoded);
-    if (!batch) {
-      return json({ error: 'invalid_next_loggers_batch' }, 400);
-    }
-
-    // The database function derives user ownership from auth.uid(), validates
-    // every record, applies a per-user rate limit, and inserts idempotently.
-    // Never trust loggedInUser, user_id, tenant_id, or role fields in the record.
-    const { data, error } = await context.supabase.rpc('ingest_next_logger_batch', {
-      p_batch_id: batch.batchId,
-      p_records: batch.records,
-    });
-    if (error) {
-      // Do not echo Postgres details or telemetry payloads to the client.
-      const limited = /rate limit/iu.test(String(error.message));
-      return json({ error: limited ? 'rate_limited' : 'ingest_rejected' }, limited ? 429 : 400);
-    }
-
-    return json({ ok: true, batchId: batch.batchId, result: data }, 202);
-  }),
+    return ingest(request, ctx);
+  },
 };

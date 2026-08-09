@@ -22,44 +22,105 @@
   },
   "api": {
     "logger": {
-      "trace": ["trace"],
-      "debug": ["debug"],
-      "info": ["info", "log"],
-      "warn": ["warn"],
-      "error": ["error"],
-      "fatal": ["fatal"],
-      "flush": ["flush"],
-      "flushOnExit": ["flush_on_exit"],
-      "close": ["close"]
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
     },
     "event": {
-      "addFields": ["add_fields"],
-      "addTrace": ["add_trace", "add_trace_id"],
-      "addRoutineId": ["add_routine_id"],
-      "addTags": ["add_tags"],
-      "addContext": ["add_context"],
-      "addMeta": ["add_meta"],
-      "addUser": ["add_user_info", "add_logged_in_user_info"],
-      "send": ["send"]
+      "addFields": [
+        "add_fields"
+      ],
+      "addTrace": [
+        "add_trace",
+        "add_trace_id"
+      ],
+      "addRoutineId": [
+        "add_routine_id"
+      ],
+      "addTags": [
+        "add_tags"
+      ],
+      "addContext": [
+        "add_context"
+      ],
+      "addMeta": [
+        "add_meta"
+      ],
+      "addUser": [
+        "add_user_info",
+        "add_logged_in_user_info"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "otel:",
+        "use_otel",
+        "not_otel",
+        "otel_enabled"
+      ]
     },
     "transport": {
-      "write": ["write"],
-      "flush": ["flush"],
-      "flushOnExit": ["flush_on_exit"],
-      "close": ["close"]
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
     }
   },
   "context": {
     "status": "partial",
-    "strategy": "fiber-local-and-thread-local",
-    "propagation": "fiber",
+    "strategy": "thread-local",
+    "propagation": "thread",
     "isolation": "concurrent-safe",
     "symbols": {
-      "run": ["with_log_context"],
-      "current": ["current_log_context"],
-      "update": ["update_log_context"],
-      "apply": ["Event#apply_context"],
-      "withSpan": ["with_span"]
+      "run": [
+        "with_log_context"
+      ],
+      "current": [
+        "current_log_context"
+      ],
+      "update": [
+        "update_log_context"
+      ],
+      "apply": [
+        "Event#apply_context"
+      ],
+      "withSpan": [
+        "with_span"
+      ]
     },
     "mergesLoggedInUser": true,
     "mergesFields": true,
@@ -68,17 +129,22 @@
   },
   "telemetry": {
     "opentelemetry": {
-      "adapterSymbols": ["OtelTransport"],
+      "adapterSymbols": [
+        "OtelTransport",
+        "with_span"
+      ],
       "explicit": true,
       "automaticInstrumentation": false,
       "monkeyPatching": false,
       "ownsProvider": false,
       "wrapsLoggerCalls": true,
-      "sampledOutCorrelation": false,
-      "recordingSpanEventsOnly": false
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
     },
     "supabase": {
-      "adapterSymbols": ["SupabaseTransport"],
+      "adapterSymbols": [
+        "SupabaseTransport"
+      ],
       "authenticatedSender": true,
       "durableBatchSchema": "next-loggers/batch/v1",
       "allowsDistributedSecrets": false,
@@ -93,13 +159,14 @@
       "sdk/ruby/test/next_loggers_test.rb"
     ],
     "validatesJsonSchema": false,
-    "testsContextIsolation": false,
-    "testsNoMonkeyPatching": false
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": true
   },
   "promotion": {
     "ready": false,
     "blockers": [
-      "Add Fiber-local context with thread fallback and ensure/unwind restoration tests."
+      "Add Fiber-local context isolation on runtimes where multiple fibers share one thread.",
+      "Validate Ruby-emitted records directly against the canonical JSON Schema."
     ]
   }
 }

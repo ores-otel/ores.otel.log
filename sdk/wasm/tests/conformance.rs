@@ -1,7 +1,10 @@
 use next_loggers_wasm::{
-    LogContext, LogLevel, Logger, OpenTelemetryTransport, SupabaseTransport, Transport, SCHEMA,
+    with_span, LogContext, LogLevel, Logger, OpenTelemetrySpan, OpenTelemetryTracer,
+    OpenTelemetryTransport, SupabaseTransport, Transport, SCHEMA,
 };
 use std::collections::BTreeMap;
+use std::fmt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[test]
@@ -75,6 +78,30 @@ fn explicit_host_context_flows_to_otel_and_supabase() {
 }
 
 #[test]
+fn per_call_otel_routing_preserves_ordinary_transport() {
+    let ordinary = Arc::new(Mutex::new(Vec::new()));
+    let otel = Arc::new(Mutex::new(Vec::new()));
+    let ordinary_sink = ordinary.clone();
+    let otel_sink = otel.clone();
+    let logger = Logger::new("routing")
+        .unwrap()
+        .with_transport(Arc::new(SupabaseTransport::new(move |record| {
+            ordinary_sink.lock().unwrap().push(record);
+            Ok(())
+        })))
+        .with_transport(Arc::new(OpenTelemetryTransport::new(move |record| {
+            otel_sink.lock().unwrap().push(record);
+            Ok(())
+        })));
+
+    logger.info("default", None).unwrap();
+    logger.info_with_otel("ordinary-only", None, false).unwrap();
+
+    assert_eq!(ordinary.lock().unwrap().len(), 2);
+    assert_eq!(otel.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn context_is_never_hidden_in_global_or_thread_local_state() {
     let logger = Logger::new("app").unwrap();
     let first = LogContext {
@@ -107,4 +134,119 @@ fn transport_errors_are_visible_to_the_host() {
 
     let logger = Logger::new("app").unwrap().with_transport(Arc::new(Broken));
     assert_eq!(logger.error("boom", None).unwrap_err(), "offline");
+}
+
+#[derive(Debug)]
+struct AppError;
+
+impl fmt::Display for AppError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("application failed")
+    }
+}
+
+struct TestSpan {
+    recording: bool,
+    statuses: Arc<AtomicUsize>,
+    exceptions: Arc<AtomicUsize>,
+    ended: Arc<AtomicUsize>,
+}
+
+impl OpenTelemetrySpan for TestSpan {
+    fn context(&self) -> Result<LogContext, String> {
+        Ok(LogContext {
+            trace_id: Some("fedcba9876543210fedcba9876543210".to_string()),
+            span_id: Some("fedcba9876543210".to_string()),
+            trace_flags: 0,
+            ..LogContext::default()
+        })
+    }
+
+    fn is_recording(&self) -> Result<bool, String> {
+        Ok(self.recording)
+    }
+
+    fn record_exception(&self, _error: &str) -> Result<(), String> {
+        self.exceptions.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn set_status(&self, _code: u8, _description: &str) -> Result<(), String> {
+        self.statuses.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn end(&self) -> Result<(), String> {
+        self.ended.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+}
+
+struct TestTracer {
+    recording: bool,
+    statuses: Arc<AtomicUsize>,
+    exceptions: Arc<AtomicUsize>,
+    ended: Arc<AtomicUsize>,
+}
+
+impl OpenTelemetryTracer for TestTracer {
+    fn start_span(
+        &self,
+        _name: &str,
+        _attributes: &BTreeMap<String, String>,
+    ) -> Result<Box<dyn OpenTelemetrySpan>, String> {
+        Ok(Box::new(TestSpan {
+            recording: self.recording,
+            statuses: self.statuses.clone(),
+            exceptions: self.exceptions.clone(),
+            ended: self.ended.clone(),
+        }))
+    }
+}
+
+#[test]
+fn sampled_out_host_span_correlates_without_recording_mutations() {
+    let ordinary = Arc::new(Mutex::new(Vec::new()));
+    let ordinary_sink = ordinary.clone();
+    let logger =
+        Logger::new("wasm-span")
+            .unwrap()
+            .with_transport(Arc::new(SupabaseTransport::new(move |record| {
+                ordinary_sink.lock().unwrap().push(record);
+                Ok(())
+            })));
+    let statuses = Arc::new(AtomicUsize::new(0));
+    let exceptions = Arc::new(AtomicUsize::new(0));
+    let ended = Arc::new(AtomicUsize::new(0));
+    let tracer = TestTracer {
+        recording: false,
+        statuses: statuses.clone(),
+        exceptions: exceptions.clone(),
+        ended: ended.clone(),
+    };
+
+    let trace = with_span(
+        &logger,
+        &tracer,
+        "sampled-out",
+        BTreeMap::new(),
+        |_span, context| -> Result<String, AppError> {
+            Ok(logger
+                .info("inside sampled-out", Some(context))
+                .unwrap()
+                .trace_id
+                .unwrap())
+        },
+    )
+    .unwrap();
+
+    assert_eq!(trace, "fedcba9876543210fedcba9876543210");
+    assert_eq!(statuses.load(Ordering::SeqCst), 0);
+    assert_eq!(exceptions.load(Ordering::SeqCst), 0);
+    assert_eq!(ended.load(Ordering::SeqCst), 1);
+    assert!(ordinary
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|record| record.message == "inside sampled-out"));
 }

@@ -76,6 +76,10 @@ public final class NextLoggers {
   @FunctionalInterface
   public interface Transport {
     void write(Map<String, Object> record) throws Exception;
+
+    default boolean isOpenTelemetry() {
+      return false;
+    }
   }
 
   /** Application-owned OTEL sink. No global provider or instrumentation is installed. */
@@ -107,6 +111,11 @@ public final class NextLoggers {
       otelRecord.put("attributes", Collections.unmodifiableMap(attributes));
       sink.accept(Collections.unmodifiableMap(otelRecord));
     }
+
+    @Override
+    public boolean isOpenTelemetry() {
+      return true;
+    }
   }
 
   /** Client-safe Supabase transport; the application supplies its authenticated sender. */
@@ -129,6 +138,7 @@ public final class NextLoggers {
     private final String runtime;
     private final Map<String, Object> fields;
     private final List<Transport> transports;
+    private volatile boolean otelEnabled = true;
 
     public Logger(
         String appName,
@@ -148,6 +158,12 @@ public final class NextLoggers {
     }
 
     public Map<String, Object> log(Level level, String message, Map<String, Object> eventFields)
+        throws Exception {
+      return log(level, message, eventFields, null);
+    }
+
+    public Map<String, Object> log(
+        Level level, String message, Map<String, Object> eventFields, Boolean eventOtelEnabled)
         throws Exception {
       Objects.requireNonNull(level, "level");
       Context context = currentContext();
@@ -183,7 +199,9 @@ public final class NextLoggers {
         record.put("tags", context.tags());
       }
       Map<String, Object> immutable = Collections.unmodifiableMap(record);
+      boolean routeToOtel = eventOtelEnabled == null ? otelEnabled : eventOtelEnabled;
       for (Transport transport : transports) {
+        if (transport.isOpenTelemetry() && !routeToOtel) continue;
         transport.write(immutable);
       }
       return immutable;
@@ -195,6 +213,157 @@ public final class NextLoggers {
 
     public Map<String, Object> error(String message, Map<String, Object> fields) throws Exception {
       return log(Level.ERROR, message, fields);
+    }
+
+    public boolean isOtelEnabled() {
+      return otelEnabled;
+    }
+
+    public Logger useOtel() {
+      otelEnabled = true;
+      return this;
+    }
+
+    public Logger notOtel() {
+      otelEnabled = false;
+      return this;
+    }
+  }
+
+  /** Structural bridge to an application-owned OpenTelemetry span. */
+  public interface OtelSpan {
+    Context context();
+
+    default boolean isRecording() {
+      return true;
+    }
+
+    void recordException(Throwable error);
+
+    void setStatus(int code, String description);
+
+    void end();
+  }
+
+  @FunctionalInterface
+  public interface OtelTracer {
+    OtelSpan startSpan(String name, Map<String, Object> attributes);
+  }
+
+  @FunctionalInterface
+  public interface SpanFunction<T> {
+    T apply(OtelSpan span) throws Exception;
+  }
+
+  private static final OtelSpan NOOP_SPAN =
+      new OtelSpan() {
+        @Override
+        public Context context() {
+          return null;
+        }
+
+        @Override
+        public boolean isRecording() {
+          return false;
+        }
+
+        @Override
+        public void recordException(Throwable error) {}
+
+        @Override
+        public void setStatus(int code, String description) {}
+
+        @Override
+        public void end() {}
+      };
+
+  /**
+   * Wrap application work in an application-owned span while emitting ordinary lifecycle logs.
+   * Sampled-out spans still correlate logs, but receive no recording-only mutations.
+   */
+  public static <T> T withSpan(
+      Logger logger,
+      OtelTracer tracer,
+      String name,
+      Map<String, Object> attributes,
+      SpanFunction<T> callback)
+      throws Exception {
+    Objects.requireNonNull(logger, "logger");
+    Objects.requireNonNull(tracer, "tracer");
+    Objects.requireNonNull(callback, "callback");
+
+    OtelSpan span;
+    try {
+      span = Objects.requireNonNull(tracer.startSpan(name, immutableCopy(attributes)), "span");
+    } catch (Throwable error) {
+      safeLifecycleLog(logger, Level.WARN, name, "start", error);
+      return callback.apply(NOOP_SPAN);
+    }
+
+    Context context;
+    try {
+      context = span.context();
+    } catch (Throwable error) {
+      safeLifecycleLog(logger, Level.WARN, name, "context", error);
+      context = null;
+    }
+
+    Context previous = CONTEXT.get();
+    if (context == null) CONTEXT.remove(); else CONTEXT.set(context);
+    safeLifecycleLog(logger, Level.DEBUG, name, "start", null);
+    try {
+      T result = callback.apply(span);
+      if (isRecordingSafely(logger, span, name)) {
+        invokeSpanSafely(logger, span, name, "status", () -> span.setStatus(1, ""));
+      }
+      safeLifecycleLog(logger, Level.DEBUG, name, "end", null);
+      return result;
+    } catch (Exception error) {
+      if (isRecordingSafely(logger, span, name)) {
+        invokeSpanSafely(logger, span, name, "exception", () -> span.recordException(error));
+        invokeSpanSafely(
+            logger,
+            span,
+            name,
+            "status",
+            () -> span.setStatus(2, error.getMessage() == null ? "" : error.getMessage()));
+      }
+      safeLifecycleLog(logger, Level.ERROR, name, "error", error);
+      throw error;
+    } finally {
+      invokeSpanSafely(logger, span, name, "end", span::end);
+      if (previous == null) CONTEXT.remove(); else CONTEXT.set(previous);
+    }
+  }
+
+  private static boolean isRecordingSafely(Logger logger, OtelSpan span, String name) {
+    try {
+      return span.isRecording();
+    } catch (Throwable error) {
+      safeLifecycleLog(logger, Level.WARN, name, "recording", error);
+      return false;
+    }
+  }
+
+  private static void invokeSpanSafely(
+      Logger logger, OtelSpan span, String name, String operation, Runnable action) {
+    try {
+      action.run();
+    } catch (Throwable error) {
+      safeLifecycleLog(logger, Level.WARN, name, operation, error);
+    }
+  }
+
+  private static void safeLifecycleLog(
+      Logger logger, Level level, String name, String phase, Throwable error) {
+    try {
+      Map<String, Object> fields = new LinkedHashMap<>();
+      fields.put("otel.span_name", name);
+      fields.put("otel.span_phase", phase);
+      if (error != null) fields.put("error.message", String.valueOf(error.getMessage()));
+      logger.log(level, "OpenTelemetry span " + phase + ": " + name, fields);
+    } catch (Throwable ignored) {
+      // Telemetry and lifecycle logging must not replace the application result.
     }
   }
 

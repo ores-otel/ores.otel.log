@@ -22,44 +22,106 @@
   },
   "api": {
     "logger": {
-      "trace": ["trace"],
-      "debug": ["debug"],
-      "info": ["info", "log"],
-      "warn": ["warn"],
-      "error": ["error"],
-      "fatal": ["fatal"],
-      "flush": ["flush"],
-      "flushOnExit": ["flush_on_exit"],
-      "close": ["close"]
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
     },
     "event": {
-      "addFields": ["add_fields"],
-      "addTrace": ["add_trace", "add_trace_id"],
-      "addRoutineId": ["add_routine_id"],
-      "addTags": ["add_tags"],
-      "addContext": ["add_context"],
-      "addMeta": ["add_meta"],
-      "addUser": ["add_user_info", "add_logged_in_user_info"],
-      "send": ["send"]
+      "addFields": [
+        "add_fields"
+      ],
+      "addTrace": [
+        "add_trace",
+        "add_trace_id"
+      ],
+      "addRoutineId": [
+        "add_routine_id"
+      ],
+      "addTags": [
+        "add_tags"
+      ],
+      "addContext": [
+        "add_context"
+      ],
+      "addMeta": [
+        "add_meta"
+      ],
+      "addUser": [
+        "add_user_info",
+        "add_logged_in_user_info"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "use_otel",
+        "not_otel",
+        "with_otel",
+        "reset_otel",
+        "is_otel_enabled"
+      ]
     },
     "transport": {
-      "write": ["write"],
-      "flush": ["flush"],
-      "flushOnExit": ["flush_on_exit"],
-      "close": ["close"]
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
     }
   },
   "context": {
     "status": "partial",
-    "strategy": "process-dictionary",
-    "propagation": "process",
-    "isolation": "concurrent-safe",
+    "strategy": "explicit-host-context",
+    "propagation": "explicit",
+    "isolation": "caller-owned",
     "symbols": {
-      "run": ["with_log_context"],
-      "current": ["current_log_context"],
-      "update": ["update_log_context"],
-      "apply": ["apply_log_context"],
-      "withSpan": ["with_span"]
+      "run": [
+        "with_span"
+      ],
+      "current": [
+        "OtelSpan.context"
+      ],
+      "update": [
+        "OtelSpanContext"
+      ],
+      "apply": [
+        "apply_span_context"
+      ],
+      "withSpan": [
+        "with_span"
+      ]
     },
     "mergesLoggedInUser": true,
     "mergesFields": true,
@@ -68,17 +130,23 @@
   },
   "telemetry": {
     "opentelemetry": {
-      "adapterSymbols": ["otel_transport"],
+      "adapterSymbols": [
+        "otel_transport",
+        "with_span",
+        "apply_span_context"
+      ],
       "explicit": true,
       "automaticInstrumentation": false,
       "monkeyPatching": false,
       "ownsProvider": false,
       "wrapsLoggerCalls": true,
-      "sampledOutCorrelation": false,
-      "recordingSpanEventsOnly": false
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
     },
     "supabase": {
-      "adapterSymbols": ["supabase_transport"],
+      "adapterSymbols": [
+        "supabase_transport"
+      ],
       "authenticatedSender": true,
       "durableBatchSchema": "next-loggers/batch/v1",
       "allowsDistributedSecrets": false,
@@ -99,9 +167,7 @@
   "promotion": {
     "ready": false,
     "blockers": [
-      "Add scoped BEAM process-local context through a small Erlang FFI boundary.",
-      "Add process isolation and restoration tests.",
-      "Add explicit application-owned span lifecycle and sampled-out correlation tests.",
+      "Expand explicit span context to the complete canonical user and baggage merge contract.",
       "Validate Gleam-emitted records directly against the canonical JSON Schema."
     ]
   }
