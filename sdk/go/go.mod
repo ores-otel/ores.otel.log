@@ -1,3 +1,3 @@
-module github.com/ORESoftware/next-loggers.ts/sdk/go
+module github.com/ores-otel/ores.otel.log/sdk/go
 
 go 1.21

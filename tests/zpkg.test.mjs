@@ -42,7 +42,7 @@ const expectedTargets = {
     adapter: 'go',
     native: {
       registry: 'go-modules',
-      package: 'github.com/ORESoftware/next-loggers.ts/sdk/go',
+      package: 'github.com/ores-otel/ores.otel.log/sdk/go',
       tag_format: 'sdk/go/v{version}',
     },
   },
@@ -136,7 +136,7 @@ test('all language slices are explicit, unique, and registry-correct', () => {
 });
 
 test('Go uses the required nested-module tag prefix', () => {
-  assert.equal(manifest.targets.golang.native.package, 'github.com/ORESoftware/next-loggers.ts/sdk/go');
+  assert.equal(manifest.targets.golang.native.package, 'github.com/ores-otel/ores.otel.log/sdk/go');
   assert.equal(manifest.targets.golang.native.tag_format, 'sdk/go/v{version}');
 });
 

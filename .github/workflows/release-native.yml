@@ -100,7 +100,7 @@ jobs:
       - run: go list -m
         working-directory: sdk/go
       - name: Confirm tag-driven publication
-        run: echo "${GITHUB_REF_NAME} publishes github.com/ORESoftware/next-loggers.ts/sdk/go through the Go module proxy"
+        run: echo "${GITHUB_REF_NAME} publishes github.com/ores-otel/ores.otel.log/sdk/go through the Go module proxy"
 
   rust:
     if: startsWith(github.ref_name, 'sdk/rust/v')
@@ -202,7 +202,7 @@ jobs:
         working-directory: sdk/dart
       - run: dart analyze
         working-directory: sdk/dart
-      - run: dart run test/conformance.dart
+      - run: dart test
         working-directory: sdk/dart
       - run: dart pub publish --force
         working-directory: sdk/dart

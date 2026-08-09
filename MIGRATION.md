@@ -13,4 +13,4 @@ git fetch --all --prune --tags
 git branch --set-upstream-to=origin/main main
 ```
 
-The new repository was initialized from the complete legacy Git history, including branches and tags.
+The new repository was initialized from the complete legacy Git history and every branch present at cutover. Direct verification found no tags or releases in either repository, so none were omitted from the migration.
