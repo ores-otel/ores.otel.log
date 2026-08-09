@@ -2,7 +2,7 @@
 name = "oresoftware-next-loggers"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.70"
+rust-version = "1.88"
 description = "Rust implementation of the next-loggers/v1 structured logging contract"
 license = "MIT"
 repository = "https://github.com/ores-otel/ores.otel.log"
@@ -20,4 +20,4 @@ path = "src/lib.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-time = { version = "=0.3.36", features = ["formatting"] }
+time = { version = "=0.3.54", features = ["formatting"] }
