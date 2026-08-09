@@ -134,7 +134,7 @@ jobs:
           java-version: "21"
       - name: Compile with all warnings as errors and run both suites
         working-directory: sdk/java
-        run: bash test.sh
+        run: bash test.sh build
       - name: Repeat cross-thread context isolation
         working-directory: sdk/java
         run: |
