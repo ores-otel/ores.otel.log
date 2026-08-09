@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const dartCwd = path.join(root, 'sdk', 'dart');
 
 const suites = [
   {
@@ -51,22 +52,28 @@ const suites = [
     cwd: path.join(root, 'sdk', 'java'),
   },
   {
+    name: 'Dart dependencies',
+    command: 'dart',
+    args: ['pub', 'get'],
+    cwd: dartCwd,
+  },
+  {
     name: 'Dart format',
     command: 'dart',
     args: ['format', '--output=none', '--set-exit-if-changed', 'lib', 'test'],
-    cwd: path.join(root, 'sdk', 'dart'),
+    cwd: dartCwd,
   },
   {
     name: 'Dart/Flutter wire conformance',
     command: 'dart',
-    args: ['run', 'test/conformance.dart'],
-    cwd: path.join(root, 'sdk', 'dart'),
+    args: ['--enable-asserts', 'run', 'test/conformance.dart'],
+    cwd: dartCwd,
   },
   {
     name: 'Dart/Flutter context and shutdown',
     command: 'dart',
-    args: ['run', 'test/context_shutdown.dart'],
-    cwd: path.join(root, 'sdk', 'dart'),
+    args: ['--enable-asserts', 'run', 'test/context_shutdown.dart'],
+    cwd: dartCwd,
   },
   {
     name: 'Ruby',
