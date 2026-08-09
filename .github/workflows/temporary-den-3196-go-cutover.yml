@@ -79,33 +79,34 @@ jobs:
           validator = Path("scripts/validate-contracts.py")
           text = validator.read_text(encoding="utf-8")
           marker = "\ndef validate_migration(registry: Registry[Any], manifests: list[dict[str, Any]]) -> int:\n"
-          function = r'''
-
-def validate_repository_identity(manifests: list[dict[str, Any]]) -> None:
-    """Keep canonical and legacy Go module identities explicit during migration."""
-    go_manifest = next((manifest for manifest in manifests if manifest["language"] == "go"), None)
-    if go_manifest is None:
-        raise Failure("Go SDK manifest is missing")
-    repository_context = (
-        os.environ.get("ORES_OTEL_SOURCE_REPOSITORY")
-        or os.environ.get("EXPECTED_REPOSITORY")
-        or os.environ.get("GITHUB_REPOSITORY")
-        or CANONICAL
-    )
-    package_names = go_manifest["packages"]
-    expected = (
-        package_names["legacyName"]
-        if repository_context == LEGACY
-        else package_names["canonicalName"]
-    )
-    go_mod = ROOT / "sdk" / "go" / "go.mod"
-    first_line = go_mod.read_text(encoding="utf-8").splitlines()[0]
-    if first_line != f"module {expected}":
-        raise Failure(
-            "Go module identity does not match the source repository context: "
-            f"repository={repository_context!r}, expected={expected!r}, observed={first_line!r}"
-        )
-'''
+          function = "\n".join([
+              "",
+              "def validate_repository_identity(manifests: list[dict[str, Any]]) -> None:",
+              "    \"\"\"Keep canonical and legacy Go module identities explicit during migration.\"\"\"",
+              "    go_manifest = next((manifest for manifest in manifests if manifest[\"language\"] == \"go\"), None)",
+              "    if go_manifest is None:",
+              "        raise Failure(\"Go SDK manifest is missing\")",
+              "    repository_context = (",
+              "        os.environ.get(\"ORES_OTEL_SOURCE_REPOSITORY\")",
+              "        or os.environ.get(\"EXPECTED_REPOSITORY\")",
+              "        or os.environ.get(\"GITHUB_REPOSITORY\")",
+              "        or CANONICAL",
+              "    )",
+              "    package_names = go_manifest[\"packages\"]",
+              "    expected = (",
+              "        package_names[\"legacyName\"]",
+              "        if repository_context == LEGACY",
+              "        else package_names[\"canonicalName\"]",
+              "    )",
+              "    go_mod = ROOT / \"sdk\" / \"go\" / \"go.mod\"",
+              "    first_line = go_mod.read_text(encoding=\"utf-8\").splitlines()[0]",
+              "    if first_line != f\"module {expected}\":",
+              "        raise Failure(",
+              "            \"Go module identity does not match the source repository context: \"",
+              "            f\"repository={repository_context!r}, expected={expected!r}, observed={first_line!r}\"",
+              "        )",
+              "",
+          ])
           if marker not in text:
               raise SystemExit("validate_migration insertion point not found")
           if "def validate_repository_identity(" in text:
@@ -122,12 +123,14 @@ def validate_repository_identity(manifests: list[dict[str, Any]]) -> None:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          manifest = json.loads(Path('contracts/sdk-manifests/go.json').read_text())
-          expected = manifest['packages']['canonicalName']
-          observed = Path('sdk/go/go.mod').read_text().splitlines()[0].removeprefix('module ')
+
+          manifest = json.loads(Path("contracts/sdk-manifests/go.json").read_text(encoding="utf-8"))
+          expected = manifest["packages"]["canonicalName"]
+          observed = Path("sdk/go/go.mod").read_text(encoding="utf-8").splitlines()[0].removeprefix("module ")
           assert observed == expected, (observed, expected)
-          assert manifest['packages']['legacyName'] == 'github.com/ORESoftware/next-loggers.ts/sdk/go'
+          assert manifest["packages"]["legacyName"] == "github.com/ORESoftware/next-loggers.ts/sdk/go"
           PY
+
           ! grep -RFn --exclude=go.json 'github.com/ORESoftware/next-loggers.ts/sdk/go' \
             sdk/go .zpkg.toml docs/CLI.md docs/RELEASING.md src/cli/package-catalog.ts \
             tests/zpkg.test.mjs .github/workflows/release-native.yml
