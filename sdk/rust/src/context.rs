@@ -120,7 +120,7 @@ pub fn merge_log_context(outer: &LogContext, inner: &LogContext) -> LogContext {
 }
 
 thread_local! {
-    static CONTEXT_STACK: RefCell<Vec<LogContext>> = RefCell::new(Vec::new());
+    static CONTEXT_STACK: RefCell<Vec<LogContext>> = const { RefCell::new(Vec::new()) };
 }
 
 pub fn current_log_context() -> LogContext {

@@ -5,7 +5,6 @@ use next_loggers::{
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::future::{pending, Future};
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
 
