@@ -7,8 +7,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const SCHEMA: &str = "next-loggers/v1";
 pub type JsonObject = Map<String, Value>;
@@ -337,16 +336,79 @@ impl Options {
 fn default_id() -> String {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let sequence = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    format!(
-        "rust-{}-{sequence}",
-        OffsetDateTime::now_utc().unix_timestamp_nanos()
-    )
+    format!("rust-{}-{sequence}", current_unix_timestamp_nanos())
 }
 
 fn default_clock() -> String {
-    OffsetDateTime::now_utc()
-        .format(&Rfc3339)
-        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
+    let (seconds, nanoseconds) = current_unix_time_parts();
+    format_rfc3339_utc(seconds, nanoseconds)
+}
+
+fn current_unix_timestamp_nanos() -> i128 {
+    let (seconds, nanoseconds) = current_unix_time_parts();
+    i128::from(seconds) * 1_000_000_000 + i128::from(nanoseconds)
+}
+
+fn current_unix_time_parts() -> (i64, u32) {
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => (
+            i64::try_from(duration.as_secs()).unwrap_or(i64::MAX),
+            duration.subsec_nanos(),
+        ),
+        Err(error) => {
+            let duration = error.duration();
+            let seconds = i64::try_from(duration.as_secs()).unwrap_or(i64::MAX);
+            if duration.subsec_nanos() == 0 {
+                (-seconds, 0)
+            } else {
+                (
+                    -seconds.saturating_add(1),
+                    1_000_000_000 - duration.subsec_nanos(),
+                )
+            }
+        }
+    }
+}
+
+fn format_rfc3339_utc(seconds: i64, nanoseconds: u32) -> String {
+    debug_assert!(nanoseconds < 1_000_000_000);
+
+    let days = seconds.div_euclid(86_400);
+    let seconds_in_day = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_date_from_unix_days(days);
+    let hour = seconds_in_day / 3_600;
+    let minute = (seconds_in_day % 3_600) / 60;
+    let second = seconds_in_day % 60;
+
+    let fractional = if nanoseconds == 0 {
+        String::new()
+    } else {
+        format!(".{nanoseconds:09}")
+            .trim_end_matches('0')
+            .to_owned()
+    };
+
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}{fractional}Z")
+}
+
+// Howard Hinnant's civil-from-days algorithm, with day zero at 1970-01-01.
+fn civil_date_from_unix_days(days: i64) -> (i64, i64, i64) {
+    let shifted = days + 719_468;
+    let era = if shifted >= 0 {
+        shifted
+    } else {
+        shifted - 146_096
+    } / 146_097;
+    let day_of_era = shifted - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    (year, month, day)
 }
 
 #[derive(Clone)]
@@ -831,5 +893,25 @@ impl Event {
             state.sent = true;
         }
         self.logger.emit(self, store)
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::{civil_date_from_unix_days, format_rfc3339_utc};
+
+    #[test]
+    fn formats_epoch_and_pre_epoch_timestamps() {
+        assert_eq!(format_rfc3339_utc(0, 0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_rfc3339_utc(-1, 0), "1969-12-31T23:59:59Z");
+    }
+
+    #[test]
+    fn formats_leap_days_and_trims_fractional_zeroes() {
+        assert_eq!(
+            format_rfc3339_utc(951_782_400, 123_400_000),
+            "2000-02-29T00:00:00.1234Z"
+        );
+        assert_eq!(civil_date_from_unix_days(19_782), (2024, 2, 29));
     }
 }
