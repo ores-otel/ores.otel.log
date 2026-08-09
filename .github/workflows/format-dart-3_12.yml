@@ -1,0 +1,56 @@
+name: Format Dart 3.12 sources
+
+on:
+  push:
+    branches:
+      - recovery/polyglot-context-shutdown-0f122
+    paths:
+      - ".github/workflows/format-dart-3_12.yml"
+      - "sdk/dart/lib/next_loggers.dart"
+      - "sdk/dart/lib/shutdown.dart"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: format-dart-3-12-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out review branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Dart 3.12.2
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: 3.12.2
+      - name: Format the two CI-reported sources
+        run: |
+          set -euo pipefail
+          dart format sdk/dart/lib/next_loggers.dart sdk/dart/lib/shutdown.dart
+          git diff --check
+      - name: Commit only reviewed Dart formatting
+        run: |
+          set -euo pipefail
+          changed="$(git diff --name-only)"
+          if [[ -z "$changed" ]]; then
+            echo 'Dart sources are already formatted for 3.12.2.'
+            exit 0
+          fi
+          unexpected="$(printf '%s\n' "$changed" | grep -Ev '^sdk/dart/lib/(next_loggers|shutdown)\.dart$' || true)"
+          if [[ -n "$unexpected" ]]; then
+            echo 'Refusing to commit unexpected files:' >&2
+            printf '%s\n' "$unexpected" >&2
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sdk/dart/lib/next_loggers.dart sdk/dart/lib/shutdown.dart
+          git commit -m 'style(dart): format context and shutdown sources'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
