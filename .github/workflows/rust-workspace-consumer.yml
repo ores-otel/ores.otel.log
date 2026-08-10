@@ -6,7 +6,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - sdk/rust/**
-      - sdk/rust-otel/**
+      - sdk/rust-context/**
       - sdk/wasm/**
       - .github/workflows/rust-workspace-consumer.yml
   push:
@@ -15,7 +15,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - sdk/rust/**
-      - sdk/rust-otel/**
+      - sdk/rust-context/**
       - sdk/wasm/**
       - .github/workflows/rust-workspace-consumer.yml
   workflow_dispatch:
