@@ -9,7 +9,7 @@ const targetRoot = join(repositoryRoot, 'sdk', 'nodejs');
 const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'));
 const rootPackage = await readJson(join(repositoryRoot, 'package.json'));
 const { scripts: _scripts, devDependencies: _devDependencies, ...releasePackage } = rootPackage;
-releasePackage.files = ['dist', 'src', '.cli-flags.toml', 'README.md', 'LICENSE'];
+releasePackage.files = ['dist', 'src', 'contracts', '.cli-flags.toml', 'README.md', 'LICENSE'];
 releasePackage.repository = {
   ...rootPackage.repository,
   directory: 'sdk/nodejs',
