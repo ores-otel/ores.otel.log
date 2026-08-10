@@ -1,0 +1,50 @@
+name: Repair Zed dependency assertions
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/repair-zpkg-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Replace the obsolete zero-dependency assertion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/zpkg.test.mjs")
+          text = path.read_text()
+          text = text.replace("const lock = await read('.zpkg.lock');\n", "")
+          old = '''test('the lockfile is the canonical zero-dependency form', () => {
+            assert.equal(lock.trim(), 'version = 1');
+            assert.equal(parseToml(lock).version, 1);
+            assert.deepEqual(Object.keys(manifest.dependencies ?? {}), []);
+            assert.equal(pkg.dependencies, undefined);
+          });'''
+          new = '''test('the Zed manifest declares the canonical interface dependency', () => {
+            assert.deepEqual(manifest.dependencies, {
+              'ores-otel/ores-interfaces': '^0.1.0',
+            });
+            assert.equal(pkg.dependencies, undefined);
+          });'''
+          if old not in text:
+              raise SystemExit("obsolete Zed lock assertion was not found")
+          path.write_text(text.replace(old, new))
+          PY
+      - name: Commit the repaired assertion
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/zpkg.test.mjs
+          git diff --cached --check
+          git commit -m "test(zed): validate the declared interface dependency"
+          git push origin HEAD:main
