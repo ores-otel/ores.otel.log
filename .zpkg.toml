@@ -25,6 +25,9 @@ keywords = [
 vcs = "git"
 url = "https://github.com/ores-otel/ores.otel.log"
 
+[install]
+dir = "zed_modules"
+
 [dependencies]
 "ores-otel/ores-interfaces" = "^0.1.0"
 
@@ -36,7 +39,9 @@ exclude = [
   ".r2g/**",
   ".zed/**",
   "**/.zed/**",
+  ".zpkg.lock",
   ".zpkg-pack/**",
+  "zed_modules/**",
   "coverage/**",
   "node_modules/**",
   "**/node_modules/**",
@@ -61,6 +66,12 @@ exclude = [
   "**/test.sh",
 ]
 smoke_test = "sh \"$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh\""
+
+# Publish the aggregate identity consumed by shared libraries and services.
+[targets.repository]
+dir = "."
+name = "next-loggers"
+adapter = "none"
 
 [targets.contracts]
 dir = "contracts"
