@@ -147,6 +147,7 @@
     "./contracts/logger-api.json": "./contracts/logger-api.json",
     "./contracts/test-org-matrix.schema.json": "./contracts/test-org-matrix.schema.json",
     "./contracts/test-org-matrix.json": "./contracts/test-org-matrix.json",
+    "./contracts/*": "./contracts/*",
     "./package.json": "./package.json"
   },
   "engines": {
