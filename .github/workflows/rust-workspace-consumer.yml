@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - Cargo.toml
+      - Cargo.lock
       - sdk/rust/**
       - sdk/rust-otel/**
       - sdk/wasm/**
@@ -12,6 +13,7 @@ on:
     branches: [main]
     paths:
       - Cargo.toml
+      - Cargo.lock
       - sdk/rust/**
       - sdk/rust-otel/**
       - sdk/wasm/**
@@ -37,14 +39,28 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt,clippy
+      - name: Generate the deterministic workspace lock
+        run: cargo generate-lockfile
+      - name: Preserve the reviewed lock for first-time workspace bootstrapping
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: rust-workspace-lock-${{ github.event.pull_request.head.sha || github.sha }}
+          path: Cargo.lock
+          if-no-files-found: error
+          retention-days: 1
+      - name: Require the generated lock to be committed and unchanged
+        run: |
+          set -euo pipefail
+          git ls-files --error-unmatch Cargo.lock
+          git diff --exit-code -- Cargo.lock
       - name: Verify workspace metadata
-        run: cargo metadata --format-version 1 --no-deps > /tmp/metadata.json
+        run: cargo metadata --locked --format-version 1 --no-deps > /tmp/metadata.json
       - name: Verify formatting
         run: cargo fmt --all -- --check
       - name: Test workspace
-        run: cargo test --workspace --all-targets
+        run: cargo test --locked --workspace --all-targets
       - name: Lint workspace
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
   git-consumer:
     runs-on: ubuntu-24.04
