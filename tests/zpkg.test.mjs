@@ -14,7 +14,6 @@ const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
 const zedInclude = await read('.zedinclude');
 
 const expectedTargets = {
-  repository: { dir: '.', name: 'next-loggers', adapter: 'none' },
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
   nodejs: {
     dir: 'sdk/nodejs',

@@ -24,11 +24,7 @@ export const RELEASE_TARGET_NAMES = [
 
 export type ReleaseTargetName = (typeof RELEASE_TARGET_NAMES)[number];
 
-// `repository` is the aggregate Zed package identity. It is intentionally not
-// a separate native release target: `PACKAGE_RELEASES.target === 'zed'`
-// publishes it, while the remaining entries describe language-specific slices.
 export const ZED_TARGET_NAMES = [
-  'repository',
   'contracts',
   'nodejs',
   'python',

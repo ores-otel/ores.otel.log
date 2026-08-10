@@ -64,12 +64,6 @@ exclude = [
 ]
 smoke_test = "sh \"$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh\""
 
-# Publish the aggregate identity consumed by shared libraries and services.
-[targets.repository]
-dir = "."
-name = "next-loggers"
-adapter = "none"
-
 [targets.contracts]
 dir = "contracts"
 name = "next-loggers-contracts"
