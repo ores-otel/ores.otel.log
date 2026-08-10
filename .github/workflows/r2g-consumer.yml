@@ -67,4 +67,6 @@ jobs:
         env:
           CI: "true"
           R2G_TEMP_BASE: ${{ runner.temp }}/next-loggers-r2g
-        run: r2g run
+        # The root now intentionally contains both package.json and Cargo.toml.
+        # Select npm explicitly so r2g does not guess across two valid SDKs.
+        run: r2g run --ecosystem=npm
