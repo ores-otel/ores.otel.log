@@ -11,7 +11,6 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const manifest = parseToml(await read('.zpkg.toml'));
 const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
-const lock = await read('.zpkg.lock');
 const zedInclude = await read('.zedinclude');
 
 const expectedTargets = {
@@ -235,10 +234,10 @@ test('the repository URL and slugs satisfy Zed validation', () => {
   assert.match(manifest.package.repository.url, /^(?:https?|ssh|git|git\+ssh):\/\//);
 });
 
-test('the lockfile is the canonical zero-dependency form', () => {
-  assert.equal(lock.trim(), 'version = 1');
-  assert.equal(parseToml(lock).version, 1);
-  assert.deepEqual(Object.keys(manifest.dependencies ?? {}), []);
+test('the Zed manifest declares the canonical interface dependency', () => {
+  assert.deepEqual(manifest.dependencies, {
+    'ores-otel/ores-interfaces': '^0.1.0',
+  });
   assert.equal(pkg.dependencies, undefined);
 });
 
