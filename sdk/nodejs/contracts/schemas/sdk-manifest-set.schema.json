@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/sdk-manifest-set.schema.json",
+  "title": "ores.otel.log SDK manifest index",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifestSetVersion", "manifests"],
+  "properties": {
+    "manifestSetVersion": {"const": "ores.otel.sdk-manifests/v1"},
+    "manifests": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "allOf": [
+          {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/repositoryPath"},
+          {"pattern": "^contracts/sdk-manifests/[a-z0-9-]+\\.json$"}
+        ]
+      }
+    }
+  }
+}

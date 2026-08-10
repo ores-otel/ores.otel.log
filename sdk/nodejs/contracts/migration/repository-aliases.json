@@ -1,0 +1,23 @@
+{
+  "contractVersion": "ores.otel.repositories/v1",
+  "canonical": {
+    "repository": "ores-otel/ores.otel.log",
+    "role": "primary",
+    "defaultBranch": "main"
+  },
+  "legacy": {
+    "repository": "ORESoftware/next-loggers.ts",
+    "role": "compatibility-mirror",
+    "defaultBranch": "main",
+    "mustRemainReadable": true,
+    "mustPreserveHistory": true
+  },
+  "testOrganization": "ores-otel-test",
+  "promotionRequirements": {
+    "minimumRepositories": 10,
+    "minimumLanguages": 7,
+    "mustTestCanonicalAndLegacy": true,
+    "requireExactHeadChecks": true,
+    "requireNoMonkeyPatching": true
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema": "next-loggers/v1",
+  "id": "minimal-1",
+  "timestamp": "2026-08-08T12:00:00.000Z",
+  "level": "INFO",
+  "runtime": "node",
+  "appName": "minimal-service",
+  "message": "ready",
+  "values": ["ready"],
+  "fields": {},
+  "unknown": true
+}

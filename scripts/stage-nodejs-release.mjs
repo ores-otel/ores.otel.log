@@ -19,20 +19,17 @@ await access(join(repositoryRoot, 'dist', 'cli', 'main.js'));
 await mkdir(targetRoot, { recursive: true });
 await writeFile(join(targetRoot, 'package.json'), `${JSON.stringify(releasePackage, null, 2)}\n`);
 
-for (const generated of ['dist', 'src', 'README.md', 'LICENSE', '.cli-flags.toml']) {
+for (const generated of ['dist', 'src', 'contracts', 'README.md', 'LICENSE', '.cli-flags.toml']) {
   await rm(join(targetRoot, generated), { recursive: true, force: true });
 }
 
-await cp(join(repositoryRoot, 'dist'), join(targetRoot, 'dist'), {
-  recursive: true,
-  force: true,
-  errorOnExist: false,
-});
-await cp(join(repositoryRoot, 'src'), join(targetRoot, 'src'), {
-  recursive: true,
-  force: true,
-  errorOnExist: false,
-});
+for (const directory of ['dist', 'src', 'contracts']) {
+  await cp(join(repositoryRoot, directory), join(targetRoot, directory), {
+    recursive: true,
+    force: true,
+    errorOnExist: false,
+  });
+}
 for (const file of ['README.md', 'LICENSE', '.cli-flags.toml']) {
   await copyFile(join(repositoryRoot, file), join(targetRoot, file));
 }

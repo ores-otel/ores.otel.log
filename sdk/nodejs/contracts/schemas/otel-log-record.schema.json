@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/otel-log-record.schema.json",
+  "title": "ores.otel.log explicit OpenTelemetry bridge record",
+  "description": "Dependency-free structure handed to an application-owned OpenTelemetry logger. No global provider registration or automatic instrumentation is permitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["body", "severityText", "severityNumber", "timestamp", "attributes"],
+  "properties": {
+    "body": {"type": "string", "maxLength": 16384},
+    "severityText": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/level"},
+    "severityNumber": {"type": "integer", "enum": [1, 5, 9, 13, 17, 21]},
+    "timestamp": {"type": "string", "format": "date-time", "maxLength": 64},
+    "attributes": {
+      "type": "object",
+      "maxProperties": 128,
+      "propertyNames": {"type": "string", "minLength": 1, "maxLength": 256},
+      "additionalProperties": {
+        "oneOf": [
+          {"type": ["string", "number", "boolean"]},
+          {"type": "array", "maxItems": 64, "items": {"type": ["string", "number", "boolean"]}}
+        ]
+      }
+    },
+    "traceId": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/w3cTraceId"},
+    "spanId": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/w3cSpanId"},
+    "traceFlags": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/traceFlags"},
+    "traceState": {"type": "string", "maxLength": 512}
+  }
+}

@@ -1,0 +1,172 @@
+{
+  "manifestVersion": "ores.otel.sdk-manifest/v1",
+  "language": "wasm",
+  "ecosystem": "crates.io and WebAssembly Component Model",
+  "runtime": "WASM guest with explicit host adapter",
+  "sourceRoot": "sdk/wasm",
+  "package": {
+    "legacyName": "oresoftware-next-loggers-wasm",
+    "canonicalName": "ores-otel-log-wasm",
+    "nativeModule": "ores_otel_log_wasm"
+  },
+  "repositories": {
+    "canonical": "ores-otel/ores.otel.log",
+    "legacy": "ORESoftware/next-loggers.ts"
+  },
+  "wire": {
+    "recordVersion": "next-loggers/v1",
+    "recordSchema": "contracts/log-record.schema.json",
+    "contextSchema": "contracts/schemas/log-context.schema.json",
+    "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
+    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+  },
+  "api": {
+    "logger": {
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
+    },
+    "event": {
+      "addFields": [
+        "add_fields"
+      ],
+      "addTrace": [
+        "add_trace",
+        "add_trace_id"
+      ],
+      "addRoutineId": [
+        "add_routine_id"
+      ],
+      "addTags": [
+        "add_tags"
+      ],
+      "addContext": [
+        "add_context"
+      ],
+      "addMeta": [
+        "add_meta"
+      ],
+      "addUser": [
+        "add_user_info",
+        "add_logged_in_user_info"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "log_with_otel",
+        "info_with_otel",
+        "with_otel_enabled"
+      ]
+    },
+    "transport": {
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
+    }
+  },
+  "context": {
+    "status": "partial",
+    "strategy": "explicit-host-context",
+    "propagation": "explicit",
+    "isolation": "caller-owned",
+    "symbols": {
+      "run": [
+        "with_span"
+      ],
+      "current": [
+        "OpenTelemetrySpan::context"
+      ],
+      "update": [
+        "LogContext"
+      ],
+      "apply": [
+        "Logger::log"
+      ],
+      "withSpan": [
+        "with_span"
+      ]
+    },
+    "mergesLoggedInUser": true,
+    "mergesFields": true,
+    "deduplicatesTraceIds": true,
+    "restoresAfterFailure": true
+  },
+  "telemetry": {
+    "opentelemetry": {
+      "adapterSymbols": [
+        "OpenTelemetryTransport",
+        "OpenTelemetryTracer",
+        "with_span"
+      ],
+      "explicit": true,
+      "automaticInstrumentation": false,
+      "monkeyPatching": false,
+      "ownsProvider": false,
+      "wrapsLoggerCalls": true,
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
+    },
+    "supabase": {
+      "adapterSymbols": [
+        "SupabaseTransport"
+      ],
+      "authenticatedSender": true,
+      "durableBatchSchema": "next-loggers/batch/v1",
+      "allowsDistributedSecrets": false,
+      "realtimeIsDurable": false
+    }
+  },
+  "conformance": {
+    "command": "cargo test --manifest-path sdk/wasm/Cargo.toml",
+    "recordFixture": "contracts/fixtures/conformance-record.json",
+    "sourceFiles": [
+      "sdk/wasm/src/lib.rs",
+      "sdk/wasm/tests/conformance.rs"
+    ],
+    "validatesJsonSchema": false,
+    "testsContextIsolation": false,
+    "testsNoMonkeyPatching": false
+  },
+  "promotion": {
+    "ready": false,
+    "blockers": [
+      "Define a stable Component Model ABI for the explicit host-owned context bridge.",
+      "Validate guest-produced records against the canonical schema."
+    ]
+  }
+}

@@ -125,7 +125,6 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
-    "./package.json": "./package.json",
     "./server-lifecycle": {
       "types": "./dist/server-lifecycle.d.ts",
       "import": "./dist/server-lifecycle.js",
@@ -142,7 +141,13 @@
       },
       "types": "./dist/execution-context.d.ts",
       "default": "./dist/execution-context.js"
-    }
+    },
+    "./contracts/log-record.schema.json": "./contracts/log-record.schema.json",
+    "./contracts/logger-api.schema.json": "./contracts/logger-api.schema.json",
+    "./contracts/logger-api.json": "./contracts/logger-api.json",
+    "./contracts/test-org-matrix.schema.json": "./contracts/test-org-matrix.schema.json",
+    "./contracts/test-org-matrix.json": "./contracts/test-org-matrix.json",
+    "./package.json": "./package.json"
   },
   "engines": {
     "node": ">=18"

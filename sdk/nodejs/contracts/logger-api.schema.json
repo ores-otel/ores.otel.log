@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ores:otel:log:logger-api-contract:v1",
+  "title": "ores.otel.log cross-language logger API contract",
+  "description": "Machine-readable contract for the shared logger, event, transport, context, and OpenTelemetry surface implemented by every SDK.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "wireSchema",
+    "operationSet",
+    "levels",
+    "operations",
+    "sdkBindings"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores.otel.log/api-contract/v1"
+    },
+    "wireSchema": {
+      "const": "next-loggers/v1"
+    },
+    "operationSet": {
+      "const": "core-v1"
+    },
+    "levels": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "TRACE",
+          "DEBUG",
+          "INFO",
+          "WARN",
+          "ERROR",
+          "FATAL"
+        ]
+      }
+    },
+    "operations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "logger",
+        "event",
+        "transport",
+        "context",
+        "otel"
+      ],
+      "properties": {
+        "logger": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        },
+        "event": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        },
+        "transport": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        },
+        "context": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        },
+        "otel": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/operation"
+          }
+        }
+      }
+    },
+    "sdkBindings": {
+      "type": "array",
+      "minItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/sdkBinding"
+      }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "semantics"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "semantics": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        },
+        "idempotent": {
+          "type": "boolean"
+        }
+      }
+    },
+    "sdkBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "language",
+        "runtimeFamily",
+        "path",
+        "package",
+        "testCommand",
+        "namingConvention",
+        "operationSet",
+        "capabilities"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimeFamily": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^sdk/[a-z0-9-]+$"
+        },
+        "package": {
+          "type": "string",
+          "minLength": 1
+        },
+        "testCommand": {
+          "type": "string",
+          "minLength": 1
+        },
+        "namingConvention": {
+          "enum": [
+            "camelCase",
+            "snake_case",
+            "PascalCase"
+          ]
+        },
+        "operationSet": {
+          "const": "core-v1"
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "structured-records",
+              "context-local-storage",
+              "explicit-context-passing",
+              "otel-explicit",
+              "no-global-patching",
+              "transport-lifecycle",
+              "deterministic-conformance"
+            ]
+          }
+        },
+        "aliases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

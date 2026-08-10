@@ -1,0 +1,19 @@
+{
+  "body": "payment failed",
+  "severityText": "ERROR",
+  "severityNumber": 17,
+  "timestamp": "2026-08-08T12:00:00.000Z",
+  "attributes": {
+    "service.name": "payments",
+    "next_logger.schema": "next-loggers/v1",
+    "next_logger.runtime": "rust",
+    "log.record.uid": "w3c-record-1",
+    "trace.id": "0123456789abcdef0123456789abcdef",
+    "span.id": "0123456789abcdef",
+    "next_logger.tags": ["payments", "otel"]
+  },
+  "traceId": "0123456789abcdef0123456789abcdef",
+  "spanId": "0123456789abcdef",
+  "traceFlags": 1,
+  "traceState": "vendor=value"
+}

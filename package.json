@@ -152,7 +152,6 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
-    "./package.json": "./package.json",
     "./server-lifecycle": {
       "types": "./dist/server-lifecycle.d.ts",
       "import": "./dist/server-lifecycle.js",
@@ -169,20 +168,26 @@
       },
       "types": "./dist/execution-context.d.ts",
       "default": "./dist/execution-context.js"
-    }
+    },
+    "./contracts/log-record.schema.json": "./contracts/log-record.schema.json",
+    "./contracts/logger-api.schema.json": "./contracts/logger-api.schema.json",
+    "./contracts/logger-api.json": "./contracts/logger-api.json",
+    "./contracts/test-org-matrix.schema.json": "./contracts/test-org-matrix.schema.json",
+    "./contracts/test-org-matrix.json": "./contracts/test-org-matrix.json",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && npm run postbuild && npm run stage:nodejs",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "test:contracts": "node scripts/test-observability-contracts.mjs",
+    "test:contracts": "node scripts/validate-contracts.mjs && node scripts/test-observability-contracts.mjs",
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
-    "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
+    "test:all": "npm run test:contracts && npm test && npm run test:runtimes && npm run test:polyglot",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
-    "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack ./sdk/nodejs --dry-run --json",
-    "prepack": "npm test"
+    "release:check": "npm run test:contracts && npm run build && node --test tests/zpkg.test.mjs && npm pack ./sdk/nodejs --dry-run --json",
+    "prepack": "npm run test:contracts && npm test"
   },
   "engines": {
     "node": ">=18"

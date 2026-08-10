@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ores:otel:log:test-org-matrix:v1",
+  "title": "ores-otel-test consumer repository matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "targetOrganization", "policy", "tracks", "repositories"],
+  "properties": {
+    "schema": {"const": "ores.otel.log/test-org-matrix/v1"},
+    "targetOrganization": {"const": "ores-otel-test"},
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumRepositories", "minimumLanguages", "requiredTracks", "applyRequiresExactRefs", "productionWritesAllowed"],
+      "properties": {
+        "minimumRepositories": {"type": "integer", "minimum": 10},
+        "minimumLanguages": {"type": "integer", "minimum": 7},
+        "requiredTracks": {"const": ["legacy", "canonical"]},
+        "applyRequiresExactRefs": {"const": true},
+        "productionWritesAllowed": {"const": false}
+      }
+    },
+    "tracks": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {"$ref": "#/$defs/track"}
+    },
+    "repositories": {
+      "type": "array",
+      "minItems": 10,
+      "items": {"$ref": "#/$defs/repository"}
+    }
+  },
+  "$defs": {
+    "track": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "repository", "ref", "status"],
+      "properties": {
+        "id": {"enum": ["legacy", "canonical"]},
+        "repository": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "ref": {
+          "oneOf": [
+            {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            {"type": "null"}
+          ]
+        },
+        "status": {"enum": ["ready", "blocked"]},
+        "blockedBy": {"type": "string", "minLength": 1}
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "language", "runtimeFamily", "track", "visibility", "sourcePath", "package", "testCommand", "requiredChecks"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^(legacy|canonical)-[a-z0-9-]+-consumer$"},
+        "language": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"},
+        "runtimeFamily": {"type": "string", "minLength": 1},
+        "track": {"enum": ["legacy", "canonical"]},
+        "visibility": {"const": "private"},
+        "sourcePath": {"type": "string", "pattern": "^sdk/[a-z0-9-]+$"},
+        "package": {"type": "string", "minLength": 1},
+        "testCommand": {"type": "string", "minLength": 1},
+        "requiredChecks": {
+          "type": "array",
+          "contains": {"const": "contract"},
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {"enum": ["contract", "consumer"]}
+        }
+      }
+    }
+  }
+}

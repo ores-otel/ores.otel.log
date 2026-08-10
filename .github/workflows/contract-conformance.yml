@@ -1,0 +1,65 @@
+name: Contract conformance
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'sdk/**'
+      - 'scripts/validate-contracts.mjs'
+      - '.github/workflows/contract-conformance.yml'
+      - 'package.json'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'sdk/**'
+      - 'scripts/validate-contracts.mjs'
+      - '.github/workflows/contract-conformance.yml'
+      - 'package.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: 11 SDKs / 22 consumer plans
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Validate schemas, operations, SDK bindings, and test-org pairs
+        run: node scripts/validate-contracts.mjs
+      - name: Reject credentials and conflict markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          paths=(
+            contracts/logger-api.json
+            contracts/logger-api.schema.json
+            contracts/test-org-matrix.json
+            contracts/test-org-matrix.schema.json
+            scripts/validate-contracts.mjs
+            .github/workflows/contract-conformance.yml
+          )
+          credential_pattern='gh[pousr]_[A-Za-z0-9]{20,}|lin_''api_|cfat_[A-Za-z0-9]+|BEGIN [A-Z ]*PRIVATE KEY|CHAT_''BRIDGE_TOKEN'
+          if grep -nE "$credential_pattern" "${paths[@]}"; then
+            echo 'Credential-shaped content is forbidden.' >&2
+            exit 1
+          fi
+          if grep -nE '^(<{7}|={7}|>{7})' "${paths[@]}"; then
+            echo 'Conflict markers are forbidden.' >&2
+            exit 1
+          fi
