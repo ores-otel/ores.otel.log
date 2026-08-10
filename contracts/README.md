@@ -70,3 +70,24 @@ python scripts/validate-contracts.py
 The validator checks schema validity, positive and negative fixtures, the exact eleven-SDK manifest set, source paths, explicit OTEL rules, no-monkey-patching patterns, promotion readiness, and the minimum ten-repository/seven-language test-org requirement.
 
 `promotion.ready` is deliberately false for SDKs whose context isolation or schema tests have not landed. Metadata cannot declare an SDK ready merely because its basic logger compiles.
+
+## Migration pairing contract
+
+The compatibility-era `logger-api.json` and `logger-api.schema.json` provide
+a second, dependency-free check of the complete logical API. They are retained
+alongside the richer per-SDK manifests so older consumer provisioning tools can
+validate all 39 canonical operations during migration.
+
+The `test-org-matrix.json` pair describes isolated legacy and canonical
+consumers for all eleven SDK families. It is a planning contract: repository
+writes are limited to `ores-otel-test`, production writes are forbidden, and
+an apply run remains blocked until it is given the exact final canonical ref.
+
+Run this compatibility validator with:
+
+```sh
+node scripts/validate-contracts.mjs
+```
+
+The primary validator remains `python scripts/validate-contracts.py`; both
+contracts must pass while the compatibility fleet is supported.
