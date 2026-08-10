@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/repository-aliases.schema.json",
+  "title": "ores.otel.log canonical and legacy repository roles",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contractVersion", "canonical", "legacy", "testOrganization", "promotionRequirements"],
+  "properties": {
+    "contractVersion": {"const": "ores.otel.repositories/v1"},
+    "canonical": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "role", "defaultBranch"],
+      "properties": {"repository": {"const": "ores-otel/ores.otel.log"}, "role": {"const": "primary"}, "defaultBranch": {"const": "main"}}
+    },
+    "legacy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["repository", "role", "defaultBranch", "mustRemainReadable", "mustPreserveHistory"],
+      "properties": {
+        "repository": {"const": "ORESoftware/next-loggers.ts"},
+        "role": {"const": "compatibility-mirror"},
+        "defaultBranch": {"const": "main"},
+        "mustRemainReadable": {"const": true},
+        "mustPreserveHistory": {"const": true}
+      }
+    },
+    "testOrganization": {"const": "ores-otel-test"},
+    "promotionRequirements": {
+      "type": "object", "additionalProperties": false,
+      "required": ["minimumRepositories", "minimumLanguages", "mustTestCanonicalAndLegacy", "requireExactHeadChecks", "requireNoMonkeyPatching"],
+      "properties": {
+        "minimumRepositories": {"type": "integer", "minimum": 10},
+        "minimumLanguages": {"type": "integer", "minimum": 7},
+        "mustTestCanonicalAndLegacy": {"const": true},
+        "requireExactHeadChecks": {"const": true},
+        "requireNoMonkeyPatching": {"const": true}
+      }
+    }
+  }
+}

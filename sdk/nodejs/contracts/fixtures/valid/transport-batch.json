@@ -1,0 +1,46 @@
+{
+  "schema": "next-loggers/batch/v1",
+  "batchId": "nl-2-0123456789abcdef",
+  "sentAt": "2026-08-08T12:00:01.000Z",
+  "records": [
+    {
+      "schema": "next-loggers/v1",
+      "id": "minimal-1",
+      "timestamp": "2026-08-08T12:00:00.000Z",
+      "level": "INFO",
+      "runtime": "node",
+      "appName": "minimal-service",
+      "message": "ready",
+      "values": ["ready"],
+      "fields": {}
+    },
+    {
+      "schema": "next-loggers/v1",
+      "id": "w3c-record-1",
+      "timestamp": "2026-08-08T12:00:00.000Z",
+      "level": "ERROR",
+      "runtime": "rust",
+      "appName": "payments",
+      "name": "checkout",
+      "message": "payment failed",
+      "values": ["payment failed", {"attempt": 2}],
+      "fields": {
+        "environment": "test",
+        "orderId": "order-42",
+        "otel.span_id": "0123456789abcdef",
+        "otel.trace_flags": 1,
+        "otel.trace_state": "vendor=value"
+      },
+      "loggedInUser": {"id": "user-1"},
+      "users": [{"id": "user-2", "role": "support"}],
+      "traceId": "0123456789abcdef0123456789abcdef",
+      "traceIds": ["0123456789abcdef0123456789abcdef", "fedcba9876543210fedcba9876543210"],
+      "routineId": "charge-card",
+      "tags": ["payments", "otel"],
+      "context": [{"attempt": 2}],
+      "meta": [{"source": "fixture"}],
+      "errors": [{"name": "PaymentError", "message": "declined"}],
+      "stackTrace": ["PaymentError: declined", "at charge-card"]
+    }
+  ]
+}

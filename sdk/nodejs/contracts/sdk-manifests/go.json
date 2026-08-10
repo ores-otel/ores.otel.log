@@ -1,0 +1,183 @@
+{
+  "manifestVersion": "ores.otel.sdk-manifest/v1",
+  "language": "go",
+  "ecosystem": "Go modules",
+  "runtime": "Go",
+  "sourceRoot": "sdk/go",
+  "package": {
+    "legacyName": "github.com/ORESoftware/next-loggers.ts/sdk/go",
+    "canonicalName": "github.com/ores-otel/ores.otel.log/sdk/go",
+    "nativeModule": "nextloggers"
+  },
+  "repositories": {
+    "canonical": "ores-otel/ores.otel.log",
+    "legacy": "ORESoftware/next-loggers.ts"
+  },
+  "wire": {
+    "recordVersion": "next-loggers/v1",
+    "recordSchema": "contracts/log-record.schema.json",
+    "contextSchema": "contracts/schemas/log-context.schema.json",
+    "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
+    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+  },
+  "api": {
+    "logger": {
+      "trace": [
+        "Trace"
+      ],
+      "debug": [
+        "Debug"
+      ],
+      "info": [
+        "Info",
+        "Log"
+      ],
+      "warn": [
+        "Warn"
+      ],
+      "error": [
+        "Error"
+      ],
+      "fatal": [
+        "Fatal"
+      ],
+      "flush": [
+        "Flush"
+      ],
+      "flushOnExit": [
+        "FlushOnExit"
+      ],
+      "close": [
+        "Close"
+      ]
+    },
+    "event": {
+      "addFields": [
+        "AddFields"
+      ],
+      "addTrace": [
+        "AddTrace",
+        "AddTraceId"
+      ],
+      "addRoutineId": [
+        "AddRoutineId"
+      ],
+      "addTags": [
+        "AddTags"
+      ],
+      "addContext": [
+        "AddContext"
+      ],
+      "addMeta": [
+        "AddMeta"
+      ],
+      "addUser": [
+        "AddUserInfo",
+        "AddLoggedInUserInfo"
+      ],
+      "send": [
+        "Send"
+      ],
+      "otelRouting": [
+        "UseOtel",
+        "UseOTel",
+        "NotOtel",
+        "NotOTel",
+        "WithOtel",
+        "WithOTel",
+        "ResetOtel",
+        "ResetOTel",
+        "IsOtelEnabled",
+        "IsOTelEnabled"
+      ]
+    },
+    "transport": {
+      "write": [
+        "Write"
+      ],
+      "flush": [
+        "Flush"
+      ],
+      "flushOnExit": [
+        "FlushOnExit"
+      ],
+      "close": [
+        "Close"
+      ]
+    }
+  },
+  "context": {
+    "status": "implemented",
+    "strategy": "context-value",
+    "propagation": "task",
+    "isolation": "concurrent-safe",
+    "symbols": {
+      "run": [
+        "WithLogContext"
+      ],
+      "current": [
+        "LogContextFrom"
+      ],
+      "update": [
+        "MergeLogContext"
+      ],
+      "apply": [
+        "Event.ApplyContext"
+      ],
+      "withSpan": [
+        "WithSpan"
+      ]
+    },
+    "mergesLoggedInUser": true,
+    "mergesFields": true,
+    "deduplicatesTraceIds": true,
+    "restoresAfterFailure": true
+  },
+  "telemetry": {
+    "opentelemetry": {
+      "adapterSymbols": [
+        "OpenTelemetryTransport",
+        "NewOpenTelemetryTransport"
+      ],
+      "explicit": true,
+      "automaticInstrumentation": false,
+      "monkeyPatching": false,
+      "ownsProvider": false,
+      "wrapsLoggerCalls": true,
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
+    },
+    "supabase": {
+      "adapterSymbols": [
+        "SupabaseTransport",
+        "NewSupabaseTransport"
+      ],
+      "authenticatedSender": true,
+      "durableBatchSchema": "next-loggers/batch/v1",
+      "allowsDistributedSecrets": false,
+      "realtimeIsDurable": false
+    }
+  },
+  "conformance": {
+    "command": "cd sdk/go && go test -race ./...",
+    "recordFixture": "contracts/fixtures/conformance-record.json",
+    "sourceFiles": [
+      "sdk/go/logger.go",
+      "sdk/go/context.go",
+      "sdk/go/context_logger.go",
+      "sdk/go/span.go",
+      "sdk/go/logger_test.go",
+      "sdk/go/context_test.go",
+      "sdk/go/span_test.go"
+    ],
+    "validatesJsonSchema": false,
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": true
+  },
+  "promotion": {
+    "ready": false,
+    "blockers": [
+      "Validate Go-emitted records directly against the canonical JSON Schema before package promotion."
+    ]
+  }
+}

@@ -160,6 +160,7 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
+    "./contracts/*": "./contracts/*",
     "./package.json": "./package.json",
     "./server-lifecycle": {
       "types": "./dist/server-lifecycle.d.ts",

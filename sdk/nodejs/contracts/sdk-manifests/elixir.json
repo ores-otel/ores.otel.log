@@ -1,0 +1,174 @@
+{
+  "manifestVersion": "ores.otel.sdk-manifest/v1",
+  "language": "elixir",
+  "ecosystem": "Hex",
+  "runtime": "Elixir on BEAM",
+  "sourceRoot": "sdk/elixir",
+  "package": {
+    "legacyName": "oresoftware_next_loggers",
+    "canonicalName": "ores_otel_log",
+    "nativeModule": "OresOtelLog"
+  },
+  "repositories": {
+    "canonical": "ores-otel/ores.otel.log",
+    "legacy": "ORESoftware/next-loggers.ts"
+  },
+  "wire": {
+    "recordVersion": "next-loggers/v1",
+    "recordSchema": "contracts/log-record.schema.json",
+    "contextSchema": "contracts/schemas/log-context.schema.json",
+    "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
+    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+  },
+  "api": {
+    "logger": {
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
+    },
+    "event": {
+      "addFields": [
+        "add_fields"
+      ],
+      "addTrace": [
+        "add_trace",
+        "add_trace_id"
+      ],
+      "addRoutineId": [
+        "add_routine_id"
+      ],
+      "addTags": [
+        "add_tags"
+      ],
+      "addContext": [
+        "add_context"
+      ],
+      "addMeta": [
+        "add_meta"
+      ],
+      "addUser": [
+        "add_user_info",
+        "add_logged_in_user_info"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "use_otel",
+        "not_otel",
+        "with_otel",
+        "reset_otel",
+        "is_otel_enabled"
+      ]
+    },
+    "transport": {
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
+    }
+  },
+  "context": {
+    "status": "partial",
+    "strategy": "process-dictionary",
+    "propagation": "process",
+    "isolation": "concurrent-safe",
+    "symbols": {
+      "run": [
+        "with_log_context"
+      ],
+      "current": [
+        "current_log_context"
+      ],
+      "update": [
+        "update_log_context"
+      ],
+      "apply": [
+        "apply_log_context"
+      ],
+      "withSpan": [
+        "with_span"
+      ]
+    },
+    "mergesLoggedInUser": true,
+    "mergesFields": true,
+    "deduplicatesTraceIds": true,
+    "restoresAfterFailure": true
+  },
+  "telemetry": {
+    "opentelemetry": {
+      "adapterSymbols": [
+        "otel_transport",
+        "with_span"
+      ],
+      "explicit": true,
+      "automaticInstrumentation": false,
+      "monkeyPatching": false,
+      "ownsProvider": false,
+      "wrapsLoggerCalls": true,
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
+    },
+    "supabase": {
+      "adapterSymbols": [
+        "supabase_transport"
+      ],
+      "authenticatedSender": true,
+      "durableBatchSchema": "next-loggers/batch/v1",
+      "allowsDistributedSecrets": false,
+      "realtimeIsDurable": false
+    }
+  },
+  "conformance": {
+    "command": "bash sdk/elixir/test.sh",
+    "recordFixture": "contracts/fixtures/conformance-record.json",
+    "sourceFiles": [
+      "sdk/elixir/lib/next_loggers.ex",
+      "sdk/elixir/lib/oresoftware_next_loggers.ex",
+      "sdk/elixir/test/next_loggers_test.exs",
+      "sdk/elixir/test/adversarial_test.exs"
+    ],
+    "validatesJsonSchema": false,
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": true
+  },
+  "promotion": {
+    "ready": false,
+    "blockers": [
+      "Validate Elixir-emitted records directly against the canonical JSON Schema."
+    ]
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "manifestVersion": "ores.otel.sdk-manifest/v1",
+  "language": "python",
+  "ecosystem": "PyPI",
+  "runtime": "CPython and compatible Python 3 runtimes",
+  "sourceRoot": "sdk/python",
+  "package": {
+    "legacyName": "oresoftware-next-loggers",
+    "canonicalName": "ores-otel-log",
+    "nativeModule": "ores_otel_log"
+  },
+  "repositories": {
+    "canonical": "ores-otel/ores.otel.log",
+    "legacy": "ORESoftware/next-loggers.ts"
+  },
+  "wire": {
+    "recordVersion": "next-loggers/v1",
+    "recordSchema": "contracts/log-record.schema.json",
+    "contextSchema": "contracts/schemas/log-context.schema.json",
+    "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
+    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+  },
+  "api": {
+    "logger": {
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
+    },
+    "event": {
+      "addFields": [
+        "add_fields"
+      ],
+      "addTrace": [
+        "add_trace",
+        "add_trace_id"
+      ],
+      "addRoutineId": [
+        "add_routine_id"
+      ],
+      "addTags": [
+        "add_tags"
+      ],
+      "addContext": [
+        "add_context"
+      ],
+      "addMeta": [
+        "add_meta"
+      ],
+      "addUser": [
+        "add_user_info",
+        "add_logged_in_user_info"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "use_otel",
+        "not_otel",
+        "with_otel",
+        "reset_otel",
+        "is_otel_enabled"
+      ]
+    },
+    "transport": {
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flush_on_exit"
+      ],
+      "close": [
+        "close"
+      ]
+    }
+  },
+  "context": {
+    "status": "implemented",
+    "strategy": "contextvars",
+    "propagation": "async",
+    "isolation": "concurrent-safe",
+    "symbols": {
+      "run": [
+        "run_with_log_context",
+        "run_with_log_context_async",
+        "log_context"
+      ],
+      "current": [
+        "get_log_context"
+      ],
+      "update": [
+        "update_log_context",
+        "merge_log_context"
+      ],
+      "apply": [
+        "apply_log_context",
+        "ContextLogger"
+      ],
+      "withSpan": [
+        "with_span",
+        "with_span_async"
+      ]
+    },
+    "mergesLoggedInUser": true,
+    "mergesFields": true,
+    "deduplicatesTraceIds": true,
+    "restoresAfterFailure": true
+  },
+  "telemetry": {
+    "opentelemetry": {
+      "adapterSymbols": [
+        "OpenTelemetryTransport",
+        "OtelTransport",
+        "with_span",
+        "with_span_async"
+      ],
+      "explicit": true,
+      "automaticInstrumentation": false,
+      "monkeyPatching": false,
+      "ownsProvider": false,
+      "wrapsLoggerCalls": true,
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
+    },
+    "supabase": {
+      "adapterSymbols": [
+        "SupabaseTransport"
+      ],
+      "authenticatedSender": true,
+      "durableBatchSchema": "next-loggers/batch/v1",
+      "allowsDistributedSecrets": false,
+      "realtimeIsDurable": false
+    }
+  },
+  "conformance": {
+    "command": "python -m unittest discover -s sdk/python/tests",
+    "recordFixture": "contracts/fixtures/conformance-record.json",
+    "sourceFiles": [
+      "sdk/python/src/next_loggers/__init__.py",
+      "sdk/python/src/next_loggers/context.py",
+      "sdk/python/tests/test_conformance.py",
+      "sdk/python/tests/test_context.py"
+    ],
+    "validatesJsonSchema": false,
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": true
+  },
+  "promotion": {
+    "ready": false,
+    "blockers": [
+      "Validate Python-emitted records directly against the canonical JSON Schema before package promotion."
+    ]
+  }
+}

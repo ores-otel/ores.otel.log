@@ -1,0 +1,138 @@
+{
+  "matrixVersion": "ores.otel.test-matrix/v1",
+  "testOrganization": "ores-otel-test",
+  "canonicalSource": "ores-otel/ores.otel.log",
+  "legacySource": "ORESoftware/next-loggers.ts",
+  "repositories": [
+    {
+      "name": "ores-otel-log-nodejs-test",
+      "language": "nodejs",
+      "runtime": "Node.js 18/20/22/24, Bun, and Deno",
+      "toolchain": "npm and runtime CLIs",
+      "testCommand": "npm ci && npm test",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "supabase-client", "lifecycle", "concurrency", "prometheus-cardinality", "loki-correlation"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-browser-test",
+      "language": "browser",
+      "runtime": "Chromium and workerd",
+      "toolchain": "Playwright and workerd",
+      "testCommand": "npm ci && npm run test:browser && npm run test:workerd",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "supabase-client", "lifecycle", "browser-exit"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-python-test",
+      "language": "python",
+      "runtime": "CPython 3.11-3.14",
+      "toolchain": "uv or pip",
+      "testCommand": "python -m unittest discover -v",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "supabase-client", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-go-test",
+      "language": "go",
+      "runtime": "Go 1.24+",
+      "toolchain": "go",
+      "testCommand": "go test -race ./...",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-rust-test",
+      "language": "rust",
+      "runtime": "Rust stable, beta, and MSRV",
+      "toolchain": "cargo",
+      "testCommand": "cargo test --all-features && cargo clippy --all-targets --all-features -- -D warnings",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-java-test",
+      "language": "java",
+      "runtime": "JDK 21 and 25",
+      "toolchain": "Maven",
+      "testCommand": "mvn --batch-mode --no-transfer-progress verify",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-dart-test",
+      "language": "dart",
+      "runtime": "Dart stable and Flutter stable",
+      "toolchain": "dart and flutter",
+      "testCommand": "dart test && dart analyze",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "supabase-client", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-gleam-test",
+      "language": "gleam",
+      "runtime": "Gleam on OTP",
+      "toolchain": "gleam",
+      "testCommand": "gleam format --check src test && gleam test",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-erlang-test",
+      "language": "erlang",
+      "runtime": "Erlang/OTP",
+      "toolchain": "rebar3",
+      "testCommand": "rebar3 as test do compile, eunit",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-elixir-test",
+      "language": "elixir",
+      "runtime": "Elixir on OTP",
+      "toolchain": "mix",
+      "testCommand": "mix format --check-formatted && mix test --warnings-as-errors",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-ruby-test",
+      "language": "ruby",
+      "runtime": "Ruby 3.2-3.5",
+      "toolchain": "bundler",
+      "testCommand": "bundle exec rake test",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-wasm-test",
+      "language": "wasm",
+      "runtime": "wasmtime and browser WebAssembly",
+      "toolchain": "cargo, wasm-tools, wasmtime",
+      "testCommand": "cargo test && wasm-tools validate target/wasm32-wasip2/release/*.wasm",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency", "wasm-host"],
+      "status": "planned"
+    },
+    {
+      "name": "ores-otel-log-wire-interop-test",
+      "language": "nodejs",
+      "runtime": "Cross-language fixture comparator",
+      "toolchain": "Node.js and Docker",
+      "testCommand": "npm ci && npm test",
+      "sources": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"],
+      "capabilities": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "lifecycle", "concurrency", "wasm-host", "browser-exit"],
+      "status": "planned"
+    }
+  ]
+}

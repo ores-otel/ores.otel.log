@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/log-record.schema.json",
+  "title": "next-loggers/v1 log record",
+  "description": "Canonical, bounded wire record emitted by every ores.otel.log language SDK. Legacy v1 correlation IDs remain accepted; new OTEL integrations should emit lowercase W3C trace/span identifiers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "timestamp", "level", "runtime", "appName", "message", "values", "fields"],
+  "properties": {
+    "schema": {"const": "next-loggers/v1"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 256},
+    "timestamp": {"type": "string", "format": "date-time", "maxLength": 64},
+    "level": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/level"},
+    "runtime": {"type": "string", "minLength": 1, "maxLength": 64},
+    "appName": {"type": "string", "minLength": 1, "maxLength": 128},
+    "name": {"type": "string", "minLength": 1, "maxLength": 128},
+    "message": {"type": "string", "maxLength": 16384},
+    "values": {"type": "array", "maxItems": 256, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonValue"}},
+    "fields": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonObject"},
+    "loggedInUser": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonObject"},
+    "users": {"type": "array", "maxItems": 64, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonObject"}},
+    "traceId": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/traceId"},
+    "traceIds": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/traceId"}},
+    "routineId": {"type": "string", "minLength": 1, "maxLength": 256},
+    "tags": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/tagList"},
+    "context": {"type": "array", "maxItems": 64, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonValue"}},
+    "meta": {"type": "array", "maxItems": 64, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonValue"}},
+    "errors": {"type": "array", "maxItems": 64, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonValue"}},
+    "stackTrace": {"type": "array", "maxItems": 256, "items": {"type": "string", "maxLength": 8192}}
+  }
+}

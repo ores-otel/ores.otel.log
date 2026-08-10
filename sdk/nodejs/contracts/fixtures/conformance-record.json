@@ -1,0 +1,46 @@
+{
+  "schema": "next-loggers/v1",
+  "id": "contract-record-1",
+  "timestamp": "2026-01-02T03:04:05.000Z",
+  "level": "ERROR",
+  "runtime": "contract-test",
+  "appName": "payments",
+  "name": "audit",
+  "message": "payment failed 42",
+  "values": [
+    "payment failed",
+    42
+  ],
+  "fields": {
+    "environment": "test",
+    "orderId": "order-42"
+  },
+  "loggedInUser": {
+    "id": "user-1"
+  },
+  "users": [
+    {
+      "id": "user-2"
+    }
+  ],
+  "traceId": "trace-1",
+  "traceIds": [
+    "trace-1",
+    "trace-2"
+  ],
+  "routineId": "charge-card",
+  "tags": [
+    "payments",
+    "critical"
+  ],
+  "context": [
+    {
+      "attempt": 2
+    }
+  ],
+  "meta": [
+    {
+      "source": "fixture"
+    }
+  ]
+}

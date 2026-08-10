@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/fixture-manifest.schema.json",
+  "title": "ores.otel.log JSON Schema fixture manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifestVersion", "cases"],
+  "properties": {
+    "manifestVersion": {"const": "ores.otel.fixtures/v1"},
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "schema", "valid"],
+        "properties": {
+          "path": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/repositoryPath"},
+          "schema": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/repositoryPath"},
+          "valid": {"type": "boolean"},
+          "expectedKeyword": {"type": "string", "minLength": 1, "maxLength": 128}
+        },
+        "allOf": [{"if": {"properties": {"valid": {"const": false}}}, "then": {"required": ["expectedKeyword"]}}]
+      }
+    }
+  }
+}

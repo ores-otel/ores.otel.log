@@ -1,0 +1,14 @@
+{
+  "loggedInUser": {"id": "user-1"},
+  "users": [{"id": "user-2"}],
+  "fields": {"requestId": "request-1"},
+  "traceId": "0123456789abcdef0123456789abcdef",
+  "traceIds": ["0123456789abcdef0123456789abcdef"],
+  "spanId": "0123456789abcdef",
+  "traceFlags": 1,
+  "traceState": "vendor=value",
+  "remote": false,
+  "baggage": {"tenant": "tenant-1"},
+  "routineId": "checkout",
+  "tags": ["otel", "checkout"]
+}
