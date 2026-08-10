@@ -1,0 +1,58 @@
+name: Repair Zed root package contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/repair-zed-root-package.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Remove the duplicate aggregate target
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest_path = Path('.zpkg.toml')
+          manifest = manifest_path.read_text()
+          block = '''# Publish the aggregate identity consumed by shared libraries and services.
+          [targets.repository]
+          dir = "."
+          name = "next-loggers"
+          adapter = "none"
+
+          '''
+          if block not in manifest:
+              raise SystemExit('duplicate aggregate target block was not found')
+          manifest_path.write_text(manifest.replace(block, '', 1))
+
+          catalog_path = Path('src/cli/package-catalog.ts')
+          catalog = catalog_path.read_text()
+          catalog = catalog.replace("// `repository` is the aggregate Zed package identity. It is intentionally not\n// a separate native release target: `PACKAGE_RELEASES.target === 'zed'`\n// publishes it, while the remaining entries describe language-specific slices.\n", '')
+          if "  'repository',\n" not in catalog:
+              raise SystemExit('repository target catalog entry was not found')
+          catalog_path.write_text(catalog.replace("  'repository',\n", '', 1))
+
+          test_path = Path('tests/zpkg.test.mjs')
+          test = test_path.read_text()
+          expected = "  repository: { dir: '.', name: 'next-loggers', adapter: 'none' },\n"
+          if expected not in test:
+              raise SystemExit('repository target test expectation was not found')
+          test_path.write_text(test.replace(expected, '', 1))
+          PY
+      - name: Commit the corrected root-package model
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .zpkg.toml src/cli/package-catalog.ts tests/zpkg.test.mjs
+          git diff --cached --check
+          git commit -m "fix(zed): use the implicit root package identity"
+          git push origin HEAD:main
