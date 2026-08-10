@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "sdk/rust",
-  "sdk/rust-otel",
+  "sdk/rust-context",
   "sdk/wasm",
 ]
 resolver = "2"
