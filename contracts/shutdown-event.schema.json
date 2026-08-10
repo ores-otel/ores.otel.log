@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ORESoftware/next-loggers.ts/blob/main/contracts/shutdown-event.schema.json",
+  "title": "next-loggers shutdown lifecycle event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "phase",
+    "previousPhase",
+    "trigger",
+    "interactive",
+    "attempt",
+    "elapsedMillis",
+    "message"
+  ],
+  "properties": {
+    "phase": {
+      "type": "string",
+      "enum": ["running", "draining", "forcing", "stopped"]
+    },
+    "previousPhase": {
+      "type": "string",
+      "enum": ["running", "draining", "forcing", "stopped"]
+    },
+    "trigger": {
+      "type": "string",
+      "minLength": 1
+    },
+    "interactive": {
+      "type": "boolean"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "elapsedMillis": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "error": true
+  }
+}

@@ -8,25 +8,20 @@ import {
 export type { LogContext, LogContextProvider, LogContextStorage };
 
 /**
- * Browser build of `@oresoftware/next-loggers/context`, selected by the package's
- * `browser` export condition.
- *
- * Browsers have no AsyncLocalStorage, so this keeps a single module-scoped
- * frame: correct for sequential work, but it cannot isolate overlapping async
- * flows — see SingleFrameLogContextStorage. isAsyncContextTracked() returns
- * false here so callers can detect the degradation instead of assuming
- * per-request isolation. Apps with real zone tracking (e.g. Angular zones) can
- * attach their own store via logger.setALS() or setLogContextProvider().
+ * Browser build of `@oresoftware/next-loggers/context`.
+ * The fallback is safe for sequential work but cannot isolate overlapping
+ * async flows. Check `isAsyncContextTracked()` before relying on request-local
+ * isolation, or install an application-owned context provider.
  */
 export const logContextStorage: LogContextStorage = new SingleFrameLogContextStorage();
-
 const api = createLogContextApi(logContextStorage, false);
 
-/** Always false in browsers: the fallback storage cannot isolate concurrent flows. */
 export const isAsyncContextTracked = api.isAsyncContextTracked;
-
 export const runWithLogContext = api.runWithLogContext;
+export const runWithMergedLogContext = api.runWithMergedLogContext;
 export const getLogContext = api.getLogContext;
+export const captureLogContext = api.captureLogContext;
+export const runWithCapturedLogContext = api.runWithCapturedLogContext;
 export const updateLogContext = api.updateLogContext;
 export const setContextLoggedInUser = api.setContextLoggedInUser;
 export const logContextProvider = api.logContextProvider;

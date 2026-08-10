@@ -1,5 +1,4 @@
-/// Public entrypoint for the oresoftware_next_loggers package.
-///
-/// The implementation remains available from `next_loggers.dart` for source
-/// compatibility, but applications should import this package-named library.
+/// Browser/Flutter-safe public entrypoint.
 export 'next_loggers.dart';
+export 'shutdown.dart';
+export 'shutdown_logging.dart';

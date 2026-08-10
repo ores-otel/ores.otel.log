@@ -39,16 +39,29 @@ class LogContext {
     Map<String, String>? baggage,
     JsonMap? fields,
     List<String>? tags,
-  }) =>
-      LogContext(
-        traceId: traceId ?? this.traceId,
-        spanId: spanId ?? this.spanId,
-        traceFlags: traceFlags ?? this.traceFlags,
-        traceState: traceState ?? this.traceState,
-        baggage: Map.unmodifiable(baggage ?? this.baggage),
-        fields: Map.unmodifiable(fields ?? this.fields),
-        tags: List.unmodifiable(tags ?? this.tags),
-      );
+  }) => LogContext(
+    traceId: traceId ?? this.traceId,
+    spanId: spanId ?? this.spanId,
+    traceFlags: traceFlags ?? this.traceFlags,
+    traceState: traceState ?? this.traceState,
+    baggage: Map.unmodifiable(baggage ?? this.baggage),
+    fields: Map.unmodifiable(fields ?? this.fields),
+    tags: List.unmodifiable(tags ?? this.tags),
+  );
+
+  LogContext snapshot() => copyWith();
+
+  LogContext merge(LogContext patch) => LogContext(
+    traceId: patch.traceId.isEmpty ? traceId : patch.traceId,
+    spanId: patch.spanId.isEmpty ? spanId : patch.spanId,
+    traceFlags: patch.traceId.isEmpty && patch.spanId.isEmpty
+        ? traceFlags
+        : patch.traceFlags,
+    traceState: patch.traceState.isEmpty ? traceState : patch.traceState,
+    baggage: {...baggage, ...patch.baggage},
+    fields: {...fields, ...patch.fields},
+    tags: <String>{...tags, ...patch.tags}.toList(growable: false),
+  );
 }
 
 final Object _contextKey = Object();
@@ -57,6 +70,24 @@ LogContext? currentLogContext() => Zone.current[_contextKey] as LogContext?;
 
 R runWithLogContext<R>(LogContext context, R Function() callback) =>
     runZoned(callback, zoneValues: {_contextKey: context.copyWith()});
+
+R withLogContext<R>(LogContext context, R Function() callback) =>
+    runWithLogContext(context, callback);
+
+R withMergedLogContext<R>(LogContext patch, R Function() callback) {
+  final current = currentLogContext();
+  return runWithLogContext(current?.merge(patch) ?? patch, callback);
+}
+
+LogContext? captureLogContext() => currentLogContext()?.snapshot();
+
+R withCapturedLogContext<R>(LogContext? captured, R Function() callback) =>
+    captured == null ? callback() : runWithLogContext(captured, callback);
+
+R Function() bindLogContext<R>(R Function() callback) {
+  final captured = captureLogContext();
+  return () => withCapturedLogContext(captured, callback);
+}
 
 abstract interface class LogTransport {
   FutureOr<void> write(LogRecord record);
@@ -127,27 +158,27 @@ class LogRecord {
   final List<String> stackTrace;
 
   JsonMap toJson() => {
-        'schema': schema,
-        'id': id,
-        'timestamp': timestamp,
-        'level': level.wireName,
-        'runtime': runtime,
-        'appName': appName,
-        if (name.isNotEmpty) 'name': name,
-        'message': message,
-        'values': values,
-        'fields': fields,
-        if (loggedInUser.isNotEmpty) 'loggedInUser': loggedInUser,
-        if (users.isNotEmpty) 'users': users,
-        if (traceId.isNotEmpty) 'traceId': traceId,
-        if (traceIds.isNotEmpty) 'traceIds': traceIds,
-        if (routineId.isNotEmpty) 'routineId': routineId,
-        if (tags.isNotEmpty) 'tags': tags,
-        if (context.isNotEmpty) 'context': context,
-        if (meta.isNotEmpty) 'meta': meta,
-        if (errors.isNotEmpty) 'errors': errors,
-        if (stackTrace.isNotEmpty) 'stackTrace': stackTrace,
-      };
+    'schema': schema,
+    'id': id,
+    'timestamp': timestamp,
+    'level': level.wireName,
+    'runtime': runtime,
+    'appName': appName,
+    if (name.isNotEmpty) 'name': name,
+    'message': message,
+    'values': values,
+    'fields': fields,
+    if (loggedInUser.isNotEmpty) 'loggedInUser': loggedInUser,
+    if (users.isNotEmpty) 'users': users,
+    if (traceId.isNotEmpty) 'traceId': traceId,
+    if (traceIds.isNotEmpty) 'traceIds': traceIds,
+    if (routineId.isNotEmpty) 'routineId': routineId,
+    if (tags.isNotEmpty) 'tags': tags,
+    if (context.isNotEmpty) 'context': context,
+    if (meta.isNotEmpty) 'meta': meta,
+    if (errors.isNotEmpty) 'errors': errors,
+    if (stackTrace.isNotEmpty) 'stackTrace': stackTrace,
+  };
 
   String toJsonString() => jsonEncode(toJson());
 }
@@ -165,12 +196,12 @@ class Logger {
     List<LogTransport> transports = const [],
     String Function()? idFactory,
     DateTime Function()? clock,
-  })  : fields = Map.of(fields),
-        currentUser = Map.of(loggedInUser),
-        transports = List.of(transports),
-        idFactory = idFactory ?? _randomId,
-        clock = clock ?? DateTime.now,
-        _otelEnabled = otelEnabled;
+  }) : fields = Map.of(fields),
+       currentUser = Map.of(loggedInUser),
+       transports = List.of(transports),
+       idFactory = idFactory ?? _randomId,
+       clock = clock ?? DateTime.now,
+       _otelEnabled = otelEnabled;
 
   final String appName;
   final String name;
@@ -379,10 +410,7 @@ class LogEvent {
       message: values.map(_messagePart).join(' '),
       values: normalizedValues,
       fields: Map.unmodifiable(mergedFields),
-      loggedInUser: Map.unmodifiable({
-        ...logger.currentUser,
-        ...loggedInUser,
-      }),
+      loggedInUser: Map.unmodifiable({...logger.currentUser, ...loggedInUser}),
       users: List.unmodifiable(
         users.map((value) => Map<String, Object?>.unmodifiable(value)),
       ),
@@ -416,8 +444,8 @@ class SupabaseTransport implements LogTransport {
     this.flushInterval = const Duration(seconds: 1),
     this.maxQueueSize = 2000,
     this.onDrop,
-  })  : assert(batchSize > 0),
-        assert(maxQueueSize >= batchSize);
+  }) : assert(batchSize > 0),
+       assert(maxQueueSize >= batchSize);
 
   final SupabaseBatchSender sendBatch;
   final int batchSize;
@@ -462,20 +490,23 @@ class SupabaseTransport implements LogTransport {
     if (_queue.isEmpty) return Future.value();
     final batch = _queue.take(batchSize).toList(growable: false);
     _queue.removeRange(0, batch.length);
-    final task = Future.sync(
-      () => sendBatch(
-        batch.map((record) => record.toJson()).toList(growable: false),
-      ),
-    ).catchError((Object error) {
-      final available = maxQueueSize - _queue.length;
-      _queue.insertAll(0, batch.take(available));
-      throw error;
-    }).whenComplete(() {
-      _flushing = null;
-      if (_queue.isNotEmpty && !_closed) {
-        unawaited(flush().catchError((_) {}));
-      }
-    });
+    final task =
+        Future.sync(
+              () => sendBatch(
+                batch.map((record) => record.toJson()).toList(growable: false),
+              ),
+            )
+            .catchError((Object error) {
+              final available = maxQueueSize - _queue.length;
+              _queue.insertAll(0, batch.take(available));
+              throw error;
+            })
+            .whenComplete(() {
+              _flushing = null;
+              if (_queue.isNotEmpty && !_closed) {
+                unawaited(flush().catchError((_) {}));
+              }
+            });
     _flushing = task;
     return task;
   }
@@ -509,20 +540,22 @@ class OpenTelemetryTransport implements OpenTelemetryLogTransport {
       for (final entry in record.fields.entries)
         'next_logger.field.${entry.key}': entry.value,
     };
-    return emit(Map.unmodifiable(<String, Object?>{
-      'body': record.message,
-      'severityText': record.level.wireName,
-      'severityNumber': const <LogLevel, int>{
-        LogLevel.trace: 1,
-        LogLevel.debug: 5,
-        LogLevel.info: 9,
-        LogLevel.warn: 13,
-        LogLevel.error: 17,
-        LogLevel.fatal: 21,
-      }[record.level],
-      'timestamp': record.timestamp,
-      'attributes': Map.unmodifiable(attributes),
-    }));
+    return emit(
+      Map.unmodifiable(<String, Object?>{
+        'body': record.message,
+        'severityText': record.level.wireName,
+        'severityNumber': const <LogLevel, int>{
+          LogLevel.trace: 1,
+          LogLevel.debug: 5,
+          LogLevel.info: 9,
+          LogLevel.warn: 13,
+          LogLevel.error: 17,
+          LogLevel.fatal: 21,
+        }[record.level],
+        'timestamp': record.timestamp,
+        'attributes': Map.unmodifiable(attributes),
+      }),
+    );
   }
 
   @override
@@ -585,23 +618,17 @@ Future<T> withOtelSpan<T>(
   try {
     context = span.context.copyWith();
   } catch (error, stackTrace) {
-    await _logOtelFailure(
-      logger,
-      name,
-      'read span context',
-      error,
-      stackTrace,
-    );
+    await _logOtelFailure(logger, name, 'read span context', error, stackTrace);
     context = const LogContext();
   }
 
   final stopwatch = Stopwatch()..start();
   return runWithLogContext(context, () async {
     await _sendSafely(
-      logger.debug('span started:', [name]).addFields({
-        'otel.span_name': name,
-        'otel.span_phase': 'start'
-      }).addTags(['otel-span']),
+      logger
+          .debug('span started:', [name])
+          .addFields({'otel.span_name': name, 'otel.span_phase': 'start'})
+          .addTags(['otel-span']),
     );
     try {
       final result = await callback(span);
@@ -614,11 +641,14 @@ Future<T> withOtelSpan<T>(
         );
       }
       await _sendSafely(
-        logger.debug('span completed:', [name]).addFields({
-          'otel.span_name': name,
-          'otel.span_phase': 'end',
-          'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
-        }).addTags(['otel-span']),
+        logger
+            .debug('span completed:', [name])
+            .addFields({
+              'otel.span_name': name,
+              'otel.span_phase': 'end',
+              'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
+            })
+            .addTags(['otel-span']),
       );
       return result;
     } catch (error, stackTrace) {
@@ -637,11 +667,14 @@ Future<T> withOtelSpan<T>(
         );
       }
       await _sendSafely(
-        logger.error('span failed:', [name, error]).addFields({
-          'otel.span_name': name,
-          'otel.span_phase': 'error',
-          'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
-        }).addTags(['otel-span']),
+        logger
+            .error('span failed:', [name, error])
+            .addFields({
+              'otel.span_name': name,
+              'otel.span_phase': 'error',
+              'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
+            })
+            .addTags(['otel-span']),
       );
       Error.throwWithStackTrace(error, stackTrace);
     } finally {
@@ -690,14 +723,16 @@ Future<void> _logOtelFailure(
   String operation,
   Object error,
   StackTrace stackTrace,
-) =>
-    _sendSafely(
-      logger.warn('OpenTelemetry $operation failed:', [error]).addFields({
+) => _sendSafely(
+  logger
+      .warn('OpenTelemetry $operation failed:', [error])
+      .addFields({
         'otel.bridge_operation': operation,
         'otel.span_name': spanName,
-      }).addTags(['otel-span', 'otel-bridge-error']).addMeta(
-          stackTrace.toString()),
-    );
+      })
+      .addTags(['otel-span', 'otel-bridge-error'])
+      .addMeta(stackTrace.toString()),
+);
 
 Future<void> _sendSafely(LogEvent event) async {
   try {
@@ -720,10 +755,7 @@ Object? _normalize(Object? value) {
     return value;
   }
   if (value is Error || value is Exception) {
-    return {
-      'name': value.runtimeType.toString(),
-      'message': value.toString(),
-    };
+    return {'name': value.runtimeType.toString(), 'message': value.toString()};
   }
   if (value is Map) {
     return value.map(

@@ -116,6 +116,14 @@
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
+    "./shutdown": {
+      "types": "./dist/shutdown.d.ts",
+      "default": "./dist/shutdown.js"
+    },
+    "./shutdown/node": {
+      "types": "./dist/node-shutdown.d.ts",
+      "default": "./dist/node-shutdown.js"
+    },
     "./browser-stream": {
       "types": "./dist/browser-stream.d.ts",
       "default": "./dist/browser-stream.js"
@@ -163,6 +171,7 @@
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
     "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
+    "audit:shutdown": "node scripts/audit-server-shutdown.mjs",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
     "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack ./sdk/nodejs --dry-run --json",
     "prepack": "npm test"

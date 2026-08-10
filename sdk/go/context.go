@@ -19,7 +19,13 @@ type TraceContext struct {
 	Baggage      map[string]string
 	RoutineID    string
 	Tags         []string
+	Context      []any
+	Meta         []any
 }
+
+// LogContext is the canonical public name. TraceContext remains as a
+// compatibility alias for callers that adopted the earlier OTEL-focused API.
+type LogContext = TraceContext
 
 type logContextKey struct{}
 
@@ -52,6 +58,8 @@ func cloneTraceContext(value TraceContext) TraceContext {
 	value.TraceIDs = append([]string(nil), value.TraceIDs...)
 	value.Baggage = cloneStringMap(value.Baggage)
 	value.Tags = append([]string(nil), value.Tags...)
+	value.Context = append([]any(nil), value.Context...)
+	value.Meta = append([]any(nil), value.Meta...)
 	return value
 }
 
@@ -124,6 +132,8 @@ func MergeLogContext(outer, inner TraceContext) TraceContext {
 		result.RoutineID = inner.RoutineID
 	}
 	result.Tags = appendUniqueStrings(result.Tags, inner.Tags...)
+	result.Context = append(result.Context, inner.Context...)
+	result.Meta = append(result.Meta, inner.Meta...)
 	return result
 }
 
@@ -137,6 +147,19 @@ func WithLogContext(ctx context.Context, value TraceContext) context.Context {
 		value = MergeLogContext(outer, value)
 	}
 	return context.WithValue(ctx, logContextKey{}, cloneTraceContext(value))
+}
+
+func BackgroundLogContext(value LogContext) context.Context {
+	return WithLogContext(context.Background(), value)
+}
+
+func CaptureLogContext(ctx context.Context) LogContext {
+	value, _ := LogContextFrom(ctx)
+	return value
+}
+
+func WithCapturedLogContext(parent context.Context, captured LogContext) context.Context {
+	return WithLogContext(parent, captured)
 }
 
 func LogContextFrom(ctx context.Context) (TraceContext, bool) {
@@ -196,5 +219,18 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		event.AddRoutineID(value.RoutineID)
 	}
 	event.AddTags(append([]string{"otel"}, value.Tags...)...)
+	for _, entry := range value.Context {
+		event.AddContext(entry)
+	}
+	for _, entry := range value.Meta {
+		event.AddMeta(entry)
+	}
 	return event
+}
+
+func ApplyLogContext(ctx context.Context, event *Event) *Event {
+	if event == nil {
+		return nil
+	}
+	return event.ApplyContext(ctx)
 }
