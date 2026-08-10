@@ -1,0 +1,62 @@
+name: One-shot runtime matrix Rust SDK path fix
+
+on:
+  push:
+    branches: [feat/rust-workspace-consumer-20260810]
+    paths:
+      - .github/workflows/one-shot-runtime-matrix-path-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.ref == 'refs/heads/feat/rust-workspace-consumer-20260810'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: feat/rust-workspace-consumer-20260810
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+          cache: npm
+      - name: Replace exactly one retired Rust SDK path
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          old = 'sdk/rust-otel/src/lib.rs'
+          new = 'sdk/rust-context/src/lib.rs'
+          matches = []
+          for path in sorted(Path('tests').glob('*.test.mjs')):
+              text = path.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count:
+                  matches.append((path, count))
+          total = sum(count for _, count in matches)
+          if total != 1:
+              raise SystemExit(f'expected exactly one {old!r} reference, found {total}: {matches}')
+          path, _ = matches[0]
+          text = path.read_text(encoding='utf-8')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          print(f'updated {path}: {old} -> {new}')
+          PY
+          git diff --check
+          git diff -- tests
+      - name: Run the complete Node contract suite
+        run: |
+          set -euo pipefail
+          npm ci
+          npm test
+      - name: Commit the reviewed test correction
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests
+          git commit -m 'Follow the current Rust context SDK in runtime tests'
+          git push origin HEAD:feat/rust-workspace-consumer-20260810
