@@ -57,6 +57,7 @@ jobs:
         env:
           SOURCE_REPOSITORY: ${{ github.repository }}
           SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
         run: |
           set -euo pipefail
           test "${#SOURCE_SHA}" = 40
@@ -92,4 +93,4 @@ jobs:
               }
           }
           EOF
-          cargo test --manifest-path "$RUNNER_TEMP/consumer/Cargo.toml" --locked=false
+          cargo test --manifest-path "$RUNNER_TEMP/consumer/Cargo.toml"
