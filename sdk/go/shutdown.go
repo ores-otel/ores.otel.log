@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -30,16 +31,38 @@ const (
 	ShutdownDraining ShutdownPhase = "draining"
 	ShutdownForced   ShutdownPhase = "forced"
 	ShutdownClosed   ShutdownPhase = "closed"
+	// ShutdownForcing and ShutdownStopped retain the earlier HTTP lifecycle
+	// vocabulary while the canonical coordinator keeps forced/closed.
+	ShutdownForcing ShutdownPhase = "forcing"
+	ShutdownStopped ShutdownPhase = "stopped"
+)
+
+type ShutdownTrigger = ShutdownCause
+
+const (
+	TriggerSIGINT       ShutdownTrigger = ShutdownSIGINT
+	TriggerSIGTERM      ShutdownTrigger = ShutdownSIGTERM
+	TriggerStdinEOF     ShutdownTrigger = ShutdownStdinEOF
+	TriggerTimeout      ShutdownTrigger = ShutdownTimeout
+	TriggerProgrammatic ShutdownTrigger = ShutdownProgrammatic
+	TriggerContext      ShutdownTrigger = "context-canceled"
+	TriggerServerError  ShutdownTrigger = "server-error"
 )
 
 type ShutdownEvent struct {
-	Phase       ShutdownPhase
-	Cause       ShutdownCause
-	Interactive bool
-	SignalCount int
-	Message     string
-	Err         error
+	Phase         ShutdownPhase
+	PreviousPhase ShutdownPhase
+	Cause         ShutdownCause
+	Trigger       ShutdownTrigger
+	Interactive   bool
+	SignalCount   int
+	Attempt       int
+	Elapsed       time.Duration
+	Message       string
+	Err           error
 }
+
+type ShutdownObserver func(ShutdownEvent)
 
 type ShutdownResult struct {
 	Phase    ShutdownPhase
@@ -54,6 +77,12 @@ type ShutdownResult struct {
 type ShutdownServer interface {
 	Shutdown(context.Context) error
 	Close() error
+}
+
+// HTTPServerLifecycle is the serve-owning form of ShutdownServer.
+type HTTPServerLifecycle interface {
+	ShutdownServer
+	Serve(net.Listener) error
 }
 
 type ShutdownOptions struct {
@@ -77,6 +106,18 @@ type ShutdownOptions struct {
 	Force          func(ShutdownCause) error
 	Log            func(ShutdownEvent)
 	Clock          func() time.Time
+}
+
+// HTTPShutdownOptions preserves the serve-owning API while delegating drain
+// and force semantics to the same bounded two-phase contract.
+type HTTPShutdownOptions struct {
+	GracePeriod   time.Duration
+	Interactive   *bool
+	Stdin         io.Reader
+	SignalChannel <-chan os.Signal
+	Observer      ShutdownObserver
+	Flush         func(context.Context) error
+	ForceClose    func(context.Context) error
 }
 
 func boolPointer(value bool) *bool { return &value }
@@ -484,3 +525,207 @@ func RunGracefulShutdown(
 
 // NewInteractiveOverride is a small convenience for configuration builders.
 func NewInteractiveOverride(value bool) *bool { return boolPointer(value) }
+
+func shutdownMessage(phase ShutdownPhase, trigger ShutdownTrigger) string {
+	switch phase {
+	case ShutdownDraining:
+		return "graceful shutdown started; no new work will be accepted"
+	case ShutdownForcing:
+		return "forced shutdown started; remaining work will be terminated"
+	case ShutdownStopped:
+		return "shutdown complete"
+	default:
+		return fmt.Sprintf("shutdown transition (%s)", trigger)
+	}
+}
+
+func notifyShutdown(observer ShutdownObserver, event ShutdownEvent) {
+	if observer == nil {
+		return
+	}
+	defer func() { _ = recover() }()
+	observer(event)
+}
+
+// LoggerShutdownObserver emits structured lifecycle records without allowing a
+// logger or transport failure to interfere with process termination.
+func LoggerShutdownObserver(logger *Logger) ShutdownObserver {
+	logEvent := LoggerShutdownLog(logger)
+	return func(event ShutdownEvent) {
+		if event.Cause == "" {
+			event.Cause = event.Trigger
+		}
+		logEvent(event)
+	}
+}
+
+// ServeHTTPWithShutdown owns server.Serve and implements the same first-event
+// drain, second-event force, bounded deadline, and exactly-once flush contract
+// as RunGracefulShutdown.
+func ServeHTTPWithShutdown(
+	parent context.Context,
+	server HTTPServerLifecycle,
+	listener net.Listener,
+	options HTTPShutdownOptions,
+) error {
+	if server == nil {
+		return errors.New("nextloggers: HTTP server is required")
+	}
+	if listener == nil {
+		return errors.New("nextloggers: listener is required")
+	}
+	if parent == nil {
+		parent = context.Background()
+	}
+	gracePeriod := options.GracePeriod
+	if gracePeriod <= 0 {
+		gracePeriod = 30 * time.Second
+	}
+	stdin := options.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	interactive := stdinIsTerminal(stdin)
+	if options.Interactive != nil {
+		interactive = *options.Interactive
+	}
+
+	startedAt := time.Now()
+	phase := ShutdownRunning
+	attempt := 0
+	emit := func(next ShutdownPhase, trigger ShutdownTrigger, err error) {
+		previous := phase
+		phase = next
+		notifyShutdown(options.Observer, ShutdownEvent{
+			Phase:         next,
+			PreviousPhase: previous,
+			Cause:         trigger,
+			Trigger:       trigger,
+			Interactive:   interactive,
+			SignalCount:   attempt,
+			Attempt:       attempt,
+			Elapsed:       time.Since(startedAt),
+			Message:       shutdownMessage(next, trigger),
+			Err:           err,
+		})
+	}
+
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+
+	signals := options.SignalChannel
+	var ownedSignals chan os.Signal
+	if signals == nil {
+		ownedSignals = make(chan os.Signal, 2)
+		signal.Notify(ownedSignals, defaultShutdownSignals()...)
+		defer signal.Stop(ownedSignals)
+		signals = ownedSignals
+	}
+
+	var stdinEOF <-chan struct{}
+	if interactive && stdin != nil {
+		stdinEOF = watchEOF(stdin)
+	}
+
+	firstTrigger := TriggerProgrammatic
+	select {
+	case <-parent.Done():
+		firstTrigger = TriggerContext
+	case value, ok := <-signals:
+		if ok {
+			firstTrigger = signalCause(value)
+		} else {
+			firstTrigger = TriggerContext
+			signals = nil
+		}
+	case <-stdinEOF:
+		firstTrigger = TriggerStdinEOF
+		stdinEOF = nil
+	case err := <-serveDone:
+		if ignorableServerCloseError(err) {
+			return nil
+		}
+		emit(ShutdownStopped, TriggerServerError, err)
+		if options.Flush != nil {
+			return errors.Join(err, options.Flush(context.Background()))
+		}
+		return err
+	}
+
+	attempt++
+	emit(ShutdownDraining, firstTrigger, nil)
+	drainCtx, cancelDrain := context.WithTimeout(context.Background(), gracePeriod)
+	defer cancelDrain()
+	drainDone := make(chan error, 1)
+	go func() { drainDone <- callShutdownSafely(server, drainCtx) }()
+
+	var flushOnce sync.Once
+	var flushErr error
+	flush := func(ctx context.Context) error {
+		flushOnce.Do(func() {
+			if options.Flush != nil {
+				flushErr = options.Flush(ctx)
+			}
+		})
+		return flushErr
+	}
+
+	force := func(trigger ShutdownTrigger, cause error) error {
+		attempt++
+		emit(ShutdownForcing, trigger, cause)
+		var failures []error
+		if cause != nil && !errors.Is(cause, context.DeadlineExceeded) {
+			failures = append(failures, cause)
+		}
+		if err := callCloseSafely(server); !ignorableServerCloseError(err) {
+			failures = append(failures, err)
+		}
+		if options.ForceClose != nil {
+			if err := options.ForceClose(context.Background()); err != nil {
+				failures = append(failures, err)
+			}
+		}
+		if err := flush(context.Background()); err != nil {
+			failures = append(failures, err)
+		}
+		joined := errors.Join(failures...)
+		emit(ShutdownStopped, trigger, joined)
+		return joined
+	}
+
+	for {
+		select {
+		case err := <-drainDone:
+			if !ignorableServerCloseError(err) {
+				return force(TriggerTimeout, err)
+			}
+			var failures []error
+			if err := flush(context.Background()); err != nil {
+				failures = append(failures, err)
+			}
+			joined := errors.Join(failures...)
+			emit(ShutdownStopped, firstTrigger, joined)
+			return joined
+		case value, ok := <-signals:
+			if !ok {
+				signals = nil
+				return force(TriggerContext, nil)
+			}
+			return force(signalCause(value), nil)
+		case <-stdinEOF:
+			stdinEOF = nil
+			return force(TriggerStdinEOF, nil)
+		case <-drainCtx.Done():
+			return force(TriggerTimeout, drainCtx.Err())
+		case <-parent.Done():
+			return force(TriggerContext, parent.Err())
+		case err := <-serveDone:
+			if !ignorableServerCloseError(err) {
+				return force(TriggerServerError, err)
+			}
+			// Shutdown closes listeners before active requests complete. Keep
+			// waiting for Shutdown rather than reporting an early clean exit.
+			serveDone = nil
+		}
+	}
+}

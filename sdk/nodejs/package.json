@@ -90,6 +90,14 @@
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
+    "./shutdown": {
+      "types": "./dist/shutdown.d.ts",
+      "default": "./dist/shutdown.js"
+    },
+    "./shutdown/node": {
+      "types": "./dist/node-shutdown.d.ts",
+      "default": "./dist/node-shutdown.js"
+    },
     "./browser-stream": {
       "types": "./dist/browser-stream.d.ts",
       "default": "./dist/browser-stream.js"

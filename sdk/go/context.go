@@ -183,6 +183,22 @@ func LogContextFrom(ctx context.Context) (LogContext, bool) {
 	return cloneLogContext(value), true
 }
 
+// BackgroundLogContext installs a defensive snapshot on a fresh background context.
+func BackgroundLogContext(value LogContext) context.Context {
+	return WithLogContext(context.Background(), value)
+}
+
+// CaptureLogContext snapshots context for a queue or explicitly spawned goroutine.
+func CaptureLogContext(ctx context.Context) LogContext {
+	value, _ := LogContextFrom(ctx)
+	return value
+}
+
+// WithCapturedLogContext re-enters a previously captured immutable snapshot.
+func WithCapturedLogContext(parent context.Context, captured LogContext) context.Context {
+	return WithLogContext(parent, captured)
+}
+
 // UpdateLogContext replaces the current immutable snapshot with the value
 // returned by update. The callback receives a defensive copy.
 func UpdateLogContext(ctx context.Context, update func(LogContext) LogContext) context.Context {
@@ -309,4 +325,13 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		event.AddMeta(item)
 	}
 	return event
+}
+
+// ApplyLogContext is the function-form adapter for callers that do not use the
+// Event method directly.
+func ApplyLogContext(ctx context.Context, event *Event) *Event {
+	if event == nil {
+		return nil
+	}
+	return event.ApplyContext(ctx)
 }

@@ -12,7 +12,7 @@ extension LogLevelWire on LogLevel {
   String get wireName => name.toUpperCase();
 }
 
-class LogContext {
+final class LogContext {
   const LogContext({
     this.loggedInUser = const {},
     this.users = const [],
@@ -132,6 +132,20 @@ R runWithLogContext<R>(LogContext context, R Function() callback) {
 
 R withLogContext<R>(LogContext context, R Function() callback) =>
     runWithLogContext(context, callback);
+
+/// Captures a defensive snapshot for queue, isolate, or callback handoff.
+LogContext? captureLogContext() => currentLogContext();
+
+R withCapturedLogContext<R>(
+  LogContext? captured,
+  R Function() callback,
+) =>
+    captured == null ? callback() : withLogContext(captured, callback);
+
+R Function() bindLogContext<R>(R Function() callback) {
+  final captured = captureLogContext();
+  return () => withCapturedLogContext(captured, callback);
+}
 
 bool updateLogContext(LogContext patch) {
   final value = Zone.current[_contextKey];

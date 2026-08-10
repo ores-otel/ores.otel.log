@@ -6,6 +6,7 @@ mod logger_core;
 pub use logger_core::*;
 
 pub mod context;
+pub mod shutdown;
 pub mod span;
 
 pub use context::{

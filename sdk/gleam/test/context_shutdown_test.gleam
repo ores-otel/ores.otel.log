@@ -1,8 +1,11 @@
+import gleam/erlang/process
 import gleam/json
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import oresoftware_next_loggers as logging
+import oresoftware_next_loggers/context as branch_context
+import oresoftware_next_loggers/shutdown as branch_shutdown
 import oresoftware_next_loggers_context as context
 import oresoftware_next_loggers_shutdown as shutdown
 
@@ -101,4 +104,48 @@ pub fn shutdown_transition_contract_test() {
   shutdown.phase(state) |> should.equal(shutdown.Forced)
   let #(_, ignored) = shutdown.trigger(state, shutdown.Sigterm)
   ignored |> should.equal(shutdown.Ignore)
+}
+
+pub fn process_context_is_scoped_and_applied_test() {
+  let value =
+    branch_context.LogContext(
+      ..branch_context.empty(),
+      fields: [#("request.id", json.string("r1"))],
+      logged_in_user: Some([#("id", json.string("u1"))]),
+      trace_id: Some("trace-1"),
+    )
+  let options =
+    logging.options("context-test", "gleam", fn() { "id-1" }, fn() {
+      "2026-01-02T03:04:05.000Z"
+    })
+  let logger = logging.new(options, logging.noop_transport())
+  let record =
+    branch_context.with_log_context(value, fn() {
+      let assert Some(captured) = branch_context.capture()
+      captured.trace_id |> should.equal(Some("trace-1"))
+      branch_context.info(logger, "hello", [json.string("hello")])
+      |> logging.record
+    })
+  branch_context.current() |> should.equal(None)
+  record.trace_id |> should.equal(Some("trace-1"))
+  record.logged_in_user |> should.equal(Some([#("id", json.string("u1"))]))
+}
+
+pub fn shutdown_is_drain_then_force_test() {
+  let subject = process.new_subject()
+  let coordinator =
+    branch_shutdown.new(fn(event) { process.send(subject, event) })
+  branch_shutdown.request(coordinator, branch_shutdown.Sigint, True)
+  |> should.equal(branch_shutdown.Drain)
+  branch_shutdown.phase(coordinator) |> should.equal(branch_shutdown.Draining)
+  branch_shutdown.request(coordinator, branch_shutdown.StdinEof, True)
+  |> should.equal(branch_shutdown.Force)
+  branch_shutdown.phase(coordinator) |> should.equal(branch_shutdown.Forcing)
+  branch_shutdown.mark_stopped(coordinator, branch_shutdown.StdinEof, True)
+  branch_shutdown.phase(coordinator) |> should.equal(branch_shutdown.Stopped)
+
+  let assert Ok(first) = process.receive(subject, within: 1000)
+  first.phase |> should.equal(branch_shutdown.Draining)
+  let assert Ok(second) = process.receive(subject, within: 1000)
+  second.phase |> should.equal(branch_shutdown.Forcing)
 }
