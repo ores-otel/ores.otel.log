@@ -1,0 +1,11 @@
+[workspace]
+members = [
+  "sdk/rust",
+  "sdk/rust-otel",
+  "sdk/wasm",
+]
+resolver = "2"
+
+# The root workspace is a consumer contract: Cargo can now discover the
+# `oresoftware-next-loggers` package from a repository-level git dependency.
+# Individual SDK manifests remain the native publication authorities.
