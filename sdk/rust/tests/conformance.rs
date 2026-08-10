@@ -75,7 +75,7 @@ trait AuditEventExt {
 
 impl AuditEventExt for Event {
     fn with_actor(self, actor: &str) -> Self {
-        self.add_fields(object(json!({"actor": actor})))
+        self.add_fields(object(json!({ "actor": actor })))
     }
 }
 
