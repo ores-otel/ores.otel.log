@@ -14,49 +14,134 @@ extension LogLevelWire on LogLevel {
 
 class LogContext {
   const LogContext({
+    this.loggedInUser = const {},
+    this.users = const [],
     this.traceId = '',
+    this.traceIds = const [],
     this.spanId = '',
-    this.traceFlags = 0,
+    this.traceFlags,
     this.traceState = '',
     this.baggage = const {},
+    this.routineId = '',
     this.fields = const {},
     this.tags = const [],
+    this.context = const [],
+    this.meta = const [],
   });
 
+  final JsonMap loggedInUser;
+  final List<JsonMap> users;
   final String traceId;
+  final List<String> traceIds;
   final String spanId;
-  final int traceFlags;
+  final int? traceFlags;
   final String traceState;
   final Map<String, String> baggage;
+  final String routineId;
   final JsonMap fields;
   final List<String> tags;
+  final List<Object?> context;
+  final List<Object?> meta;
 
   LogContext copyWith({
+    JsonMap? loggedInUser,
+    List<JsonMap>? users,
     String? traceId,
+    List<String>? traceIds,
     String? spanId,
     int? traceFlags,
     String? traceState,
     Map<String, String>? baggage,
+    String? routineId,
     JsonMap? fields,
     List<String>? tags,
+    List<Object?>? context,
+    List<Object?>? meta,
   }) =>
       LogContext(
+        loggedInUser: Map.unmodifiable(loggedInUser ?? this.loggedInUser),
+        users: List.unmodifiable(
+          (users ?? this.users).map(
+            (value) => Map<String, Object?>.unmodifiable(value),
+          ),
+        ),
         traceId: traceId ?? this.traceId,
+        traceIds: List.unmodifiable(traceIds ?? this.traceIds),
         spanId: spanId ?? this.spanId,
         traceFlags: traceFlags ?? this.traceFlags,
         traceState: traceState ?? this.traceState,
         baggage: Map.unmodifiable(baggage ?? this.baggage),
+        routineId: routineId ?? this.routineId,
         fields: Map.unmodifiable(fields ?? this.fields),
         tags: List.unmodifiable(tags ?? this.tags),
+        context: List.unmodifiable(context ?? this.context),
+        meta: List.unmodifiable(meta ?? this.meta),
       );
+
+  LogContext merge(LogContext patch) {
+    final mergedTraceIds = <String>{
+      if (traceId.isNotEmpty) traceId,
+      ...traceIds.where((value) => value.isNotEmpty),
+      if (patch.traceId.isNotEmpty) patch.traceId,
+      ...patch.traceIds.where((value) => value.isNotEmpty),
+    };
+    final mergedTags = <String>{
+      ...tags.where((value) => value.isNotEmpty),
+      ...patch.tags.where((value) => value.isNotEmpty),
+    };
+    return LogContext(
+      loggedInUser: Map.unmodifiable({...loggedInUser, ...patch.loggedInUser}),
+      users: List.unmodifiable([
+        ...users.map((value) => Map<String, Object?>.unmodifiable(value)),
+        ...patch.users.map((value) => Map<String, Object?>.unmodifiable(value)),
+      ]),
+      traceId: patch.traceId.isNotEmpty ? patch.traceId : traceId,
+      traceIds: List.unmodifiable(mergedTraceIds),
+      spanId: patch.spanId.isNotEmpty ? patch.spanId : spanId,
+      traceFlags: patch.traceFlags ?? traceFlags,
+      traceState: patch.traceState.isNotEmpty ? patch.traceState : traceState,
+      baggage: Map.unmodifiable({...baggage, ...patch.baggage}),
+      routineId: patch.routineId.isNotEmpty ? patch.routineId : routineId,
+      fields: Map.unmodifiable({...fields, ...patch.fields}),
+      tags: List.unmodifiable(mergedTags),
+      context: List.unmodifiable([...context, ...patch.context]),
+      meta: List.unmodifiable([...meta, ...patch.meta]),
+    );
+  }
 }
 
 final Object _contextKey = Object();
 
-LogContext? currentLogContext() => Zone.current[_contextKey] as LogContext?;
+class _LogContextFrame {
+  _LogContextFrame(this.value);
+  LogContext value;
+}
 
-R runWithLogContext<R>(LogContext context, R Function() callback) =>
-    runZoned(callback, zoneValues: {_contextKey: context.copyWith()});
+LogContext? currentLogContext() {
+  final value = Zone.current[_contextKey];
+  if (value is _LogContextFrame) return value.value.copyWith();
+  if (value is LogContext) return value.copyWith();
+  return null;
+}
+
+R runWithLogContext<R>(LogContext context, R Function() callback) {
+  final parent = currentLogContext();
+  final value = parent == null ? context.copyWith() : parent.merge(context);
+  return runZoned(callback, zoneValues: {_contextKey: _LogContextFrame(value)});
+}
+
+R withLogContext<R>(LogContext context, R Function() callback) =>
+    runWithLogContext(context, callback);
+
+bool updateLogContext(LogContext patch) {
+  final value = Zone.current[_contextKey];
+  if (value is! _LogContextFrame) return false;
+  value.value = value.value.merge(patch);
+  return true;
+}
+
+bool setContextLoggedInUser(JsonMap user) =>
+    updateLogContext(LogContext(loggedInUser: Map.of(user)));
 
 abstract interface class LogTransport {
   FutureOr<void> write(LogRecord record);
@@ -69,6 +154,7 @@ abstract interface class OpenTelemetryLogTransport implements LogTransport {}
 class MemoryTransport implements LogTransport {
   final List<LogRecord> records = [];
   bool _closed = false;
+  bool get closed => _closed;
 
   @override
   void write(LogRecord record) {
@@ -349,7 +435,9 @@ class LogEvent {
       if (ambient.spanId.isNotEmpty) {
         mergedFields['otel.span_id'] = ambient.spanId;
       }
-      mergedFields['otel.trace_flags'] = ambient.traceFlags;
+      if (ambient.traceFlags != null) {
+        mergedFields['otel.trace_flags'] = ambient.traceFlags;
+      }
       if (ambient.traceState.isNotEmpty) {
         mergedFields['otel.trace_state'] = ambient.traceState;
       }
@@ -360,6 +448,7 @@ class LogEvent {
         traceId = ambient.traceId;
       }
       if (ambient.traceId.isNotEmpty) traceIds.add(ambient.traceId);
+      traceIds.addAll(ambient.traceIds.where((value) => value.isNotEmpty));
       tags
         ..add('otel')
         ..addAll(ambient.tags);
@@ -381,17 +470,23 @@ class LogEvent {
       fields: Map.unmodifiable(mergedFields),
       loggedInUser: Map.unmodifiable({
         ...logger.currentUser,
+        ...?ambient?.loggedInUser,
         ...loggedInUser,
       }),
       users: List.unmodifiable(
-        users.map((value) => Map<String, Object?>.unmodifiable(value)),
+        [
+          ...?ambient?.users,
+          ...users,
+        ].map((value) => Map<String, Object?>.unmodifiable(value)),
       ),
       traceId: traceId,
       traceIds: List.unmodifiable(traceIds),
-      routineId: routineId,
+      routineId: routineId.isNotEmpty ? routineId : ambient?.routineId ?? '',
       tags: List.unmodifiable(tags),
-      context: List.unmodifiable(context.map(_normalize)),
-      meta: List.unmodifiable(meta.map(_normalize)),
+      context: List.unmodifiable(
+        [...?ambient?.context, ...context].map(_normalize),
+      ),
+      meta: List.unmodifiable([...?ambient?.meta, ...meta].map(_normalize)),
       errors: foundErrors,
     );
     _record = record;
@@ -509,20 +604,22 @@ class OpenTelemetryTransport implements OpenTelemetryLogTransport {
       for (final entry in record.fields.entries)
         'next_logger.field.${entry.key}': entry.value,
     };
-    return emit(Map.unmodifiable(<String, Object?>{
-      'body': record.message,
-      'severityText': record.level.wireName,
-      'severityNumber': const <LogLevel, int>{
-        LogLevel.trace: 1,
-        LogLevel.debug: 5,
-        LogLevel.info: 9,
-        LogLevel.warn: 13,
-        LogLevel.error: 17,
-        LogLevel.fatal: 21,
-      }[record.level],
-      'timestamp': record.timestamp,
-      'attributes': Map.unmodifiable(attributes),
-    }));
+    return emit(
+      Map.unmodifiable(<String, Object?>{
+        'body': record.message,
+        'severityText': record.level.wireName,
+        'severityNumber': const <LogLevel, int>{
+          LogLevel.trace: 1,
+          LogLevel.debug: 5,
+          LogLevel.info: 9,
+          LogLevel.warn: 13,
+          LogLevel.error: 17,
+          LogLevel.fatal: 21,
+        }[record.level],
+        'timestamp': record.timestamp,
+        'attributes': Map.unmodifiable(attributes),
+      }),
+    );
   }
 
   @override
@@ -585,13 +682,7 @@ Future<T> withOtelSpan<T>(
   try {
     context = span.context.copyWith();
   } catch (error, stackTrace) {
-    await _logOtelFailure(
-      logger,
-      name,
-      'read span context',
-      error,
-      stackTrace,
-    );
+    await _logOtelFailure(logger, name, 'read span context', error, stackTrace);
     context = const LogContext();
   }
 
@@ -720,10 +811,7 @@ Object? _normalize(Object? value) {
     return value;
   }
   if (value is Error || value is Exception) {
-    return {
-      'name': value.runtimeType.toString(),
-      'message': value.toString(),
-    };
+    return {'name': value.runtimeType.toString(), 'message': value.toString()};
   }
   if (value is Map) {
     return value.map(

@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oresoftware.github.io/next-loggers.ts/schemas/execution-context.v1.schema.json",
+  "title": "Oresoftware execution context v1",
+  "description": "Canonical wire representation for context used to enrich log, trace, and metric events across Node.js, Go, Rust, Dart, and Gleam. Applications must allowlist logged-in-user fields before serialization.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "loggedInUser": {
+      "oneOf": [
+        { "$ref": "#/$defs/user" },
+        { "type": "null" }
+      ]
+    },
+    "users": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/user" }
+    },
+    "fields": { "$ref": "#/$defs/jsonObject" },
+    "traceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "description": "Lowercase W3C trace identifier; all-zero values are invalid."
+    },
+    "spanId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$",
+      "description": "Lowercase W3C span identifier; all-zero values are invalid."
+    },
+    "traceFlags": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255,
+      "description": "Explicit flags byte. Zero is a valid present value and must not be treated as absent."
+    },
+    "traceState": {
+      "type": "string",
+      "maxLength": 512
+    },
+    "baggage": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "additionalProperties": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "routineId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Application request, routine, job, actor, or task correlation identifier."
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      }
+    },
+    "context": { "$ref": "#/$defs/jsonObject" },
+    "metadata": { "$ref": "#/$defs/jsonObject" }
+  },
+  "$defs": {
+    "user": {
+      "type": "object",
+      "description": "Only application-approved, non-secret identity attributes may be serialized.",
+      "maxProperties": 32,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "jsonObject": {
+      "type": "object",
+      "maxProperties": 128,
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 256
+      },
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    },
+    "jsonArray": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/jsonValue" }
+    },
+    "jsonValue": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string", "maxLength": 8192 },
+        { "$ref": "#/$defs/jsonArray" },
+        { "$ref": "#/$defs/jsonObject" }
+      ]
+    }
+  }
+}
