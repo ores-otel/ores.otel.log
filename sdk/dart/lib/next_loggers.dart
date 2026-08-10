@@ -14,69 +14,139 @@ extension LogLevelWire on LogLevel {
 
 class LogContext {
   const LogContext({
+    this.loggedInUser = const {},
+    this.users = const [],
+    this.fields = const {},
     this.traceId = '',
+    this.traceIds = const [],
     this.spanId = '',
-    this.traceFlags = 0,
+    int? traceFlags,
+    bool? traceFlagsSet,
     this.traceState = '',
     this.baggage = const {},
-    this.fields = const {},
+    this.routineId = '',
     this.tags = const [],
-  });
+    this.context = const [],
+    this.meta = const [],
+  })  : traceFlags = traceFlags ?? 0,
+        traceFlagsSet = traceFlagsSet ?? traceFlags != null;
 
+  final JsonMap loggedInUser;
+  final List<JsonMap> users;
+  final JsonMap fields;
   final String traceId;
+  final List<String> traceIds;
   final String spanId;
   final int traceFlags;
+  final bool traceFlagsSet;
   final String traceState;
   final Map<String, String> baggage;
-  final JsonMap fields;
+  final String routineId;
   final List<String> tags;
+  final List<Object?> context;
+  final List<Object?> meta;
 
   LogContext copyWith({
+    JsonMap? loggedInUser,
+    List<JsonMap>? users,
+    JsonMap? fields,
     String? traceId,
+    List<String>? traceIds,
     String? spanId,
     int? traceFlags,
+    bool? traceFlagsSet,
     String? traceState,
     Map<String, String>? baggage,
-    JsonMap? fields,
+    String? routineId,
     List<String>? tags,
-  }) => LogContext(
-    traceId: traceId ?? this.traceId,
-    spanId: spanId ?? this.spanId,
-    traceFlags: traceFlags ?? this.traceFlags,
-    traceState: traceState ?? this.traceState,
-    baggage: Map.unmodifiable(baggage ?? this.baggage),
-    fields: Map.unmodifiable(fields ?? this.fields),
-    tags: List.unmodifiable(tags ?? this.tags),
-  );
+    List<Object?>? context,
+    List<Object?>? meta,
+  }) =>
+      LogContext(
+        loggedInUser: Map.unmodifiable(loggedInUser ?? this.loggedInUser),
+        users: List.unmodifiable(
+          (users ?? this.users)
+              .map((value) => Map<String, Object?>.unmodifiable(value)),
+        ),
+        fields: Map.unmodifiable(fields ?? this.fields),
+        traceId: traceId ?? this.traceId,
+        traceIds: List.unmodifiable(traceIds ?? this.traceIds),
+        spanId: spanId ?? this.spanId,
+        traceFlags: traceFlags ?? this.traceFlags,
+        traceFlagsSet:
+            traceFlagsSet ?? (traceFlags != null ? true : this.traceFlagsSet),
+        traceState: traceState ?? this.traceState,
+        baggage: Map.unmodifiable(baggage ?? this.baggage),
+        routineId: routineId ?? this.routineId,
+        tags: List.unmodifiable(tags ?? this.tags),
+        context: List.unmodifiable(context ?? this.context),
+        meta: List.unmodifiable(meta ?? this.meta),
+      );
 
   LogContext snapshot() => copyWith();
 
   LogContext merge(LogContext patch) => LogContext(
-    traceId: patch.traceId.isEmpty ? traceId : patch.traceId,
-    spanId: patch.spanId.isEmpty ? spanId : patch.spanId,
-    traceFlags: patch.traceId.isEmpty && patch.spanId.isEmpty
-        ? traceFlags
-        : patch.traceFlags,
-    traceState: patch.traceState.isEmpty ? traceState : patch.traceState,
-    baggage: {...baggage, ...patch.baggage},
-    fields: {...fields, ...patch.fields},
-    tags: <String>{...tags, ...patch.tags}.toList(growable: false),
-  );
+        loggedInUser: {...loggedInUser, ...patch.loggedInUser},
+        users: [
+          ...users.map(Map<String, Object?>.from),
+          ...patch.users.map(Map<String, Object?>.from),
+        ],
+        fields: {...fields, ...patch.fields},
+        traceId: patch.traceId.isEmpty ? traceId : patch.traceId,
+        traceIds: _uniqueStrings([
+          traceId,
+          ...traceIds,
+          patch.traceId,
+          ...patch.traceIds,
+        ]),
+        spanId: patch.spanId.isEmpty ? spanId : patch.spanId,
+        traceFlags: patch.traceFlagsSet ? patch.traceFlags : traceFlags,
+        traceFlagsSet: patch.traceFlagsSet || traceFlagsSet,
+        traceState: patch.traceState.isEmpty ? traceState : patch.traceState,
+        baggage: {...baggage, ...patch.baggage},
+        routineId: patch.routineId.isEmpty ? routineId : patch.routineId,
+        tags: _uniqueStrings([...tags, ...patch.tags]),
+        context: [...context, ...patch.context],
+        meta: [...meta, ...patch.meta],
+      );
 }
 
 final Object _contextKey = Object();
 
-LogContext? currentLogContext() => Zone.current[_contextKey] as LogContext?;
+class _LogContextFrame {
+  _LogContextFrame(this.value);
+  LogContext value;
+}
 
-R runWithLogContext<R>(LogContext context, R Function() callback) =>
-    runZoned(callback, zoneValues: {_contextKey: context.copyWith()});
+List<String> _uniqueStrings(Iterable<String> values) {
+  final result = <String>[];
+  for (final value in values) {
+    if (value.isNotEmpty && !result.contains(value)) result.add(value);
+  }
+  return result;
+}
+
+LogContext? currentLogContext() {
+  final value = Zone.current[_contextKey];
+  if (value is _LogContextFrame) return value.value.snapshot();
+  if (value is LogContext) return value.snapshot();
+  return null;
+}
+
+R runWithLogContext<R>(LogContext context, R Function() callback) {
+  final parent = currentLogContext();
+  final value = parent?.merge(context) ?? context.copyWith();
+  return runZoned(
+    callback,
+    zoneValues: {_contextKey: _LogContextFrame(value)},
+  );
+}
 
 R withLogContext<R>(LogContext context, R Function() callback) =>
     runWithLogContext(context, callback);
 
 R withMergedLogContext<R>(LogContext patch, R Function() callback) {
-  final current = currentLogContext();
-  return runWithLogContext(current?.merge(patch) ?? patch, callback);
+  return runWithLogContext(patch, callback);
 }
 
 LogContext? captureLogContext() => currentLogContext()?.snapshot();
@@ -88,6 +158,17 @@ R Function() bindLogContext<R>(R Function() callback) {
   final captured = captureLogContext();
   return () => withCapturedLogContext(captured, callback);
 }
+
+/// Updates only the active Zone frame and returns false outside a scope.
+bool updateLogContext(LogContext patch) {
+  final frame = Zone.current[_contextKey];
+  if (frame is! _LogContextFrame) return false;
+  frame.value = frame.value.merge(patch);
+  return true;
+}
+
+bool setContextLoggedInUser(JsonMap user) =>
+    updateLogContext(LogContext(loggedInUser: Map.of(user)));
 
 abstract interface class LogTransport {
   FutureOr<void> write(LogRecord record);
@@ -158,27 +239,27 @@ class LogRecord {
   final List<String> stackTrace;
 
   JsonMap toJson() => {
-    'schema': schema,
-    'id': id,
-    'timestamp': timestamp,
-    'level': level.wireName,
-    'runtime': runtime,
-    'appName': appName,
-    if (name.isNotEmpty) 'name': name,
-    'message': message,
-    'values': values,
-    'fields': fields,
-    if (loggedInUser.isNotEmpty) 'loggedInUser': loggedInUser,
-    if (users.isNotEmpty) 'users': users,
-    if (traceId.isNotEmpty) 'traceId': traceId,
-    if (traceIds.isNotEmpty) 'traceIds': traceIds,
-    if (routineId.isNotEmpty) 'routineId': routineId,
-    if (tags.isNotEmpty) 'tags': tags,
-    if (context.isNotEmpty) 'context': context,
-    if (meta.isNotEmpty) 'meta': meta,
-    if (errors.isNotEmpty) 'errors': errors,
-    if (stackTrace.isNotEmpty) 'stackTrace': stackTrace,
-  };
+        'schema': schema,
+        'id': id,
+        'timestamp': timestamp,
+        'level': level.wireName,
+        'runtime': runtime,
+        'appName': appName,
+        if (name.isNotEmpty) 'name': name,
+        'message': message,
+        'values': values,
+        'fields': fields,
+        if (loggedInUser.isNotEmpty) 'loggedInUser': loggedInUser,
+        if (users.isNotEmpty) 'users': users,
+        if (traceId.isNotEmpty) 'traceId': traceId,
+        if (traceIds.isNotEmpty) 'traceIds': traceIds,
+        if (routineId.isNotEmpty) 'routineId': routineId,
+        if (tags.isNotEmpty) 'tags': tags,
+        if (context.isNotEmpty) 'context': context,
+        if (meta.isNotEmpty) 'meta': meta,
+        if (errors.isNotEmpty) 'errors': errors,
+        if (stackTrace.isNotEmpty) 'stackTrace': stackTrace,
+      };
 
   String toJsonString() => jsonEncode(toJson());
 }
@@ -196,12 +277,12 @@ class Logger {
     List<LogTransport> transports = const [],
     String Function()? idFactory,
     DateTime Function()? clock,
-  }) : fields = Map.of(fields),
-       currentUser = Map.of(loggedInUser),
-       transports = List.of(transports),
-       idFactory = idFactory ?? _randomId,
-       clock = clock ?? DateTime.now,
-       _otelEnabled = otelEnabled;
+  })  : fields = Map.of(fields),
+        currentUser = Map.of(loggedInUser),
+        transports = List.of(transports),
+        idFactory = idFactory ?? _randomId,
+        clock = clock ?? DateTime.now,
+        _otelEnabled = otelEnabled;
 
   final String appName;
   final String name;
@@ -380,7 +461,9 @@ class LogEvent {
       if (ambient.spanId.isNotEmpty) {
         mergedFields['otel.span_id'] = ambient.spanId;
       }
-      mergedFields['otel.trace_flags'] = ambient.traceFlags;
+      if (ambient.traceFlagsSet) {
+        mergedFields['otel.trace_flags'] = ambient.traceFlags;
+      }
       if (ambient.traceState.isNotEmpty) {
         mergedFields['otel.trace_state'] = ambient.traceState;
       }
@@ -391,6 +474,7 @@ class LogEvent {
         traceId = ambient.traceId;
       }
       if (ambient.traceId.isNotEmpty) traceIds.add(ambient.traceId);
+      traceIds.addAll(ambient.traceIds.where((value) => value.isNotEmpty));
       tags
         ..add('otel')
         ..addAll(ambient.tags);
@@ -410,16 +494,23 @@ class LogEvent {
       message: values.map(_messagePart).join(' '),
       values: normalizedValues,
       fields: Map.unmodifiable(mergedFields),
-      loggedInUser: Map.unmodifiable({...logger.currentUser, ...loggedInUser}),
+      loggedInUser: Map.unmodifiable({
+        ...logger.currentUser,
+        ...?ambient?.loggedInUser,
+        ...loggedInUser,
+      }),
       users: List.unmodifiable(
-        users.map((value) => Map<String, Object?>.unmodifiable(value)),
+        [...?ambient?.users, ...users]
+            .map((value) => Map<String, Object?>.unmodifiable(value)),
       ),
       traceId: traceId,
       traceIds: List.unmodifiable(traceIds),
-      routineId: routineId,
+      routineId: routineId.isEmpty ? ambient?.routineId ?? '' : routineId,
       tags: List.unmodifiable(tags),
-      context: List.unmodifiable(context.map(_normalize)),
-      meta: List.unmodifiable(meta.map(_normalize)),
+      context: List.unmodifiable(
+        [...?ambient?.context, ...context].map(_normalize),
+      ),
+      meta: List.unmodifiable([...?ambient?.meta, ...meta].map(_normalize)),
       errors: foundErrors,
     );
     _record = record;
@@ -444,8 +535,8 @@ class SupabaseTransport implements LogTransport {
     this.flushInterval = const Duration(seconds: 1),
     this.maxQueueSize = 2000,
     this.onDrop,
-  }) : assert(batchSize > 0),
-       assert(maxQueueSize >= batchSize);
+  })  : assert(batchSize > 0),
+        assert(maxQueueSize >= batchSize);
 
   final SupabaseBatchSender sendBatch;
   final int batchSize;
@@ -490,23 +581,20 @@ class SupabaseTransport implements LogTransport {
     if (_queue.isEmpty) return Future.value();
     final batch = _queue.take(batchSize).toList(growable: false);
     _queue.removeRange(0, batch.length);
-    final task =
-        Future.sync(
-              () => sendBatch(
-                batch.map((record) => record.toJson()).toList(growable: false),
-              ),
-            )
-            .catchError((Object error) {
-              final available = maxQueueSize - _queue.length;
-              _queue.insertAll(0, batch.take(available));
-              throw error;
-            })
-            .whenComplete(() {
-              _flushing = null;
-              if (_queue.isNotEmpty && !_closed) {
-                unawaited(flush().catchError((_) {}));
-              }
-            });
+    final task = Future.sync(
+      () => sendBatch(
+        batch.map((record) => record.toJson()).toList(growable: false),
+      ),
+    ).catchError((Object error) {
+      final available = maxQueueSize - _queue.length;
+      _queue.insertAll(0, batch.take(available));
+      throw error;
+    }).whenComplete(() {
+      _flushing = null;
+      if (_queue.isNotEmpty && !_closed) {
+        unawaited(flush().catchError((_) {}));
+      }
+    });
     _flushing = task;
     return task;
   }
@@ -625,10 +713,10 @@ Future<T> withOtelSpan<T>(
   final stopwatch = Stopwatch()..start();
   return runWithLogContext(context, () async {
     await _sendSafely(
-      logger
-          .debug('span started:', [name])
-          .addFields({'otel.span_name': name, 'otel.span_phase': 'start'})
-          .addTags(['otel-span']),
+      logger.debug('span started:', [name]).addFields({
+        'otel.span_name': name,
+        'otel.span_phase': 'start'
+      }).addTags(['otel-span']),
     );
     try {
       final result = await callback(span);
@@ -641,14 +729,11 @@ Future<T> withOtelSpan<T>(
         );
       }
       await _sendSafely(
-        logger
-            .debug('span completed:', [name])
-            .addFields({
-              'otel.span_name': name,
-              'otel.span_phase': 'end',
-              'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
-            })
-            .addTags(['otel-span']),
+        logger.debug('span completed:', [name]).addFields({
+          'otel.span_name': name,
+          'otel.span_phase': 'end',
+          'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
+        }).addTags(['otel-span']),
       );
       return result;
     } catch (error, stackTrace) {
@@ -667,14 +752,11 @@ Future<T> withOtelSpan<T>(
         );
       }
       await _sendSafely(
-        logger
-            .error('span failed:', [name, error])
-            .addFields({
-              'otel.span_name': name,
-              'otel.span_phase': 'error',
-              'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
-            })
-            .addTags(['otel-span']),
+        logger.error('span failed:', [name, error]).addFields({
+          'otel.span_name': name,
+          'otel.span_phase': 'error',
+          'otel.duration_ms': stopwatch.elapsedMicroseconds / 1000,
+        }).addTags(['otel-span']),
       );
       Error.throwWithStackTrace(error, stackTrace);
     } finally {
@@ -723,16 +805,14 @@ Future<void> _logOtelFailure(
   String operation,
   Object error,
   StackTrace stackTrace,
-) => _sendSafely(
-  logger
-      .warn('OpenTelemetry $operation failed:', [error])
-      .addFields({
+) =>
+    _sendSafely(
+      logger.warn('OpenTelemetry $operation failed:', [error]).addFields({
         'otel.bridge_operation': operation,
         'otel.span_name': spanName,
-      })
-      .addTags(['otel-span', 'otel-bridge-error'])
-      .addMeta(stackTrace.toString()),
-);
+      }).addTags(['otel-span', 'otel-bridge-error']).addMeta(
+          stackTrace.toString()),
+    );
 
 Future<void> _sendSafely(LogEvent event) async {
   try {

@@ -1,0 +1,111 @@
+{
+  "contractVersion": "1.0.0",
+  "states": ["running", "graceful", "force", "complete"],
+  "scenarios": [
+    {
+      "name": "non-tty first SIGTERM begins the termination sequence",
+      "interactive": false,
+      "steps": [
+        {
+          "input": "signal:SIGTERM",
+          "expectedState": "graceful",
+          "expectedActions": ["stop-admission", "begin-drain", "start-graceful-deadline", "flush-once"]
+        },
+        {
+          "input": "graceful:complete",
+          "expectedState": "complete",
+          "expectedActions": ["finish"]
+        }
+      ],
+      "expectedFlushCalls": 1
+    },
+    {
+      "name": "interactive second SIGINT forces",
+      "interactive": true,
+      "steps": [
+        {
+          "input": "signal:SIGINT",
+          "expectedState": "graceful",
+          "expectedActions": ["stop-admission", "begin-drain", "start-graceful-deadline", "flush-once", "log-second-request-help"]
+        },
+        {
+          "input": "signal:SIGINT",
+          "expectedState": "force",
+          "expectedActions": ["cancel-graceful-wait", "run-force-hooks", "start-force-deadline"]
+        },
+        {
+          "input": "force:complete",
+          "expectedState": "complete",
+          "expectedActions": ["finish"]
+        }
+      ],
+      "expectedFlushCalls": 1
+    },
+    {
+      "name": "interactive Ctrl-D substitutes for the second request",
+      "interactive": true,
+      "steps": [
+        {
+          "input": "signal:SIGINT",
+          "expectedState": "graceful",
+          "expectedActions": ["stop-admission", "begin-drain", "start-graceful-deadline", "flush-once", "log-second-request-help"]
+        },
+        {
+          "input": "stdin:eof",
+          "expectedState": "force",
+          "expectedActions": ["cancel-graceful-wait", "run-force-hooks", "start-force-deadline"]
+        },
+        {
+          "input": "force:complete",
+          "expectedState": "complete",
+          "expectedActions": ["finish"]
+        }
+      ],
+      "expectedFlushCalls": 1
+    },
+    {
+      "name": "graceful deadline escalates without another signal",
+      "interactive": false,
+      "steps": [
+        {
+          "input": "signal:SIGINT",
+          "expectedState": "graceful",
+          "expectedActions": ["stop-admission", "begin-drain", "start-graceful-deadline", "flush-once"]
+        },
+        {
+          "input": "graceful:timeout",
+          "expectedState": "force",
+          "expectedActions": ["run-force-hooks", "start-force-deadline", "log-graceful-timeout"]
+        },
+        {
+          "input": "force:complete",
+          "expectedState": "complete",
+          "expectedActions": ["finish"]
+        }
+      ],
+      "expectedFlushCalls": 1
+    },
+    {
+      "name": "second request during telemetry flush does not duplicate flush",
+      "interactive": true,
+      "steps": [
+        {
+          "input": "signal:SIGTERM",
+          "expectedState": "graceful",
+          "expectedActions": ["stop-admission", "begin-drain", "start-graceful-deadline", "flush-once", "log-second-request-help"]
+        },
+        {
+          "input": "signal:SIGINT",
+          "expectedState": "force",
+          "expectedActions": ["cancel-graceful-wait", "run-force-hooks", "start-force-deadline"]
+        },
+        {
+          "input": "force:timeout",
+          "expectedState": "complete",
+          "expectedActions": ["log-force-timeout", "finish"]
+        }
+      ],
+      "expectedFlushCalls": 1
+    }
+  ]
+}

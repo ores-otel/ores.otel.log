@@ -1,0 +1,40 @@
+name: Context and shutdown contract
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/context-shutdown-contract.yml'
+      - 'schemas/execution-context.v1.schema.json'
+      - 'schemas/fixtures/**'
+      - 'tests/schema-fixtures.test.mjs'
+      - 'src/execution-context*'
+      - 'src/server-lifecycle.ts'
+      - 'sdk/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Parse contract schemas
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "for (const p of process.argv.slice(1)) JSON.parse(require('node:fs').readFileSync(p, 'utf8'))" \
+            schemas/execution-context.v1.schema.json \
+            schemas/server-lifecycle-audit.schema.json \
+            schemas/fixtures/execution-context.v1.json \
+            schemas/fixtures/shutdown-conformance.v1.json
+
+      - name: Test contract invariants
+        run: node --test tests/schema-fixtures.test.mjs

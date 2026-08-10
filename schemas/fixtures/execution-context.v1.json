@@ -1,0 +1,36 @@
+{
+  "loggedInUser": {
+    "id": "user-123",
+    "tenantId": "tenant-456",
+    "roles": ["operator"]
+  },
+  "users": [
+    {
+      "id": "user-123"
+    }
+  ],
+  "fields": {
+    "http.method": "GET",
+    "http.route": "/v1/widgets/:id",
+    "retry": 0
+  },
+  "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+  "spanId": "00f067aa0ba902b7",
+  "traceFlags": 0,
+  "traceState": "vendor=value",
+  "baggage": {
+    "tenant.id": "tenant-456",
+    "deployment.ring": "test"
+  },
+  "routineId": "request-789",
+  "tags": ["http", "canary"],
+  "context": {
+    "feature": {
+      "name": "polyglot-context",
+      "enabled": true
+    }
+  },
+  "metadata": {
+    "contractVersion": "1.0.0"
+  }
+}

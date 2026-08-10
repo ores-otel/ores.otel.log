@@ -2,45 +2,28 @@ package nextloggers
 
 import (
 	"context"
-	"errors"
-	"net"
-	"net/http"
 	"os"
 	"sync"
 	"testing"
 	"time"
 )
 
-type fakeAddr string
-
-func (a fakeAddr) Network() string { return string(a) }
-func (a fakeAddr) String() string  { return string(a) }
-
-type fakeListener struct{}
-
-func (fakeListener) Accept() (net.Conn, error) { return nil, errors.New("unused") }
-func (fakeListener) Close() error              { return nil }
-func (fakeListener) Addr() net.Addr            { return fakeAddr("fake") }
-
 type fakeHTTPServer struct {
 	mu        sync.Mutex
-	serveDone chan struct{}
 	drainDone chan struct{}
 	shutdowns int
 	closes    int
 }
 
 func newFakeHTTPServer() *fakeHTTPServer {
-	return &fakeHTTPServer{serveDone: make(chan struct{}), drainDone: make(chan struct{})}
+	return &fakeHTTPServer{drainDone: make(chan struct{})}
 }
-func (s *fakeHTTPServer) Serve(net.Listener) error { <-s.serveDone; return http.ErrServerClosed }
 func (s *fakeHTTPServer) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
 	s.shutdowns++
 	s.mu.Unlock()
 	select {
 	case <-s.drainDone:
-		close(s.serveDone)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -50,11 +33,6 @@ func (s *fakeHTTPServer) Close() error {
 	s.mu.Lock()
 	s.closes++
 	s.mu.Unlock()
-	select {
-	case <-s.serveDone:
-	default:
-		close(s.serveDone)
-	}
 	return nil
 }
 
@@ -83,13 +61,13 @@ func TestSecondSignalForces(t *testing.T) {
 	sigs := make(chan os.Signal, 2)
 	phases := make(chan ShutdownPhase, 4)
 	interactive := true
-	result := make(chan error, 1)
+	result := make(chan ShutdownResult, 1)
 	go func() {
-		result <- ServeHTTPWithShutdown(context.Background(), server, fakeListener{}, HTTPShutdownOptions{
-			GracePeriod:   time.Second,
+		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
+			Timeout:       time.Second,
 			Interactive:   &interactive,
 			SignalChannel: sigs,
-			Observer:      func(event ShutdownEvent) { phases <- event.Phase },
+			Log:           func(event ShutdownEvent) { phases <- event.Phase },
 		})
 	}()
 	sigs <- os.Interrupt
@@ -103,9 +81,9 @@ func TestSecondSignalForces(t *testing.T) {
 	}
 	sigs <- os.Interrupt
 	select {
-	case err := <-result:
-		if err != nil {
-			t.Fatalf("force returned error: %v", err)
+	case got := <-result:
+		if got.Phase != ShutdownForced || got.Err != nil {
+			t.Fatalf("force returned unexpected result: %#v", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no forced completion")
@@ -122,10 +100,10 @@ func TestOneSignalCanDrain(t *testing.T) {
 	server := newFakeHTTPServer()
 	sigs := make(chan os.Signal, 1)
 	interactive := false
-	result := make(chan error, 1)
+	result := make(chan ShutdownResult, 1)
 	go func() {
-		result <- ServeHTTPWithShutdown(context.Background(), server, fakeListener{}, HTTPShutdownOptions{
-			GracePeriod:   time.Second,
+		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
+			Timeout:       time.Second,
 			Interactive:   &interactive,
 			SignalChannel: sigs,
 		})
@@ -134,9 +112,9 @@ func TestOneSignalCanDrain(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	close(server.drainDone)
 	select {
-	case err := <-result:
-		if err != nil {
-			t.Fatalf("graceful returned error: %v", err)
+	case got := <-result:
+		if got.Phase != ShutdownClosed || got.Err != nil {
+			t.Fatalf("graceful returned unexpected result: %#v", got)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no graceful completion")

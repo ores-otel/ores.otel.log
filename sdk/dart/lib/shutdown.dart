@@ -1,256 +1,411 @@
 import 'dart:async';
+import 'dart:io';
 
-enum ShutdownPhase { running, draining, forcing, stopped }
+import 'next_loggers.dart';
 
-final class ShutdownTrigger {
-  const ShutdownTrigger(this.name);
-  final String name;
+enum ShutdownCause { sigint, sigterm, stdinEof, timeout, programmatic }
 
-  static const sigint = ShutdownTrigger('SIGINT');
-  static const sigterm = ShutdownTrigger('SIGTERM');
-  static const stdinEof = ShutdownTrigger('stdin-eof');
-  static const timeout = ShutdownTrigger('timeout');
-  static const programmatic = ShutdownTrigger('programmatic');
-  static const serverError = ShutdownTrigger('server-error');
-  static const drainError = ShutdownTrigger('drain-error');
+enum ShutdownPhase { running, draining, forced, closed }
 
-  @override
-  String toString() => name;
-}
+enum ShutdownAction { beginGraceful, force, ignore }
 
-final class ShutdownActionContext {
-  const ShutdownActionContext({
-    required this.trigger,
-    required this.interactive,
-    required this.attempt,
-    required this.elapsed,
-  });
+class ShutdownStateMachine {
+  ShutdownStateMachine({required this.interactive});
 
-  final ShutdownTrigger trigger;
   final bool interactive;
-  final int attempt;
-  final Duration elapsed;
+  ShutdownPhase phase = ShutdownPhase.running;
+  int signalCount = 0;
+
+  ShutdownAction trigger(ShutdownCause cause) {
+    signalCount += 1;
+    switch (phase) {
+      case ShutdownPhase.running:
+        phase = ShutdownPhase.draining;
+        return ShutdownAction.beginGraceful;
+      case ShutdownPhase.draining:
+        phase = ShutdownPhase.forced;
+        return ShutdownAction.force;
+      case ShutdownPhase.forced:
+      case ShutdownPhase.closed:
+        return ShutdownAction.ignore;
+    }
+  }
+
+  ShutdownAction forceNow() {
+    switch (phase) {
+      case ShutdownPhase.running:
+      case ShutdownPhase.draining:
+        phase = ShutdownPhase.forced;
+        return ShutdownAction.force;
+      case ShutdownPhase.forced:
+      case ShutdownPhase.closed:
+        return ShutdownAction.ignore;
+    }
+  }
+
+  bool markClosed() {
+    if (phase != ShutdownPhase.draining) {
+      return false;
+    }
+    phase = ShutdownPhase.closed;
+    return true;
+  }
+
+  ShutdownAction timeout() => forceNow();
 }
 
-final class ShutdownEvent {
+class ShutdownEvent {
   const ShutdownEvent({
     required this.phase,
-    required this.previousPhase,
-    required this.trigger,
+    required this.action,
+    required this.cause,
     required this.interactive,
-    required this.attempt,
-    required this.elapsed,
+    required this.signalCount,
     required this.message,
     this.error,
   });
 
   final ShutdownPhase phase;
-  final ShutdownPhase previousPhase;
-  final ShutdownTrigger trigger;
+  final ShutdownAction action;
+  final ShutdownCause cause;
   final bool interactive;
-  final int attempt;
-  final Duration elapsed;
+  final int signalCount;
   final String message;
   final Object? error;
-
-  Map<String, Object?> toFields() => <String, Object?>{
-    'shutdown.phase': phase.name,
-    'shutdown.previous_phase': previousPhase.name,
-    'shutdown.trigger': trigger.name,
-    'shutdown.interactive': interactive,
-    'shutdown.attempt': attempt,
-    'shutdown.elapsed_ms': elapsed.inMilliseconds,
-    if (error != null) 'shutdown.error': error.toString(),
-  };
 }
 
-final class ShutdownResult {
+class ShutdownResult {
   const ShutdownResult({
-    required this.forced,
-    required this.triggers,
+    required this.phase,
+    required this.cause,
+    required this.startedAt,
+    required this.finishedAt,
     required this.errors,
-    required this.elapsed,
   });
 
-  final bool forced;
-  final List<ShutdownTrigger> triggers;
+  final ShutdownPhase phase;
+  final ShutdownCause cause;
+  final DateTime startedAt;
+  final DateTime finishedAt;
   final List<Object> errors;
-  final Duration elapsed;
 }
 
-typedef ShutdownAction = FutureOr<void> Function(ShutdownActionContext context);
-typedef ShutdownObserver = FutureOr<void> Function(ShutdownEvent event);
+class ProcessShutdownOptions {
+  const ProcessShutdownOptions({
+    required this.graceful,
+    required this.force,
+    this.flush,
+    this.timeout = const Duration(seconds: 15),
+    this.forceTimeout = const Duration(seconds: 5),
+    this.interactive,
+    this.watchStdinEof = true,
+    this.events,
+    this.stdinEofEvents,
+    this.onLog,
+    this.clock,
+  });
 
-final class ShutdownCoordinator {
-  ShutdownCoordinator({
-    required ShutdownAction drain,
-    required ShutdownAction force,
-    ShutdownAction? flush,
-    ShutdownObserver? onEvent,
-    this.gracePeriod = const Duration(seconds: 30),
-  }) : _drain = drain,
-       _force = force,
-       _flush = flush,
-       _onEvent = onEvent {
-    if (gracePeriod.isNegative) {
-      throw ArgumentError.value(
-        gracePeriod,
-        'gracePeriod',
-        'must be non-negative',
-      );
-    }
-  }
+  /// Withdraw readiness, stop accepting new work, and await active work.
+  final FutureOr<void> Function(ShutdownCause cause) graceful;
 
-  final ShutdownAction _drain;
-  final ShutdownAction _force;
-  final ShutdownAction? _flush;
-  final ShutdownObserver? _onEvent;
-  final Duration gracePeriod;
-  final Stopwatch _watch = Stopwatch()..start();
-  final Completer<ShutdownResult> _completion = Completer<ShutdownResult>();
-  final List<ShutdownTrigger> _triggers = <ShutdownTrigger>[];
+  /// Close active sockets/tasks that survived the bounded graceful drain.
+  final FutureOr<void> Function(ShutdownCause cause) force;
+
+  /// Flush logs and telemetry exactly once across graceful/force races.
+  final FutureOr<void> Function(ShutdownCause cause)? flush;
+  final Duration timeout;
+  final Duration forceTimeout;
+  final bool? interactive;
+
+  /// Watching stdin consumes it. Disable when the application already owns it.
+  final bool watchStdinEof;
+
+  /// Injectable event streams for tests and embedding.
+  final Stream<ShutdownCause>? events;
+  final Stream<void>? stdinEofEvents;
+  final void Function(ShutdownEvent event)? onLog;
+  final DateTime Function()? clock;
+}
+
+class ProcessShutdownController {
+  ProcessShutdownController._(this._options, this._interactive)
+      : state = ShutdownStateMachine(interactive: _interactive),
+        _clock = _options.clock ?? DateTime.now;
+
+  final ProcessShutdownOptions _options;
+  final bool _interactive;
+  final DateTime Function() _clock;
+  final ShutdownStateMachine state;
+  final Completer<ShutdownResult> _done = Completer<ShutdownResult>();
   final List<Object> _errors = <Object>[];
-  final List<Future<void>> _observerTasks = <Future<void>>[];
-
-  ShutdownPhase _phase = ShutdownPhase.running;
-  int _attempt = 0;
-  bool _forced = false;
+  final List<StreamSubscription<dynamic>> _subscriptions =
+      <StreamSubscription<dynamic>>[];
   Timer? _timer;
+  DateTime? _startedAt;
+  Future<void>? _flushFuture;
+  bool _forceStarted = false;
+  bool _disposed = false;
 
-  ShutdownPhase get phase => _phase;
-  int get attempt => _attempt;
-  Future<ShutdownResult> get done => _completion.future;
+  Future<ShutdownResult> get done => _done.future;
+  ShutdownPhase get phase => state.phase;
 
-  Future<ShutdownResult> request(
-    ShutdownTrigger trigger, {
-    bool force = false,
-    bool interactive = false,
-  }) {
-    if (_completion.isCompleted) return done;
-    _attempt += 1;
-    _triggers.add(trigger);
-    if (_phase == ShutdownPhase.running && !force) {
-      _beginDrain(trigger, interactive);
-    } else if (_phase == ShutdownPhase.draining || force) {
-      _beginForce(trigger, interactive);
-    }
-    return done;
-  }
-
-  ShutdownActionContext _context(ShutdownTrigger trigger, bool interactive) =>
-      ShutdownActionContext(
-        trigger: trigger,
-        interactive: interactive,
-        attempt: _attempt,
-        elapsed: _watch.elapsed,
-      );
-
-  void _transition(
-    ShutdownPhase next,
-    ShutdownTrigger trigger,
-    bool interactive, [
+  void _log(
+    ShutdownPhase phase,
+    ShutdownAction action,
+    ShutdownCause cause,
+    String message, [
     Object? error,
   ]) {
-    final previous = _phase;
-    _phase = next;
-    final message = switch (next) {
-      ShutdownPhase.draining =>
-        'graceful shutdown started; no new work will be accepted',
-      ShutdownPhase.forcing =>
-        'forced shutdown started; remaining work will be terminated',
-      ShutdownPhase.stopped => 'shutdown complete',
-      ShutdownPhase.running => 'shutdown coordinator running',
-    };
     try {
-      final observed = _onEvent?.call(
+      _options.onLog?.call(
         ShutdownEvent(
-          phase: next,
-          previousPhase: previous,
-          trigger: trigger,
-          interactive: interactive,
-          attempt: _attempt,
-          elapsed: _watch.elapsed,
+          phase: phase,
+          action: action,
+          cause: cause,
+          interactive: _interactive,
+          signalCount: state.signalCount,
           message: message,
           error: error,
         ),
       );
-      if (observed is Future<void>) {
-        _observerTasks.add(observed.catchError((Object _) {}));
-      }
     } catch (_) {
-      // A logger/observer failure must not stop shutdown.
+      // Logging must never block shutdown.
     }
   }
 
-  void _beginDrain(ShutdownTrigger trigger, bool interactive) {
-    if (_phase != ShutdownPhase.running) return;
-    _transition(ShutdownPhase.draining, trigger, interactive);
-    _timer = Timer(
-      gracePeriod,
-      () => request(ShutdownTrigger.timeout, force: true),
-    );
-    Future<void>.sync(() => _drain(_context(trigger, interactive))).then(
-      (_) {
-        if (_phase == ShutdownPhase.draining) {
-          unawaited(_finish(trigger, interactive, forced: false));
-        }
-      },
-      onError: (Object error, StackTrace _) {
-        _errors.add(error);
-        if (_phase == ShutdownPhase.draining) {
-          _transition(
-            ShutdownPhase.draining,
-            ShutdownTrigger.drainError,
-            interactive,
-            error,
-          );
-          _beginForce(ShutdownTrigger.drainError, interactive);
-        }
-      },
-    );
-  }
-
-  void _beginForce(ShutdownTrigger trigger, bool interactive) {
-    if (_phase == ShutdownPhase.forcing || _phase == ShutdownPhase.stopped)
-      return;
-    _forced = true;
-    _timer?.cancel();
-    _transition(ShutdownPhase.forcing, trigger, interactive);
-    Future<void>.sync(() => _force(_context(trigger, interactive))).then(
-      (_) => _finish(trigger, interactive, forced: true),
-      onError: (Object error, StackTrace _) {
-        _errors.add(error);
-        _transition(ShutdownPhase.forcing, trigger, interactive, error);
-        return _finish(trigger, interactive, forced: true);
-      },
-    );
-  }
-
-  Future<void> _finish(
-    ShutdownTrigger trigger,
-    bool interactive, {
-    required bool forced,
-  }) async {
-    if (_completion.isCompleted) return;
-    if (!forced && _phase != ShutdownPhase.draining) return;
-    if (forced && _phase != ShutdownPhase.forcing) return;
-    _timer?.cancel();
-    if (_completion.isCompleted) return;
-    _transition(ShutdownPhase.stopped, trigger, interactive);
-    await Future.wait<void>(List<Future<void>>.from(_observerTasks));
+  Future<bool> _capture(
+    String operation,
+    ShutdownCause cause,
+    FutureOr<void> Function()? callback,
+  ) async {
+    if (callback == null) return true;
     try {
-      await _flush?.call(_context(trigger, interactive));
+      await callback();
+      return true;
     } catch (error) {
       _errors.add(error);
+      _log(
+        state.phase,
+        ShutdownAction.ignore,
+        cause,
+        '$operation failed; shutdown continues',
+        error,
+      );
+      return false;
     }
-    if (_completion.isCompleted) return;
-    _completion.complete(
+  }
+
+  Future<void> _flushOnce(ShutdownCause cause) {
+    return _flushFuture ??= () async {
+      await _capture(
+        'telemetry flush',
+        cause,
+        _options.flush == null ? null : () => _options.flush!(cause),
+      );
+    }();
+  }
+
+  Future<void> _waitBounded(
+    String operation,
+    ShutdownCause cause,
+    Future<void> future,
+  ) async {
+    try {
+      await future.timeout(_options.forceTimeout);
+    } on TimeoutException catch (error) {
+      _errors.add(error);
+      _log(
+        state.phase,
+        ShutdownAction.ignore,
+        cause,
+        '$operation did not finish before the force deadline',
+        error,
+      );
+    }
+  }
+
+  void trigger(ShutdownCause cause) {
+    final action = state.trigger(cause);
+    if (action == ShutdownAction.beginGraceful) {
+      _startGraceful(cause);
+    } else if (action == ShutdownAction.force) {
+      _startForce(cause);
+    }
+  }
+
+  void requestGraceful([ShutdownCause cause = ShutdownCause.programmatic]) {
+    trigger(cause);
+  }
+
+  void force([ShutdownCause cause = ShutdownCause.programmatic]) {
+    if (state.forceNow() == ShutdownAction.force) {
+      _startForce(cause);
+    }
+  }
+
+  void _startGraceful(ShutdownCause cause) {
+    _startedAt ??= _clock();
+    _log(
+      ShutdownPhase.draining,
+      ShutdownAction.beginGraceful,
+      cause,
+      _interactive
+          ? 'graceful shutdown started; press Ctrl-C again or Ctrl-D to force'
+          : 'graceful shutdown started',
+    );
+    _timer = Timer(_options.timeout, () {
+      if (state.timeout() == ShutdownAction.force) {
+        _startForce(ShutdownCause.timeout);
+      }
+    });
+
+    unawaited(() async {
+      final gracefulSucceeded = await _capture(
+        'graceful shutdown',
+        cause,
+        () => _options.graceful(cause),
+      );
+      if (!gracefulSucceeded && state.forceNow() == ShutdownAction.force) {
+        _startForce(cause);
+        return;
+      }
+      if (state.phase != ShutdownPhase.draining) {
+        return;
+      }
+      await _flushOnce(cause);
+      if (state.markClosed()) {
+        _finish(ShutdownPhase.closed, cause);
+      }
+    }());
+  }
+
+  void _startForce(ShutdownCause cause) {
+    if (_forceStarted) return;
+    _forceStarted = true;
+    _startedAt ??= _clock();
+    _timer?.cancel();
+    _log(
+      ShutdownPhase.forced,
+      ShutdownAction.force,
+      cause,
+      'forcing active connections and application resources closed',
+    );
+    unawaited(() async {
+      await _waitBounded(
+        'force shutdown',
+        cause,
+        _capture('force shutdown', cause, () => _options.force(cause)),
+      );
+      await _waitBounded('telemetry flush', cause, _flushOnce(cause));
+      _finish(ShutdownPhase.forced, cause);
+    }());
+  }
+
+  void _finish(ShutdownPhase phase, ShutdownCause cause) {
+    if (_done.isCompleted) return;
+    _timer?.cancel();
+    dispose();
+    _log(
+      phase,
+      ShutdownAction.ignore,
+      cause,
+      phase == ShutdownPhase.closed
+          ? 'graceful shutdown completed'
+          : 'forceful shutdown completed',
+    );
+    _done.complete(
       ShutdownResult(
-        forced: _forced,
-        triggers: List<ShutdownTrigger>.unmodifiable(_triggers),
+        phase: phase,
+        cause: cause,
+        startedAt: _startedAt ?? _clock(),
+        finishedAt: _clock(),
         errors: List<Object>.unmodifiable(_errors),
-        elapsed: _watch.elapsed,
       ),
     );
   }
+
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _timer?.cancel();
+    for (final subscription in _subscriptions) {
+      unawaited(subscription.cancel());
+    }
+    _subscriptions.clear();
+  }
+
+  void _listen(Stream<dynamic> stream, void Function(dynamic) callback) {
+    _subscriptions.add(stream.listen(callback));
+  }
+}
+
+/// Best-effort structured shutdown logging through the Dart next-loggers SDK.
+void Function(ShutdownEvent) loggerShutdownLog(Logger logger) {
+  return (event) {
+    unawaited(() async {
+      try {
+        final fields = <String, Object?>{
+          'shutdown.phase': event.phase.name,
+          'shutdown.action': event.action.name,
+          'shutdown.cause': event.cause.name,
+          'shutdown.interactive': event.interactive,
+          'shutdown.signal_count': event.signalCount,
+        };
+        final LogEvent entry;
+        if (event.error != null) {
+          entry = logger.error(event.message, <Object?>[event.error]);
+        } else if (event.phase == ShutdownPhase.forced) {
+          entry = logger.warn(event.message);
+        } else {
+          entry = logger.info(event.message);
+        }
+        await entry.addFields(fields).send();
+      } catch (_) {
+        // Best-effort observability must not interfere with termination.
+      }
+    }());
+  };
+}
+
+ProcessShutdownController installProcessShutdown(
+  ProcessShutdownOptions options,
+) {
+  final interactive = options.interactive ?? stdin.hasTerminal;
+  final controller = ProcessShutdownController._(options, interactive);
+
+  if (options.events != null) {
+    controller._listen(
+      options.events!,
+      (value) => controller.trigger(value as ShutdownCause),
+    );
+  } else {
+    controller._listen(
+      ProcessSignal.sigint.watch(),
+      (_) => controller.trigger(ShutdownCause.sigint),
+    );
+    try {
+      controller._listen(
+        ProcessSignal.sigterm.watch(),
+        (_) => controller.trigger(ShutdownCause.sigterm),
+      );
+    } catch (_) {
+      // SIGTERM is not available on every Dart platform (notably Windows).
+    }
+  }
+
+  if (options.stdinEofEvents != null) {
+    controller._listen(
+      options.stdinEofEvents!,
+      (_) => controller.trigger(ShutdownCause.stdinEof),
+    );
+  } else if (interactive && options.watchStdinEof) {
+    controller._subscriptions.add(
+      stdin.cast<Object?>().listen(
+            (_) {},
+            onDone: () => controller.trigger(ShutdownCause.stdinEof),
+          ),
+    );
+  }
+
+  return controller;
 }
