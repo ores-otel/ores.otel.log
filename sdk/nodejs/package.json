@@ -125,7 +125,24 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./server-lifecycle": {
+      "types": "./dist/server-lifecycle.d.ts",
+      "import": "./dist/server-lifecycle.js",
+      "default": "./dist/server-lifecycle.js"
+    },
+    "./execution-context": {
+      "browser": {
+        "types": "./dist/execution-context-browser.d.ts",
+        "default": "./dist/execution-context-browser.js"
+      },
+      "workerd": {
+        "types": "./dist/execution-context-workerd.d.ts",
+        "default": "./dist/execution-context-workerd.js"
+      },
+      "types": "./dist/execution-context.d.ts",
+      "default": "./dist/execution-context.js"
+    }
   },
   "engines": {
     "node": ">=18"

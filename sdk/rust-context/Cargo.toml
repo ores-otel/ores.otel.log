@@ -1,0 +1,19 @@
+[package]
+name = "oresoftware-next-loggers-context"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Explicit thread/task-local context and shutdown policy for next-loggers"
+license = "MIT"
+repository = "https://github.com/ores-otel/ores.otel.log"
+
+[features]
+default = []
+tokio = ["dep:tokio"]
+
+[dependencies]
+next-loggers = { package = "oresoftware-next-loggers", path = "../rust" }
+tokio = { version = "~1.47.5", optional = true, features = ["io-std", "io-util", "macros", "rt", "signal", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "~1.47.5", features = ["macros", "rt"] }

@@ -1,0 +1,69 @@
+name: Build validated context lifecycle repair
+
+on: push
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: sdk/go/go.mod
+
+      - name: Install Rust formatter
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install Dart
+        uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - name: Apply deterministic source repairs
+        run: |
+          set -euo pipefail
+          python3 tools/build_context_lifecycle_repair.py
+          gofmt -w sdk/go/context_test.go
+          cargo fmt --manifest-path sdk/rust-context/Cargo.toml
+          dart format \
+            sdk/dart/lib/next_loggers.dart \
+            sdk/dart/lib/shutdown.dart \
+            sdk/dart/test/context_shutdown.dart
+
+      - name: Validate repaired runtimes
+        run: |
+          set -euo pipefail
+          (cd sdk/go && go test ./...)
+          cargo test --manifest-path sdk/rust-context/Cargo.toml
+          cargo test --manifest-path sdk/rust-context/Cargo.toml --features tokio
+          (
+            cd sdk/dart
+            dart pub get
+            dart analyze
+            dart run test/context_shutdown.dart
+          )
+          git diff --check
+          git diff --stat
+
+      - name: Upload validated source files
+        uses: actions/upload-artifact@v4
+        with:
+          name: context-lifecycle-repair
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            sdk/go/context_test.go
+            sdk/rust-context/src/lib.rs
+            sdk/rust-context/tests/context.rs
+            sdk/rust-context/tests/tokio_context.rs
+            sdk/dart/lib/next_loggers.dart
+            sdk/dart/lib/shutdown.dart
+            sdk/dart/test/context_shutdown.dart

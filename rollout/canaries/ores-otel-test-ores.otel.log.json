@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "contractVersion": "1.0.0",
+  "productionRepository": "ores-otel/ores.otel.log",
+  "canaryRepository": "ores-otel-test/ores.otel.log",
+  "canaryBranch": "agent/lifecycle-canary-20260808",
+  "canonicalRepository": "ores-otel/ores.otel.log",
+  "canonicalBranch": "agent/polyglot-context-shutdown-20260808",
+  "state": "canary-pending",
+  "staticAudit": {
+    "workflow": ".github/workflows/polyglot-context-shutdown-canary.yml",
+    "jsonArtifact": "server-lifecycle-audit.json",
+    "markdownArtifact": "server-lifecycle-audit.md",
+    "strictHighRiskGate": true
+  },
+  "behavioralEvidence": {
+    "longRequestDrain": "pending",
+    "newConnectionRefusal": "pending",
+    "keepAliveBounded": "pending",
+    "upgradedConnectionForce": "pending",
+    "nonTtyFirstSignal": "pending",
+    "ttySecondSignal": "pending",
+    "ttyCtrlDForce": "pending",
+    "gracefulTimeoutEscalation": "pending",
+    "forceTimeoutBounded": "pending",
+    "telemetryFlushExactlyOnce": "pending",
+    "contextIsolation": "pending"
+  },
+  "productionPromotionAllowed": false
+}
