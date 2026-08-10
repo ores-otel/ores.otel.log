@@ -14,7 +14,7 @@ Execution-context and shutdown-policy companion for the Rust
 - `spawn_with_current_context` snapshots and explicitly propagates the active
   context into a newly spawned Tokio task.
 - `LoggerContextExt` adds explicit (`info_with_context`) and ambient
-  (`info_ambient`) event constructors without colliding with the canonical SDK's
+  (`info_ambient`) event constructors without colliding with the canonical SDK’s
   inherent `info_context(values)` ambient API.
 
 ```rust

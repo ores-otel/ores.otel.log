@@ -95,7 +95,8 @@ The `sdk/rust-context` companion crate provides:
 - Tokio task-local context for futures that may move between threads;
 - explicit `spawn_with_current_context()` propagation because Tokio task locals
   are not inherited by `tokio::spawn`;
-- logger extension methods for explicit and ambient context.
+- logger extension methods for explicit (`*_with_context`) and ambient
+  (`*_ambient`) context.
 
 Task-local context wins over thread-local context. Nested helper scopes merge
 with their parent and restore it on return or panic.
