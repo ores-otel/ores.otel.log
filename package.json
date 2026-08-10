@@ -152,6 +152,7 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
+    "./contracts/*": "./contracts/*",
     "./package.json": "./package.json"
   },
   "scripts": {
