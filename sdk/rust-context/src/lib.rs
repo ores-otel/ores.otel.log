@@ -88,7 +88,7 @@ impl LogContext {
 }
 
 thread_local! {
-    static THREAD_CONTEXT: RefCell<Vec<ThreadContextFrame>> = RefCell::new(Vec::new());
+    static THREAD_CONTEXT: RefCell<Vec<ThreadContextFrame>> = const { RefCell::new(Vec::new()) };
     static NEXT_THREAD_CONTEXT_ID: Cell<u64> = const { Cell::new(1) };
 }
 
