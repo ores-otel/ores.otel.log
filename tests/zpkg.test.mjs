@@ -14,7 +14,7 @@ const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
 const zedInclude = await read('.zedinclude');
 
 const expectedTargets = {
-  repository: { dir: '.', name: 'next-loggers', adapter: 'none' },
+  repository: { dir: '.', adapter: 'none' },
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
   nodejs: {
     dir: 'sdk/nodejs',
@@ -125,9 +125,13 @@ test('all language slices are explicit, unique, and registry-correct', () => {
     const actual = manifest.targets[target];
     assert.deepEqual(actual, expected, `${target} target drifted`);
     assert.equal(dirs.has(actual.dir), false, `duplicate target directory: ${actual.dir}`);
-    assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+    if (actual.name === undefined) {
+      assert.equal(target, 'repository', `only the canonical root target may omit name: ${target}`);
+    } else {
+      assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+      names.add(actual.name);
+    }
     dirs.add(actual.dir);
-    names.add(actual.name);
     if (actual.native) {
       assert.equal(tags.has(actual.native.tag_format), false, `duplicate native tag: ${actual.native.tag_format}`);
       tags.add(actual.native.tag_format);
@@ -230,7 +234,13 @@ test('the repository URL and slugs satisfy Zed validation', () => {
   const slug = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
   assert.match(manifest.package.org, slug);
   assert.match(manifest.package.name, slug);
-  for (const target of Object.values(manifest.targets)) assert.match(target.name, slug);
+  for (const [key, target] of Object.entries(manifest.targets)) {
+    if (target.name === undefined) {
+      assert.equal(key, 'repository', `only the canonical root target may omit name: ${key}`);
+    } else {
+      assert.match(target.name, slug);
+    }
+  }
   assert.equal(manifest.package.repository.vcs, 'git');
   assert.match(manifest.package.repository.url, /^(?:https?|ssh|git|git\+ssh):\/\//);
 });
