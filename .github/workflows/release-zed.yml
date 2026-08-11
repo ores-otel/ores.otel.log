@@ -36,7 +36,7 @@ jobs:
         run: >-
           cargo install
           --git https://github.com/zed-pkg/zed-cli
-          --rev 822bbdef7ebb9218a83ad7d3b3dca78ade1add79
+          --rev 14bc2fb1bdc2b85e5545e60e70fc94f047188662
           --locked zed-cli
       - run: zed release plan
       - run: zed pack

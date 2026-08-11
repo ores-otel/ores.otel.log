@@ -12,7 +12,7 @@ const manifest = parseToml(await read('.zpkg.toml'));
 const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
 const zedInclude = await read('.zedinclude');
-const zedCliCommit = '822bbdef7ebb9218a83ad7d3b3dca78ade1add79';
+const zedCliCommit = '14bc2fb1bdc2b85e5545e60e70fc94f047188662';
 const interfacesCommit = '4c38da4205438f28c7a196c1c36ec050ae5b5dac';
 const checkoutCommit = '3d3c42e5aac5ba805825da76410c181273ba90b1';
 
