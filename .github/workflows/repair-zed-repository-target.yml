@@ -1,0 +1,51 @@
+name: Repair Zed repository-target contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/repair-zed-repository-target.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Register the canonical whole-repository target
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          catalog_path = Path('src/cli/package-catalog.ts')
+          catalog = catalog_path.read_text()
+          marker = "export const ZED_TARGET_NAMES = [\n"
+          entry = "  'repository',\n"
+          if entry not in catalog:
+              if marker not in catalog:
+                  raise SystemExit('ZED target catalog marker not found')
+              catalog = catalog.replace(marker, marker + entry, 1)
+          catalog_path.write_text(catalog)
+
+          test_path = Path('tests/zpkg.test.mjs')
+          test = test_path.read_text()
+          marker = 'const expectedTargets = {\n'
+          entry = "  repository: { dir: '.', name: 'next-loggers', adapter: 'none' },\n"
+          if entry not in test:
+              if marker not in test:
+                  raise SystemExit('expected target map marker not found')
+              test = test.replace(marker, marker + entry, 1)
+          test_path.write_text(test)
+          PY
+      - name: Commit the synchronized contract
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/cli/package-catalog.ts tests/zpkg.test.mjs
+          git diff --cached --check
+          git commit -m "test(zed): model the whole-repository package target"
+          git push origin HEAD:main
