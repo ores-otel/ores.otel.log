@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/backpressure-conformance-vectors.schema.json",
+  "title": "ores.otel.log bounded-backpressure semantic vectors",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["vectorSet", "contract", "cases"],
+  "properties": {
+    "vectorSet": {"const": "ores.otel.log/backpressure-vectors/v1"},
+    "contract": {"const": "ores.otel.log/backpressure-result/v1"},
+    "cases": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "expectedValid", "expectedRule", "receipt"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{2,63}$"
+          },
+          "expectedValid": {"type": "boolean"},
+          "expectedRule": {
+            "enum": [
+              "none",
+              "counter-domain",
+              "attempted-accounting",
+              "drop-reason-accounting",
+              "queue-capacity",
+              "shutdown-capacity",
+              "flush-state",
+              "shutdown-drain",
+              "shutdown-flush"
+            ]
+          },
+          "receipt": {
+            "$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/backpressure-result.schema.json"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"expectedValid": {"const": true}},
+              "required": ["expectedValid"]
+            },
+            "then": {"properties": {"expectedRule": {"const": "none"}}},
+            "else": {"not": {"properties": {"expectedRule": {"const": "none"}}}}
+          }
+        ]
+      }
+    }
+  }
+}
