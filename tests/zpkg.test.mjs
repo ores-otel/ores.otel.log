@@ -162,7 +162,15 @@ test('root publish metadata is target-safe', () => {
   assert.equal(manifest.publish.include_readme, true);
   assert.equal(manifest.publish.tag_format, 'v{version}');
   assert.equal(manifest.publish.smoke_test, 'sh "$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh"');
-  for (const pattern of ['.github/**', '.r2g/**', 'pubspec.lock', '**/target/**', '**/*.gem', '**/test.sh']) {
+  for (const pattern of [
+    '.github/**',
+    '.r2g/**',
+    '**/pubspec.lock',
+    '**/target/**',
+    '**/*.egg-info/**',
+    '**/*.gem',
+    '**/test.sh',
+  ]) {
     assert.ok(manifest.publish.exclude.includes(pattern), `publish.exclude should strip ${pattern}`);
   }
 });
