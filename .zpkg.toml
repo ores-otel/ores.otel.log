@@ -26,7 +26,7 @@ vcs = "git"
 url = "https://github.com/ores-otel/ores.otel.log"
 
 [dependencies]
-"ores-otel/ores-interfaces-repository" = "^0.1.0"
+"ores-otel/ores-interfaces" = "^0.1.0"
 
 [publish]
 include_readme = true
@@ -64,9 +64,9 @@ exclude = [
 ]
 smoke_test = "sh \"$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh\""
 
-# Zed v0.1.0 publishes this aggregate as
-# oresoftware/next-loggers-repository. Whole-repository dependants use that
-# coordinate while native consumers may select a language-specific target.
+# The unnamed whole-repository target publishes the canonical
+# oresoftware/next-loggers package; native consumers may select a language
+# target instead.
 [targets.repository]
 dir = "."
 adapter = "none"
