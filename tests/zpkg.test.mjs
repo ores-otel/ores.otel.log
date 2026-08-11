@@ -12,6 +12,9 @@ const manifest = parseToml(await read('.zpkg.toml'));
 const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
 const zedInclude = await read('.zedinclude');
+const zedCliCommit = '822bbdef7ebb9218a83ad7d3b3dca78ade1add79';
+const interfacesCommit = '4c38da4205438f28c7a196c1c36ec050ae5b5dac';
+const checkoutCommit = '3d3c42e5aac5ba805825da76410c181273ba90b1';
 
 const expectedTargets = {
   repository: { dir: '.', adapter: 'none' },
@@ -250,6 +253,29 @@ test('the Zed manifest declares the canonical interface dependency', () => {
     'ores-otel/ores-interfaces': '^0.1.0',
   });
   assert.equal(pkg.dependencies, undefined);
+});
+
+test('Zed roundtrip workflows seed the canonical interface dependency hermetically', async () => {
+  for (const path of ['.github/workflows/ci.yml', '.github/workflows/packaging.yml']) {
+    const workflow = await read(path);
+    assert.match(workflow, /permissions:\n(?:[^\n]*\n)*?\s+contents: read/u, `${path} must be read-only`);
+    assert.ok(
+      workflow.includes(`uses: actions/checkout@${checkoutCommit} # v7`),
+      `${path} must use the reviewed checkout commit`,
+    );
+    assert.ok(workflow.includes(`ref: ${interfacesCommit}`), `${path} must pin ores-interfaces`);
+    assert.match(workflow, new RegExp(`--rev\\s+${zedCliCommit}`, 'u'), `${path} must pin zed-cli`);
+    assert.match(
+      workflow,
+      /zed \\\n\s+--registry "file:\/\/\$registry" \\\n\s+--home "\$RUNNER_TEMP\/zed-seed-home" \\\n\s+publish --skip-vcs-checks/u,
+      `${path} must seed its file registry in an isolated home`,
+    );
+    assert.match(
+      workflow,
+      /--registry "file:\/\/\$registry" \\\n\s+--home "\$RUNNER_TEMP\/zed-home" \\\n\s+r2g --r2g-root/u,
+      `${path} must roundtrip against the seeded registry in an isolated home`,
+    );
+  }
 });
 
 test('the eslint plugin version tracks package.json', async () => {
