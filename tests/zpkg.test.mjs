@@ -11,6 +11,7 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const manifest = parseToml(await read('.zpkg.toml'));
 const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
+const rustCargo = await read('sdk/rust/Cargo.toml');
 const zedInclude = await read('.zedinclude');
 const zedCliCommit = '14bc2fb1bdc2b85e5545e60e70fc94f047188662';
 const interfacesCommit = '289f66434d919d77e57818292e127f7dcb137525';
@@ -180,6 +181,14 @@ test('generated Node release files use a bounded Zed allowlist', () => {
     'sdk/nodejs/src/**',
   ]);
   assert.equal(patterns.some((pattern) => ['*', '**', '**/*'].includes(pattern)), false);
+});
+
+test('the Rust SDK accepts compatible time 0.3 resolutions from consumers', () => {
+  assert.match(
+    rustCargo,
+    /^time = \{ version = "0\.3", features = \["formatting"\] \}$/mu,
+  );
+  assert.doesNotMatch(rustCargo, /^time = \{ version = "=0\.3\./mu);
 });
 
 test('the root and every slice carry a target-local smoke contract', async () => {
