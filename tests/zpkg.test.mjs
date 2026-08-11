@@ -191,12 +191,13 @@ test('generated Node release files use a bounded Zed allowlist', () => {
   assert.equal(patterns.some((pattern) => ['*', '**', '**/*'].includes(pattern)), false);
 });
 
-test('the Rust SDK accepts compatible time 0.3 resolutions from consumers', () => {
+test('the Rust SDK exact-pins the audited time release', () => {
+  assert.match(rustCargo, /^rust-version = "1\.88"$/mu);
   assert.match(
     rustCargo,
-    /^time = \{ version = "0\.3", features = \["formatting"\] \}$/mu,
+    /^time = \{ version = "=0\.3\.54", features = \["formatting"\] \}$/mu,
   );
-  assert.doesNotMatch(rustCargo, /^time = \{ version = "=0\.3\./mu);
+  assert.doesNotMatch(rustCargo, /^time = \{ version = "(?:0\.3|=0\.3\.36)",/mu);
 });
 
 test('the root and every slice carry a target-local smoke contract', async () => {
