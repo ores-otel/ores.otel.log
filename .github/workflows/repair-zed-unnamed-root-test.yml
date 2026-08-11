@@ -1,0 +1,72 @@
+name: Repair unnamed Zed root-target tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/repair-zed-unnamed-root-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Align tests with the canonical unnamed root target
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/zpkg.test.mjs')
+          text = path.read_text()
+          text = text.replace(
+              "  repository: { dir: '.', name: 'next-loggers', adapter: 'none' },\n",
+              "  repository: { dir: '.', adapter: 'none' },\n",
+          )
+
+          old_names = '''    assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+              dirs.add(actual.dir);
+              names.add(actual.name);
+          '''
+          new_names = '''    if (actual.name === undefined) {
+                assert.equal(target, 'repository', `only the canonical root target may omit name: ${target}`);
+              } else {
+                assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+                names.add(actual.name);
+              }
+              dirs.add(actual.dir);
+          '''
+          if old_names not in text:
+              raise SystemExit('target-name uniqueness assertion was not found')
+          text = text.replace(old_names, new_names, 1)
+
+          old_slugs = '''  for (const target of Object.values(manifest.targets)) assert.match(target.name, slug);
+          '''
+          new_slugs = '''  for (const [key, target] of Object.entries(manifest.targets)) {
+              if (target.name === undefined) {
+                assert.equal(key, 'repository', `only the canonical root target may omit name: ${key}`);
+              } else {
+                assert.match(target.name, slug);
+              }
+            }
+          '''
+          if old_slugs not in text:
+              raise SystemExit('target slug assertion was not found')
+          text = text.replace(old_slugs, new_slugs, 1)
+          path.write_text(text)
+          PY
+      - name: Commit and run the focused tests
+        run: |
+          npm ci
+          npm run build
+          node --test tests/zpkg.test.mjs tests/cli-packages.test.mjs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tests/zpkg.test.mjs
+          git diff --cached --check
+          git commit -m "test(zed): support the unnamed canonical root target"
+          git push origin HEAD:main
