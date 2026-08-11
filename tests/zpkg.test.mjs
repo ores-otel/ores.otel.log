@@ -172,6 +172,7 @@ test('generated Node release files use a bounded Zed allowlist', () => {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'));
   assert.deepEqual(patterns, [
+    'dist/**',
     'sdk/nodejs/.cli-flags.toml',
     'sdk/nodejs/LICENSE',
     'sdk/nodejs/README.md',
