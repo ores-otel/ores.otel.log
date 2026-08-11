@@ -64,6 +64,13 @@ exclude = [
 ]
 smoke_test = "sh \"$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh\""
 
+# With explicit targets, Zed publishes only those targets. This target keeps
+# the canonical oresoftware/next-loggers coordinate available to dependants.
+[targets.repository]
+dir = "."
+name = "next-loggers"
+adapter = "none"
+
 [targets.contracts]
 dir = "contracts"
 name = "next-loggers-contracts"
