@@ -260,7 +260,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ores-otel/ores-interfaces
-          ref: 4c38da4205438f28c7a196c1c36ec050ae5b5dac
+          ref: 289f66434d919d77e57818292e127f7dcb137525
           path: .zed/dependencies/ores-interfaces
           persist-credentials: false
       - uses: actions/setup-node@v7

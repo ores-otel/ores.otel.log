@@ -13,7 +13,7 @@ const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
 const zedInclude = await read('.zedinclude');
 const zedCliCommit = '14bc2fb1bdc2b85e5545e60e70fc94f047188662';
-const interfacesCommit = '4c38da4205438f28c7a196c1c36ec050ae5b5dac';
+const interfacesCommit = '289f66434d919d77e57818292e127f7dcb137525';
 const checkoutCommit = '3d3c42e5aac5ba805825da76410c181273ba90b1';
 
 const expectedTargets = {
