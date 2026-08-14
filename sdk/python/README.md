@@ -28,3 +28,20 @@ log = Logger(
     ],
 )
 ```
+
+## Per-event OpenTelemetry routing
+
+`otel=True` is the logger default. Set `otel=False` to make OTEL opt-in, then
+override individual events without suppressing Memory, Supabase, or other
+transports:
+
+```python
+log = Logger(otel=False, transports=[otel_transport, supabase_transport])
+log.info("sampled in").use_otel().send()
+log.warn("OTEL excluded").not_otel().send()
+log.info("computed").with_otel(route_to_otel).send()
+```
+
+`reset_otel()` returns an event to the logger default, while
+`is_otel_enabled(fallback)` exposes the resolved decision. Logger-level
+`set_otel_enabled()`, `use_otel()`, and `not_otel()` update the default.

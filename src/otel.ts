@@ -5,6 +5,7 @@ import type {
   LogLevel,
   LogRecord,
   LogTransport,
+  LoggerOptions,
   SerializedValue,
 } from './base-logger.js';
 
@@ -720,16 +721,42 @@ export function createOpenTelemetryTransport(
 export function withOpenTelemetry(
   logger: BaseLogger,
   options: OpenTelemetryTransportOptions,
-): BaseLogger {
+): BaseLogger;
+export function withOpenTelemetry(
+  logger: LoggerOptions,
+  options: OpenTelemetryTransportOptions,
+): LoggerOptions;
+export function withOpenTelemetry(
+  logger: BaseLogger | LoggerOptions,
+  options: OpenTelemetryTransportOptions,
+): BaseLogger | LoggerOptions {
   const otelContext = options.activeSpan
     ? createOpenTelemetryContextProvider(options.activeSpan)
     : undefined;
-  return logger.anew({
-    transports: [...logger.getTransports(), createOpenTelemetryTransport(options)],
+  if (
+    typeof (logger as BaseLogger).anew !== 'function' ||
+    typeof (logger as BaseLogger).getTransports !== 'function'
+  ) {
+    const loggerOptions = logger as LoggerOptions;
+    const existing = loggerOptions.transports
+      ? Array.isArray(loggerOptions.transports)
+        ? loggerOptions.transports
+        : [loggerOptions.transports]
+      : [];
+    const contextProvider = loggerOptions.contextProvider ?? otelContext;
+    return {
+      ...loggerOptions,
+      transports: [...existing, createOpenTelemetryTransport(options)],
+      ...(contextProvider ? { contextProvider } : {}),
+    };
+  }
+  const baseLogger = logger as BaseLogger;
+  return baseLogger.anew({
+    transports: [...baseLogger.getTransports(), createOpenTelemetryTransport(options)],
     ...(otelContext
       ? {
           contextProvider: () => {
-            const inherited = logger.getContext();
+            const inherited = baseLogger.getContext();
             const telemetry = otelContext();
             if (!inherited) return telemetry;
             if (!telemetry) return inherited;

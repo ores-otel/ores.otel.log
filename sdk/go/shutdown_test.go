@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -61,16 +62,35 @@ func (server *fakeShutdownServer) calls() int {
 	return server.closeCalls
 }
 
-func TestInteractiveSecondSignalForces(t *testing.T) {
+type shutdownEvents struct {
+	mu     sync.Mutex
+	events []ShutdownEvent
+}
+
+func (events *shutdownEvents) add(event ShutdownEvent) {
+	events.mu.Lock()
+	events.events = append(events.events, event)
+	events.mu.Unlock()
+}
+
+func (events *shutdownEvents) snapshot() []ShutdownEvent {
+	events.mu.Lock()
+	defer events.mu.Unlock()
+	return append([]ShutdownEvent(nil), events.events...)
+}
+
+func TestInteractiveSecondSignalForcesAndCountsSignals(t *testing.T) {
 	server := newFakeShutdownServer()
 	signals := make(chan os.Signal, 2)
 	result := make(chan ShutdownResult, 1)
+	logs := &shutdownEvents{}
 	go func() {
 		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
 			Interactive:     NewInteractiveOverride(true),
 			SignalChannel:   signals,
 			DisableStdinEOF: true,
 			Timeout:         time.Second,
+			Log:             logs.add,
 		})
 	}()
 
@@ -86,19 +106,25 @@ func TestInteractiveSecondSignalForces(t *testing.T) {
 	if got.Phase != ShutdownForced || got.Cause != ShutdownSIGINT || server.calls() != 1 {
 		t.Fatalf("unexpected result %#v; close calls=%d", got, server.calls())
 	}
+	events := logs.snapshot()
+	if len(events) < 2 || events[len(events)-1].SignalCount != 2 {
+		t.Fatalf("expected two OS signals in lifecycle logs, got %#v", events)
+	}
 }
 
-func TestCtrlDCanReplaceSecondCtrlC(t *testing.T) {
+func TestCtrlDCanReplaceSecondCtrlCWithoutIncrementingSignalCount(t *testing.T) {
 	server := newFakeShutdownServer()
 	signals := make(chan os.Signal, 1)
 	eof := make(chan struct{})
 	result := make(chan ShutdownResult, 1)
+	logs := &shutdownEvents{}
 	go func() {
 		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
 			Interactive:   NewInteractiveOverride(true),
 			SignalChannel: signals,
 			EOFChannel:    eof,
 			Timeout:       time.Second,
+			Log:           logs.add,
 		})
 	}()
 
@@ -109,18 +135,85 @@ func TestCtrlDCanReplaceSecondCtrlC(t *testing.T) {
 	if got.Cause != ShutdownStdinEOF || got.Phase != ShutdownForced {
 		t.Fatalf("unexpected result %#v", got)
 	}
+	events := logs.snapshot()
+	if len(events) < 2 || events[len(events)-1].SignalCount != 1 {
+		t.Fatalf("EOF must not increment OS signal count: %#v", events)
+	}
 }
 
-func TestNonInteractiveOneSignalGraceful(t *testing.T) {
+func TestEOFBeforeFirstSIGINTIsDormantAndDiscarded(t *testing.T) {
 	server := newFakeShutdownServer()
 	signals := make(chan os.Signal, 1)
+	eof := make(chan struct{}, 1)
+	eof <- struct{}{}
 	result := make(chan ShutdownResult, 1)
 	go func() {
 		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
-			Interactive:     NewInteractiveOverride(false),
-			SignalChannel:   signals,
-			DisableStdinEOF: true,
-			Timeout:         time.Second,
+			Interactive:   NewInteractiveOverride(true),
+			SignalChannel: signals,
+			EOFChannel:    eof,
+			Timeout:       time.Second,
+		})
+	}()
+
+	select {
+	case <-server.started:
+		t.Fatal("pre-SIGINT EOF started graceful shutdown")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	signals <- os.Interrupt
+	<-server.started
+	close(server.release)
+	got := <-result
+	if got.Phase != ShutdownClosed || got.Cause != ShutdownSIGINT || server.calls() != 0 {
+		t.Fatalf("stale EOF should be ignored, got %#v; close calls=%d", got, server.calls())
+	}
+}
+
+func TestTTYSIGTERMDoesNotArmEOF(t *testing.T) {
+	server := newFakeShutdownServer()
+	signals := make(chan os.Signal, 1)
+	eof := make(chan struct{})
+	close(eof)
+	result := make(chan ShutdownResult, 1)
+	logs := &shutdownEvents{}
+	go func() {
+		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
+			Interactive:   NewInteractiveOverride(true),
+			SignalChannel: signals,
+			EOFChannel:    eof,
+			Timeout:       time.Second,
+			Log:           logs.add,
+		})
+	}()
+
+	signals <- syscall.SIGTERM
+	<-server.started
+	close(server.release)
+	got := <-result
+	if got.Phase != ShutdownClosed || got.Cause != ShutdownSIGTERM || server.calls() != 0 {
+		t.Fatalf("TTY SIGTERM should drain without EOF arming, got %#v", got)
+	}
+	for _, event := range logs.snapshot() {
+		if event.Cause == ShutdownStdinEOF {
+			t.Fatalf("EOF was observed after SIGTERM: %#v", event)
+		}
+	}
+}
+
+func TestNonInteractiveOneSignalGracefulAndEOFIsIgnored(t *testing.T) {
+	server := newFakeShutdownServer()
+	signals := make(chan os.Signal, 1)
+	eof := make(chan struct{})
+	close(eof)
+	result := make(chan ShutdownResult, 1)
+	go func() {
+		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
+			Interactive:   NewInteractiveOverride(false),
+			SignalChannel: signals,
+			EOFChannel:    eof,
+			Timeout:       time.Second,
 		})
 	}()
 
@@ -128,7 +221,7 @@ func TestNonInteractiveOneSignalGraceful(t *testing.T) {
 	<-server.started
 	close(server.release)
 	got := <-result
-	if got.Phase != ShutdownClosed || server.calls() != 0 {
+	if got.Phase != ShutdownClosed || got.Cause != ShutdownSIGINT || server.calls() != 0 {
 		t.Fatalf("unexpected result %#v; close calls=%d", got, server.calls())
 	}
 }
@@ -230,25 +323,4 @@ func TestSecondSignalForcesWhileFlushIsBlockedAndFlushRunsOnce(t *testing.T) {
 		t.Fatalf("flush ran %d times", calls)
 	}
 	close(flushRelease)
-}
-
-func TestFirstEOFIsNotCountedTwice(t *testing.T) {
-	server := newFakeShutdownServer()
-	eof := make(chan struct{})
-	close(eof)
-	result := make(chan ShutdownResult, 1)
-	go func() {
-		result <- RunGracefulShutdown(context.Background(), server, ShutdownOptions{
-			Interactive:   NewInteractiveOverride(true),
-			SignalChannel: make(chan os.Signal),
-			EOFChannel:    eof,
-			Timeout:       time.Second,
-		})
-	}()
-	<-server.started
-	close(server.release)
-	got := <-result
-	if got.Phase != ShutdownClosed || got.Cause != ShutdownStdinEOF {
-		t.Fatalf("a single EOF should drain gracefully, got %#v", got)
-	}
 }

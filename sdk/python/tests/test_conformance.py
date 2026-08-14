@@ -139,6 +139,30 @@ class LoggerContractTests(unittest.TestCase):
         self.assertEqual(supabase[0]["schema"], "next-loggers/v1")
         self.assertEqual(supabase[0]["message"], "payment failed")
 
+    def test_per_event_otel_routing_preserves_regular_transports(self):
+        otel = []
+        regular = MemoryTransport()
+        logger = Logger(
+            otel=False,
+            transports=[OpenTelemetryTransport(otel.append), regular],
+            console=False,
+        )
+
+        default_off = logger.info("default-off")
+        self.assertFalse(default_off.is_otel_enabled(logger.is_otel_enabled()))
+        default_off.send()
+        logger.info("forced-on").use_otel().send()
+        logger.info("reset-off").use_otel().reset_otel().send()
+        logger.use_otel()
+        logger.warn("forced-off").not_otel().send()
+        logger.info("logger-on").with_otel(True).send()
+
+        self.assertEqual([record["body"] for record in otel], ["forced-on", "logger-on"])
+        self.assertEqual(
+            [record.message for record in regular.records],
+            ["default-off", "forced-on", "reset-off", "forced-off", "logger-on"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

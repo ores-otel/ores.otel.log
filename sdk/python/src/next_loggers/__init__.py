@@ -426,12 +426,17 @@ class Logger:
         return self
 
     def use_otel(self) -> "Logger":
-        self.otel_enabled = True
-        return self
+        return self.set_otel_enabled(True)
 
     def not_otel(self) -> "Logger":
-        self.otel_enabled = False
+        return self.set_otel_enabled(False)
+
+    def set_otel_enabled(self, enabled: bool) -> "Logger":
+        self.otel_enabled = bool(enabled)
         return self
+
+    def is_otel_enabled(self) -> bool:
+        return self.otel_enabled
 
     def _enabled(self, level: LogLevel) -> bool:
         return _LEVEL_INDEX[level] >= _LEVEL_INDEX[self.max_level]

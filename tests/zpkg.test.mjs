@@ -11,10 +11,10 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const manifest = parseToml(await read('.zpkg.toml'));
 const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
-const lock = await read('.zpkg.lock');
 const zedInclude = await read('.zedinclude');
 
 const expectedTargets = {
+  repository: { dir: '.', adapter: 'none' },
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
   nodejs: {
     dir: 'sdk/nodejs',
@@ -125,9 +125,13 @@ test('all language slices are explicit, unique, and registry-correct', () => {
     const actual = manifest.targets[target];
     assert.deepEqual(actual, expected, `${target} target drifted`);
     assert.equal(dirs.has(actual.dir), false, `duplicate target directory: ${actual.dir}`);
-    assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+    if (actual.name === undefined) {
+      assert.equal(target, 'repository', `only the canonical root target may omit name: ${target}`);
+    } else {
+      assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+      names.add(actual.name);
+    }
     dirs.add(actual.dir);
-    names.add(actual.name);
     if (actual.native) {
       assert.equal(tags.has(actual.native.tag_format), false, `duplicate native tag: ${actual.native.tag_format}`);
       tags.add(actual.native.tag_format);
@@ -230,15 +234,21 @@ test('the repository URL and slugs satisfy Zed validation', () => {
   const slug = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
   assert.match(manifest.package.org, slug);
   assert.match(manifest.package.name, slug);
-  for (const target of Object.values(manifest.targets)) assert.match(target.name, slug);
+  for (const [key, target] of Object.entries(manifest.targets)) {
+    if (target.name === undefined) {
+      assert.equal(key, 'repository', `only the canonical root target may omit name: ${key}`);
+    } else {
+      assert.match(target.name, slug);
+    }
+  }
   assert.equal(manifest.package.repository.vcs, 'git');
   assert.match(manifest.package.repository.url, /^(?:https?|ssh|git|git\+ssh):\/\//);
 });
 
-test('the lockfile is the canonical zero-dependency form', () => {
-  assert.equal(lock.trim(), 'version = 1');
-  assert.equal(parseToml(lock).version, 1);
-  assert.deepEqual(Object.keys(manifest.dependencies ?? {}), []);
+test('the Zed manifest declares the canonical interface dependency', () => {
+  assert.deepEqual(manifest.dependencies, {
+    'ores-otel/ores-interfaces': '^0.1.0',
+  });
   assert.equal(pkg.dependencies, undefined);
 });
 

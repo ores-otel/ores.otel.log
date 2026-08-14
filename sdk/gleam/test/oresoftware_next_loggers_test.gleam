@@ -204,7 +204,7 @@ pub fn per_event_otel_routing_test() {
 
   let assert Ok(_) =
     logging.info(logger, "ordinary-only", [json.string("ordinary-only")])
-    |> logging.not_otel
+    |> logging.event_not_otel
     |> logging.send
   let assert Ok(Written(ordinary_only)) =
     process.receive(ordinary_subject, within: 1000)
@@ -214,7 +214,7 @@ pub fn per_event_otel_routing_test() {
 
   let assert Ok(_) =
     logging.info(logger, "telemetry", [json.string("telemetry")])
-    |> logging.use_otel
+    |> logging.event_use_otel
     |> logging.send
   let assert Ok(Written(ordinary_telemetry)) =
     process.receive(ordinary_subject, within: 1000)

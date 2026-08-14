@@ -95,10 +95,19 @@ fn per_call_otel_routing_preserves_ordinary_transport() {
         })));
 
     logger.info("default", None).unwrap();
-    logger.info_with_otel("ordinary-only", None, false).unwrap();
+    logger
+        .event(LogLevel::Info, "ordinary-only", None, BTreeMap::new())
+        .not_otel()
+        .send()
+        .unwrap();
+    logger
+        .event(LogLevel::Info, "forced-on", None, BTreeMap::new())
+        .use_otel()
+        .send()
+        .unwrap();
 
-    assert_eq!(ordinary.lock().unwrap().len(), 2);
-    assert_eq!(otel.lock().unwrap().len(), 1);
+    assert_eq!(ordinary.lock().unwrap().len(), 3);
+    assert_eq!(otel.lock().unwrap().len(), 2);
 }
 
 #[test]

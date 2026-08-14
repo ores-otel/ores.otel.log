@@ -91,14 +91,62 @@ pub fn explicit_zero_trace_flags_override_parent_test() {
   |> should.equal(Some(0))
 }
 
-pub fn shutdown_transition_contract_test() {
+pub fn first_tty_sigint_arms_eof_and_eof_forces_test() {
   let state = shutdown.new(True)
   let #(state, first) = shutdown.trigger(state, shutdown.Sigint)
   first |> should.equal(shutdown.BeginGraceful)
   shutdown.phase(state) |> should.equal(shutdown.Draining)
+  shutdown.eof_armed(state) |> should.equal(True)
+  shutdown.signal_count(state) |> should.equal(1)
+
   let #(state, second) = shutdown.trigger(state, shutdown.StdinEof)
   second |> should.equal(shutdown.Force)
   shutdown.phase(state) |> should.equal(shutdown.Forced)
-  let #(_, ignored) = shutdown.trigger(state, shutdown.Sigterm)
-  ignored |> should.equal(shutdown.Ignore)
+  shutdown.signal_count(state) |> should.equal(1)
+}
+
+pub fn initial_eof_is_ignored_test() {
+  let state = shutdown.new(True)
+  let #(state, action) = shutdown.trigger(state, shutdown.StdinEof)
+  action |> should.equal(shutdown.Ignore)
+  shutdown.phase(state) |> should.equal(shutdown.Running)
+  shutdown.signal_count(state) |> should.equal(0)
+}
+
+pub fn tty_sigterm_does_not_arm_eof_test() {
+  let state = shutdown.new(True)
+  let #(state, action) = shutdown.trigger(state, shutdown.Sigterm)
+  action |> should.equal(shutdown.BeginGraceful)
+  shutdown.eof_armed(state) |> should.equal(False)
+  shutdown.signal_count(state) |> should.equal(1)
+
+  let #(state, eof_action) = shutdown.trigger(state, shutdown.StdinEof)
+  eof_action |> should.equal(shutdown.Ignore)
+  shutdown.phase(state) |> should.equal(shutdown.Draining)
+}
+
+pub fn non_tty_sigint_does_not_arm_eof_test() {
+  let state = shutdown.new(False)
+  let #(state, action) = shutdown.trigger(state, shutdown.Sigint)
+  action |> should.equal(shutdown.BeginGraceful)
+  shutdown.eof_armed(state) |> should.equal(False)
+
+  let #(_, eof_action) = shutdown.trigger(state, shutdown.StdinEof)
+  eof_action |> should.equal(shutdown.Ignore)
+}
+
+pub fn second_signal_forces_and_counts_two_signals_test() {
+  let state = shutdown.new(True)
+  let #(state, _) = shutdown.trigger(state, shutdown.Sigint)
+  let #(state, action) = shutdown.trigger(state, shutdown.Sigterm)
+  action |> should.equal(shutdown.Force)
+  shutdown.signal_count(state) |> should.equal(2)
+}
+
+pub fn timeout_forces_without_incrementing_signal_count_test() {
+  let state = shutdown.new(False)
+  let #(state, _) = shutdown.trigger(state, shutdown.Sigterm)
+  let #(state, action) = shutdown.timeout(state)
+  action |> should.equal(shutdown.Force)
+  shutdown.signal_count(state) |> should.equal(1)
 }

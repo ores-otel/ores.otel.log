@@ -28,6 +28,7 @@ import { createNodeLogger } from '@oresoftware/next-loggers/node';
 import {
   createOpenTelemetryContextProvider,
   createOpenTelemetryTransport,
+  withOpenTelemetry,
 } from '@oresoftware/next-loggers/otel';
 
 const otelLogger = logs.getLogger('my-service');
@@ -61,6 +62,37 @@ const logger = createNodeLogger({
 
 The OpenTelemetry packages shown above belong to the application, not this
 library. `next-loggers` intentionally has no dependency on an OTEL SDK.
+
+## Per-event routing and setup helper
+
+The routing precedence is identical in all 11 SDKs:
+
+1. an event set with `useOtel`/`use_otel` is sent to OTEL;
+2. an event set with `notOtel`/`not_otel` is not sent to OTEL;
+3. `resetOtel`/`reset_otel` removes that event decision;
+4. otherwise the logger `otel` default applies, and defaults to `true`.
+
+The computed form is `withOtel(enabled)` (or `with_otel`) and the resolver is
+`isOtelEnabled(fallback)` (or `is_otel_enabled`). Some native SDKs retain their
+existing immediate level methods and expose `event`/`event_use_otel` for this
+chain; their README contains the exact language-native spelling.
+
+Routing recognizes the built-in OTEL bridge marker and the transport name
+`opentelemetry`, so a hand-written bridge can opt into the same behavior. A
+record excluded from OTEL continues through every non-OTEL transport.
+
+TypeScript can compose transport and context setup in one call:
+
+```ts
+const logger = createNodeLogger(withOpenTelemetry(
+  { appName: 'my-service', transports: existingTransports },
+  { logger: otelLogger, activeSpan, activeContext: () => context.active() },
+));
+```
+
+`withOpenTelemetry` appends rather than replaces transports. It derives an OTEL
+context provider from `activeSpan` by default, but never replaces an explicitly
+supplied `contextProvider`.
 
 ## Native SDK bridge contract
 

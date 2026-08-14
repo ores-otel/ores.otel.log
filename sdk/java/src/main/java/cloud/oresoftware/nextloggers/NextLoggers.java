@@ -132,6 +132,46 @@ public final class NextLoggers {
     }
   }
 
+  /** One unsent event whose OTEL decision may override its logger default. */
+  public static final class LogEvent {
+    private final Logger logger;
+    private final Level level;
+    private final String message;
+    private final Map<String, Object> fields;
+    private final Context context;
+    private Boolean otelEnabled;
+
+    private LogEvent(Logger logger, Level level, String message, Map<String, Object> fields) {
+      this.logger = logger;
+      this.level = Objects.requireNonNull(level, "level");
+      this.message = message;
+      this.fields = immutableCopy(fields);
+      this.context = currentContext();
+    }
+
+    public LogEvent useOtel() { return withOtel(true); }
+
+    public LogEvent notOtel() { return withOtel(false); }
+
+    public LogEvent withOtel(boolean enabled) {
+      this.otelEnabled = enabled;
+      return this;
+    }
+
+    public LogEvent resetOtel() {
+      this.otelEnabled = null;
+      return this;
+    }
+
+    public boolean isOtelEnabled(boolean fallback) {
+      return otelEnabled == null ? fallback : otelEnabled;
+    }
+
+    public Map<String, Object> send() throws Exception {
+      return logger.emitEvent(this);
+    }
+  }
+
   public static final class Logger {
     private final String appName;
     private final String name;
@@ -146,11 +186,22 @@ public final class NextLoggers {
         String runtime,
         Map<String, Object> fields,
         List<Transport> transports) {
+      this(appName, name, runtime, fields, transports, true);
+    }
+
+    public Logger(
+        String appName,
+        String name,
+        String runtime,
+        Map<String, Object> fields,
+        List<Transport> transports,
+        boolean otelEnabled) {
       this.appName = requireText(appName, "appName");
       this.name = name;
       this.runtime = runtime == null || runtime.isBlank() ? "java" : runtime;
       this.fields = immutableCopy(fields);
       this.transports = transports == null ? List.of() : List.copyOf(transports);
+      this.otelEnabled = otelEnabled;
     }
 
     public Logger(String appName, List<Transport> transports) {
@@ -159,14 +210,25 @@ public final class NextLoggers {
 
     public Map<String, Object> log(Level level, String message, Map<String, Object> eventFields)
         throws Exception {
-      return log(level, message, eventFields, null);
+      return event(level, message, eventFields).send();
     }
 
+    /** Compatibility overload for callers that choose OTEL routing inline. */
     public Map<String, Object> log(
-        Level level, String message, Map<String, Object> eventFields, Boolean eventOtelEnabled)
+        Level level, String message, Map<String, Object> eventFields, boolean useOtel)
         throws Exception {
-      Objects.requireNonNull(level, "level");
-      Context context = currentContext();
+      return event(level, message, eventFields).withOtel(useOtel).send();
+    }
+
+    public LogEvent event(Level level, String message, Map<String, Object> eventFields) {
+      return new LogEvent(this, level, message, eventFields);
+    }
+
+    private Map<String, Object> emitEvent(LogEvent event) throws Exception {
+      Level level = event.level;
+      String message = event.message;
+      Map<String, Object> eventFields = event.fields;
+      Context context = event.context;
       Map<String, Object> mergedFields = new LinkedHashMap<>(fields);
       if (context != null) {
         mergedFields.putAll(context.fields());
@@ -199,9 +261,8 @@ public final class NextLoggers {
         record.put("tags", context.tags());
       }
       Map<String, Object> immutable = Collections.unmodifiableMap(record);
-      boolean routeToOtel = eventOtelEnabled == null ? otelEnabled : eventOtelEnabled;
       for (Transport transport : transports) {
-        if (transport.isOpenTelemetry() && !routeToOtel) continue;
+        if (transport.isOpenTelemetry() && !event.isOtelEnabled(otelEnabled)) continue;
         transport.write(immutable);
       }
       return immutable;
@@ -219,14 +280,17 @@ public final class NextLoggers {
       return otelEnabled;
     }
 
-    public Logger useOtel() {
-      otelEnabled = true;
+    public Logger setOtelEnabled(boolean enabled) {
+      otelEnabled = enabled;
       return this;
     }
 
+    public Logger useOtel() {
+      return setOtelEnabled(true);
+    }
+
     public Logger notOtel() {
-      otelEnabled = false;
-      return this;
+      return setOtelEnabled(false);
     }
   }
 

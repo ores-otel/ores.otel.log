@@ -17,10 +17,18 @@ class FakeStdin extends EventEmitter {
     super();
     this.isTTY = isTTY;
     this.resumed = false;
+    this.paused = false;
+    this.readableFlowing = false;
   }
 
   resume() {
     this.resumed = true;
+    this.readableFlowing = true;
+  }
+
+  pause() {
+    this.paused = true;
+    this.readableFlowing = false;
   }
 }
 
@@ -47,15 +55,13 @@ class FakeServer {
 
   finish(error) {
     const callbacks = this.callbacks.splice(0);
-    for (const callback of callbacks) {
-      callback(error);
-    }
+    for (const callback of callbacks) callback(error);
   }
 }
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test('interactive first SIGINT drains and second SIGINT forces', async () => {
+test('interactive stdin remains untouched until first SIGINT', async () => {
   const runtime = new FakeProcess();
   const stdin = new FakeStdin(true);
   const server = new FakeServer();
@@ -68,10 +74,18 @@ test('interactive first SIGINT drains and second SIGINT forces', async () => {
     onLog: (event) => events.push(event),
   });
 
-  assert.equal(stdin.resumed, true);
+  assert.equal(stdin.resumed, false);
+  assert.equal(stdin.listenerCount('end'), 0);
+  stdin.emit('end');
+  await tick();
+  assert.equal(controller.phase, 'running');
+  assert.equal(server.closeCalls, 0);
+
   runtime.emit('SIGINT');
   await tick();
   assert.equal(controller.phase, 'draining');
+  assert.equal(stdin.resumed, true);
+  assert.equal(stdin.listenerCount('end'), 1);
   assert.equal(server.closeCalls, 1);
   assert.equal(server.idleCalls, 1);
   assert.equal(server.forceCalls, 0);
@@ -82,19 +96,23 @@ test('interactive first SIGINT drains and second SIGINT forces', async () => {
   assert.equal(result.cause, 'SIGINT');
   assert.equal(server.forceCalls, 1);
   assert.equal(runtime.exitCode, 0);
+  assert.equal(stdin.paused, true);
+  const forced = events.find((event) => event.phase === 'forced');
+  assert.equal(forced?.signalCount, 2);
   assert.match(events[0].message, /Ctrl-D/);
 });
 
-test('Ctrl-D can replace the second Ctrl-C', async () => {
+test('Ctrl-D after first SIGINT replaces only the second Ctrl-C', async () => {
   const runtime = new FakeProcess();
   const stdin = new FakeStdin(true);
   const server = new FakeServer();
+  const events = [];
   const controller = installNodeServerShutdown({
     servers: server,
     process: runtime,
     stdin,
     timeoutMillis: 10_000,
-    onLog: () => undefined,
+    onLog: (event) => events.push(event),
   });
 
   runtime.emit('SIGINT');
@@ -104,13 +122,45 @@ test('Ctrl-D can replace the second Ctrl-C', async () => {
   assert.equal(result.phase, 'forced');
   assert.equal(result.cause, 'stdin-eof');
   assert.equal(server.forceCalls, 1);
+  const forced = events.find((event) => event.phase === 'forced');
+  assert.equal(forced?.signalCount, 1, 'EOF must not increment OS signal count');
 });
 
-test('one non-TTY signal completes a graceful drain', async () => {
+test('TTY SIGTERM drains without arming or consuming stdin', async () => {
+  const runtime = new FakeProcess();
+  const stdin = new FakeStdin(true);
+  const server = new FakeServer();
+  const events = [];
+  const controller = installNodeServerShutdown({
+    servers: server,
+    process: runtime,
+    stdin,
+    onLog: (event) => events.push(event),
+  });
+
+  runtime.emit('SIGTERM');
+  await tick();
+  assert.equal(controller.phase, 'draining');
+  assert.equal(stdin.resumed, false);
+  assert.equal(stdin.listenerCount('end'), 0);
+  stdin.emit('end');
+  await tick();
+  assert.equal(controller.phase, 'draining');
+
+  server.finish();
+  const result = await controller.done;
+  assert.equal(result.phase, 'closed');
+  assert.equal(result.cause, 'SIGTERM');
+  assert.equal(events.some((event) => /Ctrl-D/.test(event.message)), false);
+  assert.equal(events.at(-1)?.signalCount, 1);
+});
+
+test('one non-TTY signal completes a graceful drain without stdin reads', async () => {
   const runtime = new FakeProcess();
   const stdin = new FakeStdin(false);
   const server = new FakeServer();
   const order = [];
+  const events = [];
   const controller = installNodeServerShutdown({
     servers: server,
     process: runtime,
@@ -118,30 +168,34 @@ test('one non-TTY signal completes a graceful drain', async () => {
     beforeGraceful: () => order.push('before'),
     flush: () => order.push('flush'),
     afterGraceful: () => order.push('after'),
-    onLog: () => undefined,
+    onLog: (event) => events.push(event),
   });
 
   runtime.emit('SIGTERM');
   await tick();
   assert.equal(controller.phase, 'draining');
+  assert.equal(stdin.resumed, false);
+  assert.equal(stdin.listenerCount('end'), 0);
   server.finish();
   const result = await controller.done;
   assert.equal(result.phase, 'closed');
   assert.equal(result.cause, 'SIGTERM');
   assert.deepEqual(order, ['before', 'flush', 'after']);
   assert.equal(server.forceCalls, 0);
+  assert.equal(events.at(-1)?.signalCount, 1);
 });
 
-test('timeout escalates after close was requested', async () => {
+test('timeout escalates after listener close was requested', async () => {
   const runtime = new FakeProcess();
   const server = new FakeServer();
+  const events = [];
   const controller = installNodeServerShutdown({
     servers: server,
     process: runtime,
     interactive: false,
     watchStdinEof: false,
     timeoutMillis: 5,
-    onLog: () => undefined,
+    onLog: (event) => events.push(event),
   });
 
   runtime.emit('SIGINT');
@@ -150,16 +204,16 @@ test('timeout escalates after close was requested', async () => {
   assert.equal(result.cause, 'timeout');
   assert.ok(server.closeCalls >= 2);
   assert.equal(server.forceCalls, 1);
+  assert.equal(events.find((event) => event.phase === 'forced')?.signalCount, 1);
 });
 
 test('already stopped servers are treated as gracefully closed', async () => {
   const runtime = new FakeProcess();
   const server = {
     close(callback) {
-      const error = Object.assign(new Error('not running'), {
+      callback(Object.assign(new Error('not running'), {
         code: 'ERR_SERVER_NOT_RUNNING',
-      });
-      callback(error);
+      }));
     },
   };
   const controller = installNodeServerShutdown({
@@ -180,7 +234,6 @@ test('transition helper is deterministic', () => {
   assert.equal(nextShutdownAction('draining', 'stdin-eof'), 'force');
   assert.equal(nextShutdownAction('closed', 'SIGTERM'), 'ignore');
 });
-
 
 test('logger sink emits structured best-effort shutdown records', async () => {
   const records = [];
@@ -304,4 +357,3 @@ test('force completion is bounded when hooks ignore cancellation', async () => {
   assert.equal(result.phase, 'forced');
   assert.equal(result.errors.length, 2);
 });
-

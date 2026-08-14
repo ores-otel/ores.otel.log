@@ -510,8 +510,18 @@ pub fn use_otel(event: LogEvent) -> LogEvent {
   with_otel(event, True)
 }
 
+/// Explicit event name retained alongside the concise pipeline helper.
+pub fn event_use_otel(event: LogEvent) -> LogEvent {
+  use_otel(event)
+}
+
 pub fn not_otel(event: LogEvent) -> LogEvent {
   with_otel(event, False)
+}
+
+/// Explicit event name retained alongside the concise pipeline helper.
+pub fn event_not_otel(event: LogEvent) -> LogEvent {
+  not_otel(event)
 }
 
 pub fn with_otel(event: LogEvent, enabled: Bool) -> LogEvent {

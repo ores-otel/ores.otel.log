@@ -258,6 +258,25 @@ impl Logger {
         self
     }
 
+    pub fn set_otel_enabled(&mut self, enabled: bool) -> &mut Self {
+        self.otel_enabled = enabled;
+        self
+    }
+
+    pub fn use_otel(mut self) -> Self {
+        self.otel_enabled = true;
+        self
+    }
+
+    pub fn not_otel(mut self) -> Self {
+        self.otel_enabled = false;
+        self
+    }
+
+    pub fn is_otel_enabled(&self) -> bool {
+        self.otel_enabled
+    }
+
     pub fn with_id_factory<F>(mut self, factory: F) -> Self
     where
         F: Fn() -> String + Send + Sync + 'static,
@@ -281,7 +300,24 @@ impl Logger {
         context: Option<&LogContext>,
         event_fields: BTreeMap<String, String>,
     ) -> Result<LogRecord, String> {
-        self.log_with_otel(level, message, context, event_fields, None)
+        self.event(level, message, context, event_fields).send()
+    }
+
+    pub fn event(
+        &self,
+        level: LogLevel,
+        message: impl Into<String>,
+        context: Option<&LogContext>,
+        event_fields: BTreeMap<String, String>,
+    ) -> Event<'_> {
+        Event {
+            logger: self,
+            level,
+            message: message.into(),
+            context: context.cloned(),
+            event_fields,
+            otel_enabled: None,
+        }
     }
 
     pub fn log_with_otel(
@@ -365,6 +401,49 @@ impl Logger {
             context,
             BTreeMap::new(),
             Some(otel),
+        )
+    }
+}
+
+pub struct Event<'a> {
+    logger: &'a Logger,
+    level: LogLevel,
+    message: String,
+    context: Option<LogContext>,
+    event_fields: BTreeMap<String, String>,
+    otel_enabled: Option<bool>,
+}
+
+impl Event<'_> {
+    pub fn with_otel(mut self, enabled: bool) -> Self {
+        self.otel_enabled = Some(enabled);
+        self
+    }
+
+    pub fn use_otel(self) -> Self {
+        self.with_otel(true)
+    }
+
+    pub fn not_otel(self) -> Self {
+        self.with_otel(false)
+    }
+
+    pub fn reset_otel(mut self) -> Self {
+        self.otel_enabled = None;
+        self
+    }
+
+    pub fn is_otel_enabled(&self, fallback: bool) -> bool {
+        self.otel_enabled.unwrap_or(fallback)
+    }
+
+    pub fn send(self) -> Result<LogRecord, String> {
+        self.logger.log_with_otel(
+            self.level,
+            self.message,
+            self.context.as_ref(),
+            self.event_fields,
+            self.otel_enabled,
         )
     }
 }
