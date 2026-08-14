@@ -250,6 +250,8 @@ void main() {
         eagerError: false,
       ).then<Object?>((value) => value, onError: (Object error) => error);
       expect(results, isA<StateError>());
+      await Future<void>.delayed(Duration.zero);
+      expect(attempts, hasLength(1), reason: 'failures must not busy-retry');
       await transport.flush();
       expect(attempts.first, ['one', 'two']);
       expect(attempts.last, ['one', 'two']);

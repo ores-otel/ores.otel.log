@@ -563,17 +563,22 @@ class SupabaseTransport implements LogTransport {
     if (_queue.isEmpty) return Future.value();
     final batch = _queue.take(batchSize).toList(growable: false);
     _queue.removeRange(0, batch.length);
+    var failed = false;
     final task = Future.sync(
       () => sendBatch(
         batch.map((record) => record.toJson()).toList(growable: false),
       ),
     ).catchError((Object error) {
+      failed = true;
       final available = maxQueueSize - _queue.length;
       _queue.insertAll(0, batch.take(available));
       throw error;
     }).whenComplete(() {
       _flushing = null;
-      if (_queue.isNotEmpty && !_closed) {
+      // A failed batch stays queued for an explicit flush or a later write.
+      // Retrying immediately here creates an unbounded microtask loop while a
+      // device is offline or encryption is misconfigured.
+      if (!failed && _queue.isNotEmpty && !_closed) {
         unawaited(flush().catchError((_) {}));
       }
     });
