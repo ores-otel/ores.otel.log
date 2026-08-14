@@ -24,6 +24,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Check out the immutable canonical interface dependency
+        uses: actions/checkout@v7
+        with:
+          repository: ores-otel/ores-interfaces
+          ref: 6b2e674464933a4de38785c03c33564661290454
+          path: .zed/ci-deps/ores-interfaces
+          persist-credentials: false
+
       - name: Check out immutable flags-2-env contract tooling
         uses: actions/checkout@v7
         with:
@@ -105,6 +113,12 @@ jobs:
           --rev 822bbdef7ebb9218a83ad7d3b3dca78ade1add79
           --locked zed-cli
 
+      - name: Seed the isolated registry with the canonical interface dependency
+        working-directory: .zed/ci-deps/ores-interfaces
+        env:
+          ZED_PKG_REGISTRY: file://${{ runner.temp }}/zed-reg
+        run: zed publish --skip-vcs-checks
+
       - name: Inspect the deterministic Zed/native release plan
         run: zed release plan --json | tee zed-release-plan.json
 
@@ -132,6 +146,8 @@ jobs:
         working-directory: sdk/ruby
 
       - name: Roundtrip the complete Zed artifact
+        env:
+          ZED_PKG_REGISTRY: file://${{ runner.temp }}/zed-reg
         run: |
           zed pack
           zed r2g --clean
