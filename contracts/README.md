@@ -23,11 +23,26 @@ The canonical repository is `ores-otel/ores.otel.log`. The historical `ORESoftwa
 | `schemas/log-context.schema.json` | Logical context shared by ALS, task, thread, process, Zone, Fiber, and host adapters |
 | `schemas/otel-log-record.schema.json` | Explicit application-owned OTEL bridge structure |
 | `schemas/transport-batch.schema.json` | Bounded `next-loggers/batch/v1` client envelope |
+| `schemas/backpressure-result.schema.json` | Bounded transport accounting receipt |
+| `schemas/backpressure-conformance-vectors.schema.json` | Schema-valid positive and semantic-negative backpressure vectors |
+| `schemas/backpressure-conformance-report.schema.json` | Receipt-free adapter result with source/runtime identity and vector digest |
 | `schemas/sdk-manifest.schema.json` | Required logical APIs and runtime guarantees for each SDK |
 | `schemas/test-repository-matrix.schema.json` | Cross-repository test-org contract |
 | `sdk-manifests.json` | Index of per-language symbols, context mechanisms, transports, tests, and promotion blockers |
 | `migration/test-repository-matrix.json` | Thirteen planned test repositories spanning twelve language/runtime entries |
 | `fixtures/manifest.json` | Positive and negative validation cases |
+
+The bounded-backpressure semantic corpus is executable without a collector or
+credential:
+
+```sh
+node scripts/run-backpressure-conformance.mjs
+```
+
+The report includes the implementation version and source SHA, runtime version,
+schema version, and SHA-256 digest of the exact vector bytes. Failure entries
+contain only vector and rule identifiers; receipt contents are never copied into
+the report.
 
 Every schema uses JSON Schema Draft 2020-12 and a canonical `$id` rooted at the new repository. The old `next-loggers/v1` discriminator is intentionally preserved so the repository move is not a wire-format break.
 

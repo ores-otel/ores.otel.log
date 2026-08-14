@@ -249,6 +249,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Check out the immutable canonical interface dependency
+        uses: actions/checkout@v7
+        with:
+          repository: ores-otel/ores-interfaces
+          ref: 6b2e674464933a4de38785c03c33564661290454
+          path: .zed/ci-deps/ores-interfaces
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -259,8 +266,19 @@ jobs:
       - run: npm run build
       - uses: dtolnay/rust-toolchain@stable
       - name: install the zed CLI
-        run: cargo install --git https://github.com/zed-pkg/zed-cli --locked zed-cli
+        run: >-
+          cargo install
+          --git https://github.com/zed-pkg/zed-cli
+          --rev 5cef340b85b91f77c8b8644ac66e3534f58f85b6
+          --locked zed-cli
+      - name: Seed the isolated registry with the canonical interface dependency
+        working-directory: .zed/ci-deps/ores-interfaces
+        env:
+          ZED_PKG_REGISTRY: file://${{ runner.temp }}/zed-reg
+        run: zed publish --skip-vcs-checks
       - name: pack and roundtrip-test the artifact
+        env:
+          ZED_PKG_REGISTRY: file://${{ runner.temp }}/zed-reg
         run: |
           zed pack
           # r2g publishes to a throwaway file:// registry, installs into a mock
