@@ -1,0 +1,13 @@
+{
+  "schema": "ores.otel.log/backpressure-result/v1",
+  "transport": "otlp-http",
+  "policy": "drop-newest",
+  "capacity": 100,
+  "attempted": 0,
+  "accepted": 0,
+  "dropped": -1,
+  "queued": 0,
+  "dropReasons": {"overflow": -1, "shutdown": 0, "transport": 0},
+  "flush": {"requested": true, "completed": true, "timedOut": false},
+  "shutdown": {"mode": "graceful", "completed": true, "remainingQueued": 0}
+}
