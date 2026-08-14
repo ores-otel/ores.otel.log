@@ -52,6 +52,7 @@ coverage.out
 sdk/python/build/
 sdk/python/dist/
 sdk/rust/target/
+/target/
 sdk/rust-otel/target/
 sdk/rust-otel/Cargo.lock
 sdk/rust-context/target/
