@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -247,10 +250,14 @@ jobs:
     name: zed pack & r2g
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Check out the immutable canonical interface dependency
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: ores-otel/ores-interfaces
           ref: 6b2e674464933a4de38785c03c33564661290454
@@ -271,19 +278,26 @@ jobs:
           --git https://github.com/zed-pkg/zed-cli
           --rev 5cef340b85b91f77c8b8644ac66e3534f58f85b6
           --locked zed-cli
-      - name: Seed the isolated registry with the canonical interface dependency
-        working-directory: .zed/ci-deps/ores-interfaces
-        env:
-          ZED_PKG_REGISTRY: file://${{ runner.temp }}/zed-reg
-        run: zed publish --skip-vcs-checks
       - name: pack and roundtrip-test the artifact
-        env:
-          ZED_PKG_REGISTRY: file://${{ runner.temp }}/zed-reg
         run: |
+          set -euo pipefail
+          registry="$RUNNER_TEMP/zed-dependency-registry"
+          mkdir -p "$registry"
+          (
+            cd .zed/ci-deps/ores-interfaces
+            zed \
+              --registry "file://$registry" \
+              --home "$RUNNER_TEMP/zed-seed-home" \
+              publish --skip-vcs-checks
+          )
           zed pack
           # r2g publishes to a throwaway file:// registry, installs into a mock
-          # consumer, and runs publish.smoke_test against the real artifact.
-          zed r2g --clean
+          # consumer, and runs publish.smoke_test against the real artifact. It
+          # snapshots the seeded input registry into an isolated workspace.
+          zed \
+            --registry "file://$registry" \
+            --home "$RUNNER_TEMP/zed-home" \
+            r2g --r2g-root "$RUNNER_TEMP/zed-r2g" --clean
 
   # ── Packed-package consumer (what npm users actually install) ─────────────
   package:
