@@ -2,7 +2,7 @@
 EXTENDS Naturals, TLC
 
 (***************************************************************************
-This model specifies the shared TypeScript, Dart, and Rust two-phase shutdown
+This model specifies the shared TypeScript, Dart, Rust, Go, and Gleam two-phase shutdown
 lifecycle. Runtime callbacks are deliberately abstracted: the safety contract
 is that shutdown never returns to running, telemetry is flushed at most once,
 and completion is terminal only after that flush completes.
@@ -13,16 +13,20 @@ CONSTANT MaxSignals
 Phases == {"running", "draining", "forced", "closed"}
 
 VARIABLES phase,
+          previousPhase,
           done,
           flushStarted,
           flushCompleted,
           flushCount,
           signalCount
 
-vars == <<phase, done, flushStarted, flushCompleted, flushCount, signalCount>>
+vars == <<phase, previousPhase, done, flushStarted, flushCompleted, flushCount, signalCount>>
+
+PhaseRank == [running |-> 0, draining |-> 1, forced |-> 2, closed |-> 3]
 
 Init ==
     /\ phase = "running"
+    /\ previousPhase = "running"
     /\ done = FALSE
     /\ flushStarted = FALSE
     /\ flushCompleted = FALSE
@@ -34,6 +38,7 @@ BeginGraceful ==
     /\ ~done
     /\ signalCount < MaxSignals
     /\ phase' = "draining"
+    /\ previousPhase' = phase
     /\ signalCount' = signalCount + 1
     /\ UNCHANGED <<done, flushStarted, flushCompleted, flushCount>>
 
@@ -42,6 +47,7 @@ Escalate ==
     /\ ~done
     /\ signalCount < MaxSignals
     /\ phase' = "forced"
+    /\ previousPhase' = phase
     /\ signalCount' = signalCount + 1
     /\ UNCHANGED <<done, flushStarted, flushCompleted, flushCount>>
 
@@ -49,6 +55,7 @@ ForceNow ==
     /\ phase \in {"running", "draining"}
     /\ ~done
     /\ phase' = "forced"
+    /\ previousPhase' = phase
     /\ UNCHANGED <<done, flushStarted, flushCompleted, flushCount, signalCount>>
 
 CompleteFlush ==
@@ -58,6 +65,7 @@ CompleteFlush ==
     /\ flushStarted' = TRUE
     /\ flushCompleted' = TRUE
     /\ flushCount' = flushCount + 1
+    /\ previousPhase' = phase
     /\ UNCHANGED <<phase, done, signalCount>>
 
 FinishGraceful ==
@@ -65,6 +73,7 @@ FinishGraceful ==
     /\ ~done
     /\ flushCompleted
     /\ phase' = "closed"
+    /\ previousPhase' = phase
     /\ done' = TRUE
     /\ UNCHANGED <<flushStarted, flushCompleted, flushCount, signalCount>>
 
@@ -73,6 +82,7 @@ FinishForced ==
     /\ ~done
     /\ flushCompleted
     /\ done' = TRUE
+    /\ previousPhase' = phase
     /\ UNCHANGED <<phase, flushStarted, flushCompleted, flushCount, signalCount>>
 
 Next ==
@@ -92,6 +102,7 @@ Spec ==
 
 TypeOK ==
     /\ phase \in Phases
+    /\ previousPhase \in Phases
     /\ done \in BOOLEAN
     /\ flushStarted \in BOOLEAN
     /\ flushCompleted \in BOOLEAN
@@ -99,6 +110,8 @@ TypeOK ==
     /\ signalCount \in 0..MaxSignals
 
 FlushProgressIsOrdered == flushCompleted => flushStarted
+
+PhaseNeverRegresses == PhaseRank[phase] >= PhaseRank[previousPhase]
 
 FlushAtMostOnce == flushCount <= 1
 

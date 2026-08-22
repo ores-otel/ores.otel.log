@@ -6,16 +6,17 @@ state transitions, accounting, bounded resources, shutdown, and progress.
 
 ## Models
 
-- `ShutdownLifecycle.tla` specifies the shared TypeScript, Dart, and Rust
-  graceful/forced shutdown lifecycle. TLC checks terminality, flush ordering,
-  at-most-once flushing, and eventual completion after shutdown begins.
+- `ShutdownLifecycle.tla` specifies the shared TypeScript, Dart, Rust, Go, and
+  Gleam graceful/forced shutdown lifecycle. TLC checks phase monotonicity,
+  terminality, flush ordering, at-most-once flushing, and eventual completion
+  after shutdown begins.
 - `LogDelivery.tla` specifies a bounded OTEL/Supabase queue with admission,
   acknowledgement, retry, transport-drop, shutdown-drop, flush, and close.
   TLC checks queue/retry bounds and conservation equations that prohibit silent
   loss.
 - `shutdown-transitions.v1.json` is the executable cross-language transition
   relation. Its closed JSON Schema lives under `contracts/schemas`; TypeScript,
-  Dart, and Rust tests all consume the same vectors.
+  Dart, Rust, Go, and Gleam tests all consume the same vectors.
 - `scripts/check-formal-model.mjs` exhaustively explores the finite delivery
   graph independently of TLC. This is intentionally redundant: a model or its
   implementation must be wrong in two different ways to escape both checks.
@@ -71,6 +72,6 @@ java -jar /tmp/tla2tools-1.7.4.jar \
 
 TLC exhaustively checks the configured finite state spaces, not arbitrary queue
 sizes or the network itself. The executable language tests establish refinement
-of the shared transition relation; they do not turn Dart, Rust, or JavaScript
+of the shared transition relation; they do not turn Dart, Rust, Go, Gleam, or JavaScript
 runtime scheduling into a mathematical proof. Production observability and
 fault-injection tests remain necessary alongside these checks.

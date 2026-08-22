@@ -39,6 +39,19 @@ test('shutdown terminal phases ignore every external transition', () => {
   }
 });
 
+test('every shutdown transition is phase-monotone', () => {
+  const rank = { running: 0, draining: 1, forced: 2, closed: 3 };
+  for (const phase of Object.keys(rank)) {
+    for (const event of ['trigger', 'force-now', 'mark-closed']) {
+      const transition = shutdownTransition(phase, event);
+      assert.ok(
+        rank[transition.phase] >= rank[phase],
+        `${phase}:${event} regressed to ${transition.phase}`,
+      );
+    }
+  }
+});
+
 test('delivery explicit-state model checks all loss and close paths', () => {
   const report = checkDeliveryModel();
   assert.ok(report.states > 100);

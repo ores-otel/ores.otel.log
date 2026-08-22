@@ -26,6 +26,14 @@ export const SHUTDOWN_EVENTS = Object.freeze([
   'mark-closed',
 ]);
 
+const SHUTDOWN_TRANSITIONS = Object.freeze({
+  'running:trigger': Object.freeze({ phase: 'draining', action: 'begin-graceful' }),
+  'draining:trigger': Object.freeze({ phase: 'forced', action: 'force' }),
+  'running:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:mark-closed': Object.freeze({ phase: 'closed', action: 'close' }),
+});
+
 export function shutdownTransition(phase, event) {
   if (!SHUTDOWN_PHASES.includes(phase)) {
     throw new TypeError(`unknown shutdown phase: ${phase}`);
@@ -34,26 +42,8 @@ export function shutdownTransition(phase, event) {
     throw new TypeError(`unknown shutdown event: ${event}`);
   }
 
-  if (event === 'trigger') {
-    if (phase === 'running') {
-      return Object.freeze({ phase: 'draining', action: 'begin-graceful' });
-    }
-    if (phase === 'draining') {
-      return Object.freeze({ phase: 'forced', action: 'force' });
-    }
-  }
-
-  if (event === 'force-now') {
-    if (phase === 'running' || phase === 'draining') {
-      return Object.freeze({ phase: 'forced', action: 'force' });
-    }
-  }
-
-  if (event === 'mark-closed' && phase === 'draining') {
-    return Object.freeze({ phase: 'closed', action: 'close' });
-  }
-
-  return Object.freeze({ phase, action: 'ignore' });
+  return SHUTDOWN_TRANSITIONS[`${phase}:${event}`]
+    ?? Object.freeze({ phase, action: 'ignore' });
 }
 
 function assert(condition, message) {

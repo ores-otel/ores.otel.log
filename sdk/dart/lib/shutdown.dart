@@ -21,37 +21,33 @@ class ShutdownTransition {
 ShutdownTransition transitionShutdownState(
   ShutdownPhase phase,
   ShutdownStateEvent event,
-) {
-  if (event == ShutdownStateEvent.trigger) {
-    if (phase == ShutdownPhase.running) {
-      return const ShutdownTransition(
-        phase: ShutdownPhase.draining,
-        action: ShutdownAction.beginGraceful,
-      );
-    }
-    if (phase == ShutdownPhase.draining) {
-      return const ShutdownTransition(
-        phase: ShutdownPhase.forced,
-        action: ShutdownAction.force,
-      );
-    }
-  }
-  if (event == ShutdownStateEvent.forceNow &&
-      (phase == ShutdownPhase.running || phase == ShutdownPhase.draining)) {
-    return const ShutdownTransition(
-      phase: ShutdownPhase.forced,
-      action: ShutdownAction.force,
-    );
-  }
-  if (event == ShutdownStateEvent.markClosed &&
-      phase == ShutdownPhase.draining) {
-    return const ShutdownTransition(
-      phase: ShutdownPhase.closed,
-      action: ShutdownAction.close,
-    );
-  }
-  return ShutdownTransition(phase: phase, action: ShutdownAction.ignore);
-}
+) =>
+    switch ((phase, event)) {
+      (ShutdownPhase.running, ShutdownStateEvent.trigger) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.draining,
+          action: ShutdownAction.beginGraceful,
+        ),
+      (ShutdownPhase.draining, ShutdownStateEvent.trigger) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.forced,
+          action: ShutdownAction.force,
+        ),
+      (
+        ShutdownPhase.running || ShutdownPhase.draining,
+        ShutdownStateEvent.forceNow,
+      ) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.forced,
+          action: ShutdownAction.force,
+        ),
+      (ShutdownPhase.draining, ShutdownStateEvent.markClosed) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.closed,
+          action: ShutdownAction.close,
+        ),
+      _ => ShutdownTransition(phase: phase, action: ShutdownAction.ignore),
+    };
 
 class ShutdownStateMachine {
   ShutdownStateMachine({required this.interactive});

@@ -23,6 +23,22 @@ export interface ShutdownStateTransition {
   readonly action: ShutdownModelAction;
 }
 
+type ShutdownTransitionKey = `${ShutdownPhase}:${ShutdownStateEvent}`;
+
+/** Non-identity cases in the total shutdown relation. Unlisted pairs ignore. */
+const SHUTDOWN_TRANSITIONS: Readonly<
+  Partial<Record<ShutdownTransitionKey, ShutdownStateTransition>>
+> = Object.freeze({
+  'running:trigger': Object.freeze({
+    phase: 'draining',
+    action: 'begin-graceful',
+  }),
+  'draining:trigger': Object.freeze({ phase: 'forced', action: 'force' }),
+  'running:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:mark-closed': Object.freeze({ phase: 'closed', action: 'close' }),
+});
+
 export interface ShutdownEvent {
   phase: ShutdownPhase;
   action: ShutdownAction;
@@ -576,23 +592,10 @@ export function transitionShutdownState(
   phase: ShutdownPhase,
   event: ShutdownStateEvent,
 ): ShutdownStateTransition {
-  if (event === 'trigger') {
-    if (phase === 'running') {
-      return { phase: 'draining', action: 'begin-graceful' };
-    }
-    if (phase === 'draining') {
-      return { phase: 'forced', action: 'force' };
-    }
-  }
-  if (event === 'force-now') {
-    if (phase === 'running' || phase === 'draining') {
-      return { phase: 'forced', action: 'force' };
-    }
-  }
-  if (event === 'mark-closed' && phase === 'draining') {
-    return { phase: 'closed', action: 'close' };
-  }
-  return { phase, action: 'ignore' };
+  return (
+    SHUTDOWN_TRANSITIONS[`${phase}:${event}`]
+    ?? Object.freeze({ phase, action: 'ignore' as const })
+  );
 }
 
 export function nextShutdownAction(

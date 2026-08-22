@@ -78,11 +78,11 @@ fn merge_user(
   base: Option(core.JsonObject),
   patch: Option(core.JsonObject),
 ) -> Option(core.JsonObject) {
-  case #(base, patch) {
-    #(None, None) -> None
-    #(Some(value), None) -> Some(value)
-    #(None, Some(value)) -> Some(value)
-    #(Some(parent), Some(value)) -> Some(merge_object(parent, value))
+  case base, patch {
+    None, None -> None
+    Some(value), None -> Some(value)
+    None, Some(value) -> Some(value)
+    Some(parent), Some(value) -> Some(merge_object(parent, value))
   }
 }
 
