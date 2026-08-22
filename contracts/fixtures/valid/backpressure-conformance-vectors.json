@@ -1,0 +1,186 @@
+{
+  "vectorSet": "ores.otel.log/backpressure-vectors/v1",
+  "contract": "ores.otel.log/backpressure-result/v1",
+  "cases": [
+    {
+      "id": "valid-drop-newest-drained",
+      "expectedValid": true,
+      "expectedRule": "none",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-newest",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 0,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": true, "completed": true, "timedOut": false},
+        "shutdown": {"mode": "graceful", "completed": true, "remainingQueued": 0}
+      }
+    },
+    {
+      "id": "valid-block-timeout-pending",
+      "expectedValid": true,
+      "expectedRule": "none",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "block-with-timeout",
+        "capacity": 10,
+        "attempted": 12,
+        "accepted": 10,
+        "dropped": 2,
+        "queued": 3,
+        "dropReasons": {"overflow": 2, "shutdown": 0, "transport": 0},
+        "flush": {"requested": true, "completed": false, "timedOut": true},
+        "shutdown": {"mode": "forced", "completed": false, "remainingQueued": 3}
+      }
+    },
+    {
+      "id": "invalid-attempted-accounting",
+      "expectedValid": false,
+      "expectedRule": "attempted-accounting",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-newest",
+        "capacity": 100,
+        "attempted": 121,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 0,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": true, "completed": true, "timedOut": false},
+        "shutdown": {"mode": "graceful", "completed": true, "remainingQueued": 0}
+      }
+    },
+    {
+      "id": "invalid-drop-reason-accounting",
+      "expectedValid": false,
+      "expectedRule": "drop-reason-accounting",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-newest",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 0,
+        "dropReasons": {"overflow": 19, "shutdown": 0, "transport": 0},
+        "flush": {"requested": true, "completed": true, "timedOut": false},
+        "shutdown": {"mode": "graceful", "completed": true, "remainingQueued": 0}
+      }
+    },
+    {
+      "id": "invalid-queue-capacity",
+      "expectedValid": false,
+      "expectedRule": "queue-capacity",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-oldest",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 101,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": false, "completed": false, "timedOut": false},
+        "shutdown": {"mode": "graceful", "completed": false, "remainingQueued": 0}
+      }
+    },
+    {
+      "id": "invalid-shutdown-capacity",
+      "expectedValid": false,
+      "expectedRule": "shutdown-capacity",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-oldest",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 0,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": false, "completed": false, "timedOut": false},
+        "shutdown": {"mode": "forced", "completed": false, "remainingQueued": 101}
+      }
+    },
+    {
+      "id": "invalid-flush-state",
+      "expectedValid": false,
+      "expectedRule": "flush-state",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "reject",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 0,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": false, "completed": true, "timedOut": false},
+        "shutdown": {"mode": "forced", "completed": false, "remainingQueued": 0}
+      }
+    },
+    {
+      "id": "invalid-completed-shutdown-remainder",
+      "expectedValid": false,
+      "expectedRule": "shutdown-drain",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-newest",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 0,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": true, "completed": true, "timedOut": false},
+        "shutdown": {"mode": "graceful", "completed": true, "remainingQueued": 1}
+      }
+    },
+    {
+      "id": "invalid-completed-shutdown-queued",
+      "expectedValid": false,
+      "expectedRule": "shutdown-drain",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-newest",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 1,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": true, "completed": true, "timedOut": false},
+        "shutdown": {"mode": "graceful", "completed": true, "remainingQueued": 0}
+      }
+    },
+    {
+      "id": "invalid-completed-shutdown-flush",
+      "expectedValid": false,
+      "expectedRule": "shutdown-flush",
+      "receipt": {
+        "schema": "ores.otel.log/backpressure-result/v1",
+        "transport": "otlp-http",
+        "policy": "drop-newest",
+        "capacity": 100,
+        "attempted": 120,
+        "accepted": 100,
+        "dropped": 20,
+        "queued": 0,
+        "dropReasons": {"overflow": 20, "shutdown": 0, "transport": 0},
+        "flush": {"requested": true, "completed": false, "timedOut": false},
+        "shutdown": {"mode": "graceful", "completed": true, "remainingQueued": 0}
+      }
+    }
+  ]
+}

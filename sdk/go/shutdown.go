@@ -36,6 +36,7 @@ type ShutdownEvent struct {
 	Phase       ShutdownPhase
 	Cause       ShutdownCause
 	Interactive bool
+	// SignalCount counts operating-system SIGINT/SIGTERM events only.
 	SignalCount int
 	Message     string
 	Err         error
@@ -62,12 +63,13 @@ type ShutdownOptions struct {
 	// Interactive overrides TTY detection when non-nil.
 	Interactive *bool
 	Stdin       io.Reader
-	// DisableStdinEOF avoids consuming stdin in applications that own it. By
-	// default Ctrl-D is watched only when stdin is an interactive terminal.
+	// DisableStdinEOF prevents Ctrl-D from replacing the second Ctrl-C. Even
+	// when enabled, stdin is not read until the first interactive SIGINT.
 	DisableStdinEOF bool
 
 	// SignalChannel and EOFChannel are injectable test/embedding boundaries. If
 	// SignalChannel is nil, os.Interrupt and SIGTERM are registered directly.
+	// EOFChannel is dormant until the first interactive SIGINT.
 	SignalChannel <-chan os.Signal
 	EOFChannel    <-chan struct{}
 
@@ -125,8 +127,6 @@ func runHook(
 }
 
 // runHookBounded protects shutdown from callbacks that ignore cancellation.
-// The callback may continue in its goroutine after the deadline, but process
-// termination is never held hostage by it.
 func runHookBounded(
 	ctx context.Context,
 	cause ShutdownCause,
@@ -232,16 +232,40 @@ func watchEOF(reader io.Reader) <-chan struct{} {
 	return done
 }
 
+// armEOF returns an EOF source only after an interactive SIGINT. A stale
+// injected EOF that happened before arming is discarded so Ctrl-D can never be
+// remembered as a future second-stage shutdown request.
+func armEOF(stdin io.Reader, options ShutdownOptions) <-chan struct{} {
+	if options.EOFChannel != nil {
+		select {
+		case _, ok := <-options.EOFChannel:
+			if !ok {
+				return nil
+			}
+			// Discard one pre-arm injected event, then listen for a later event.
+			return options.EOFChannel
+		default:
+			return options.EOFChannel
+		}
+	}
+	return watchEOF(stdin)
+}
+
 type gracefulShutdownOutcome struct {
 	drainErr error
 	err      error
 }
 
-// RunGracefulShutdown blocks until one shutdown event arrives, then invokes
-// Shutdown with a deadline. While draining (including telemetry flushes), a
-// second SIGINT/SIGTERM or stdin EOF immediately escalates to Close. In
-// non-interactive deployments one signal is sufficient: the function returns
-// as soon as the graceful drain completes.
+// RunGracefulShutdown blocks for SIGINT/SIGTERM (or parent cancellation), then
+// invokes Shutdown with a deadline.
+//
+// TTY policy:
+//   - first SIGINT starts graceful drain and only then arms Ctrl-D;
+//   - second SIGINT/another termination signal or armed Ctrl-D forces Close;
+//   - SIGTERM starts graceful drain but never reads stdin.
+//
+// Non-TTY policy: stdin is never read; one signal starts graceful drain and a
+// second signal or the deadline is the force fallback.
 func RunGracefulShutdown(
 	parent context.Context,
 	server ShutdownServer,
@@ -286,11 +310,6 @@ func RunGracefulShutdown(
 		defer signal.Stop(ownedSignals)
 		signals = ownedSignals
 	}
-
-	eof := options.EOFChannel
-	if eof == nil && interactive && !options.DisableStdinEOF {
-		eof = watchEOF(stdin)
-	}
 	parentDone := parent.Done()
 
 	firstCause := ShutdownProgrammatic
@@ -299,21 +318,30 @@ func RunGracefulShutdown(
 		case value, ok := <-signals:
 			if !ok {
 				signals = nil
+				if parentDone == nil {
+					now := clock()
+					return ShutdownResult{
+						Phase:    ShutdownForced,
+						Cause:    ShutdownProgrammatic,
+						Started:  now,
+						Finished: now,
+						Err:      errors.New("nextloggers: shutdown signal source closed"),
+					}
+				}
 				continue
 			}
 			signalCount++
 			firstCause = signalCause(value)
-		case <-eof:
-			signalCount++
-			firstCause = ShutdownStdinEOF
-			// EOF is a one-shot close notification; leaving the closed channel in
-			// later selects would incorrectly count the same Ctrl-D twice.
-			eof = nil
 		case <-parentDone:
 			firstCause = ShutdownProgrammatic
 			parentDone = nil
 		}
 		break
+	}
+
+	var eof <-chan struct{}
+	if interactive && firstCause == ShutdownSIGINT && !options.DisableStdinEOF {
+		eof = armEOF(stdin, options)
 	}
 
 	started := clock()
@@ -323,7 +351,7 @@ func RunGracefulShutdown(
 		Interactive: interactive,
 		SignalCount: signalCount,
 		Message: func() string {
-			if interactive {
+			if interactive && firstCause == ShutdownSIGINT {
 				return "graceful shutdown started; send Ctrl-C again or Ctrl-D to force"
 			}
 			return "graceful shutdown started"
@@ -375,7 +403,6 @@ func RunGracefulShutdown(
 			}
 			return
 		}
-
 		if err := flush(shutdownCtx, firstCause); err != nil {
 			failures = append(failures, err)
 		}
@@ -446,8 +473,7 @@ func RunGracefulShutdown(
 	}
 
 	for {
-		// Prefer a completed graceful path over a near-simultaneous timeout or
-		// signal so a fully drained server is not mislabeled as forced.
+		// Prefer a completed graceful path over a near-simultaneous force event.
 		select {
 		case outcome := <-gracefulDone:
 			return finishGraceful(outcome)
@@ -465,7 +491,6 @@ func RunGracefulShutdown(
 			signalCount++
 			return force(signalCause(value), nil)
 		case <-eof:
-			signalCount++
 			eof = nil
 			return force(ShutdownStdinEOF, nil)
 		case <-parentDone:

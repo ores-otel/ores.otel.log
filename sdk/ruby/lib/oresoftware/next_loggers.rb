@@ -191,6 +191,44 @@ module ORESoftware
       end
     end
 
+    class LogEvent
+      attr_reader :logger, :level, :message, :fields
+
+      def initialize(logger, level, message, fields = {})
+        @logger = logger
+        @level = level
+        @message = message
+        @fields = fields
+        @otel_enabled = nil
+      end
+
+      def use_otel
+        with_otel(true)
+      end
+
+      def not_otel
+        with_otel(false)
+      end
+
+      def with_otel(enabled)
+        @otel_enabled = !!enabled
+        self
+      end
+
+      def reset_otel
+        @otel_enabled = nil
+        self
+      end
+
+      def otel_enabled?(fallback)
+        @otel_enabled.nil? ? !!fallback : @otel_enabled
+      end
+
+      def send
+        logger.emit_event(self)
+      end
+    end
+
     class Logger
       def initialize(
         app_name:,
@@ -216,14 +254,17 @@ module ORESoftware
         @clock = clock
       end
 
-      def use_otel
-        @otel_enabled = true
+      def set_otel_enabled(enabled)
+        @otel_enabled = !!enabled
         self
       end
 
+      def use_otel
+        set_otel_enabled(true)
+      end
+
       def not_otel
-        @otel_enabled = false
-        self
+        set_otel_enabled(false)
       end
 
       def otel_enabled
@@ -233,8 +274,18 @@ module ORESoftware
       alias otel_enabled? otel_enabled
 
       def log(level, message, fields = {}, otel: nil)
-        level_name = level.to_s.upcase
-        raise ArgumentError, "unsupported level: #{level}" unless LEVELS.include?(level_name)
+        pending = event(level, message, fields)
+        pending.with_otel(otel) unless otel.nil?
+        pending.send
+      end
+
+      def event(level, message, fields = {})
+        LogEvent.new(self, level, message, fields)
+      end
+
+      def emit_event(event)
+        level_name = event.level.to_s.upcase
+        raise ArgumentError, "unsupported level: #{event.level}" unless LEVELS.include?(level_name)
 
         context = NextLoggers.current_context
         merged_fields = @fields.merge(context&.fields || {})
@@ -243,10 +294,10 @@ module ORESoftware
           merged_fields["otel.trace_flags"] = context.trace_flags
           merged_fields["otel.trace_state"] = context.trace_state unless blank?(context.trace_state)
         end
-        merged_fields.merge!(stringify_keys(fields))
+        merged_fields.merge!(stringify_keys(event.fields))
         merged_fields.freeze
 
-        text = message.to_s
+        text = event.message.to_s
         record = {
           "schema" => SCHEMA,
           "id" => @id_factory.call.to_s,
@@ -267,7 +318,7 @@ module ORESoftware
         record.freeze
 
         @transports.each do |transport|
-          next if transport.respond_to?(:open_telemetry?) && transport.open_telemetry? && !(otel.nil? ? @otel_enabled : otel)
+          next if transport.respond_to?(:open_telemetry?) && transport.open_telemetry? && !event.otel_enabled?(@otel_enabled)
 
           if transport.respond_to?(:write)
             transport.write(record)

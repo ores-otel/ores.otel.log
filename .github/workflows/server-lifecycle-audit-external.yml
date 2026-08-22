@@ -30,7 +30,7 @@ jobs:
       - name: Check out canonical audit tooling
         uses: actions/checkout@v4
         with:
-          repository: ORESoftware/next-loggers.ts
+          repository: ores-otel/ores.otel.log
           ref: ${{ inputs.canonical-ref }}
           path: tooling
 

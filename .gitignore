@@ -52,10 +52,11 @@ coverage.out
 sdk/python/build/
 sdk/python/dist/
 sdk/rust/target/
-sdk/rust-context/target/
-sdk/rust-context/Cargo.lock
+/target/
 sdk/rust-otel/target/
 sdk/rust-otel/Cargo.lock
+sdk/rust-context/target/
+sdk/rust-context/Cargo.lock
 sdk/wasm/target/
 sdk/gleam/build/
 *.log

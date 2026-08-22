@@ -64,6 +64,13 @@ export interface LogTransport {
   close?(): void | Promise<void>;
 }
 
+function isOpenTelemetryTransport(transport: LogTransport): boolean {
+  return (
+    transport.otel === true ||
+    transport.name?.trim().toLowerCase() === 'opentelemetry'
+  );
+}
+
 export interface HttpTransportOptions {
   endpoint: string;
   /** Tried when the primary endpoint fails (e.g. a Google Apps Script backup collector). */
@@ -1502,7 +1509,10 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
       }
       const results = await Promise.allSettled(
         this.transports.map(async (transport) => {
-          if (transport.otel === true && !event.isOtelEnabled(this.isOtelEnabled())) {
+          if (
+            isOpenTelemetryTransport(transport) &&
+            !event.isOtelEnabled(this.isOtelEnabled())
+          ) {
             return;
           }
           await transport.write(record);

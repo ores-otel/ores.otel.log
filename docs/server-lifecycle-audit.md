@@ -35,7 +35,7 @@ on:
 
 jobs:
   lifecycle:
-    uses: ORESoftware/next-loggers.ts/.github/workflows/server-lifecycle-audit.yml@main
+    uses: ores-otel/ores.otel.log/.github/workflows/server-lifecycle-audit.yml@main
     with:
       roots: .
       strict: true

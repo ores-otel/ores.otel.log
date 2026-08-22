@@ -87,21 +87,21 @@ def existing_file_sha(repository: str, path: str, *, apply: bool) -> str | None:
     )
     if result.returncode != 0:
         return None
-    return result.stdout.strip() or None
+    sha = result.stdout.strip()
+    return sha or None
 
 
 def put_file(repository: str, path: str, content: str, message: str, *, apply: bool) -> None:
     encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    existing_sha = existing_file_sha(repository, path, apply=apply)
-
     command = [
         "gh", "api", "--method", "PUT",
         f"repos/{repository}/contents/{path}",
         "-f", f"message={message}",
         "-f", f"content={encoded}",
     ]
-    if existing_sha:
-        command.extend(["-f", f"sha={existing_sha}"])
+    sha = existing_file_sha(repository, path, apply=apply)
+    if sha:
+        command.extend(["-f", f"sha={sha}"])
     run(command, apply=apply)
 
 
@@ -194,9 +194,7 @@ def native_steps(language: str) -> str:
         working-directory: source/sdk/dart
       - run: dart analyze
         working-directory: source/sdk/dart
-      - run: dart test
-        working-directory: source/sdk/dart
-      - run: dart --enable-asserts run test/context_shutdown.dart
+      - run: dart run test/conformance.dart
         working-directory: source/sdk/dart
 ''',
         "gleam": '''      - uses: erlef/setup-beam@v1
@@ -322,15 +320,14 @@ def seed_test_repo(
 def mirror_history(*, apply: bool) -> None:
     """Mirror user-owned branch and tag refs, excluding GitHub's read-only refs/pull namespace."""
     refspecs = [
-        "+refs/heads/*:refs/heads/*",
-        "+refs/tags/*:refs/tags/*",
-        "^refs/heads/agent/pat-publication-relay-*",
+        "refs/heads/*:refs/heads/*",
+        "refs/tags/*:refs/tags/*",
     ]
     if not apply:
         print(f"DRY-RUN: gh repo clone {LEGACY} <temporary>/legacy.git -- --mirror")
         print(f"DRY-RUN: git -C <temporary>/legacy.git remote add canonical https://github.com/{CANONICAL}.git")
         print(
-            "DRY-RUN: git -C <temporary>/legacy.git push --prune canonical "
+            "DRY-RUN: git -C <temporary>/legacy.git push canonical "
             + " ".join(refspecs)
         )
         return
@@ -339,14 +336,7 @@ def mirror_history(*, apply: bool) -> None:
         run(["gh", "repo", "clone", LEGACY, str(mirror), "--", "--mirror"], apply=True)
         run(["git", "-C", str(mirror), "remote", "add", "canonical", f"https://github.com/{CANONICAL}.git"], apply=True)
         run(
-            ["git", "-C", str(mirror), "push", "--prune", "canonical", *refspecs],
-            apply=True,
-        )
-        run(
-            [
-                "gh", "api", "--method", "PATCH", f"repos/{CANONICAL}",
-                "-f", "default_branch=main", "-F", "has_wiki=false",
-            ],
+            ["git", "-C", str(mirror), "push", "canonical", *refspecs],
             apply=True,
         )
 
@@ -412,6 +402,7 @@ def main() -> int:
 
     print("No token argument is accepted. Authentication must come from a pre-authenticated gh CLI or GitHub App.")
     return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

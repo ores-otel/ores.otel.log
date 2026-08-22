@@ -12,6 +12,7 @@
     "dist",
     "src",
     "contracts",
+    "formal",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -90,14 +91,6 @@
       "types": "./dist/context.d.ts",
       "default": "./dist/context.js"
     },
-    "./shutdown": {
-      "types": "./dist/shutdown.d.ts",
-      "default": "./dist/shutdown.js"
-    },
-    "./shutdown/node": {
-      "types": "./dist/node-shutdown.d.ts",
-      "default": "./dist/node-shutdown.js"
-    },
     "./browser-stream": {
       "types": "./dist/browser-stream.d.ts",
       "default": "./dist/browser-stream.js"
@@ -134,8 +127,6 @@
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"
     },
-    "./contracts/*": "./contracts/*",
-    "./package.json": "./package.json",
     "./server-lifecycle": {
       "types": "./dist/server-lifecycle.d.ts",
       "import": "./dist/server-lifecycle.js",
@@ -152,7 +143,14 @@
       },
       "types": "./dist/execution-context.d.ts",
       "default": "./dist/execution-context.js"
-    }
+    },
+    "./contracts/log-record.schema.json": "./contracts/log-record.schema.json",
+    "./contracts/logger-api.schema.json": "./contracts/logger-api.schema.json",
+    "./contracts/logger-api.json": "./contracts/logger-api.json",
+    "./contracts/test-org-matrix.schema.json": "./contracts/test-org-matrix.schema.json",
+    "./contracts/test-org-matrix.json": "./contracts/test-org-matrix.json",
+    "./contracts/*": "./contracts/*",
+    "./package.json": "./package.json"
   },
   "engines": {
     "node": ">=18"

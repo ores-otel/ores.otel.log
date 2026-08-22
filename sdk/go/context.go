@@ -165,23 +165,6 @@ func WithLogContext(parent context.Context, value LogContext) context.Context {
 	return withLogContextSnapshot(parent, MergeLogContexts(current, value))
 }
 
-// BackgroundLogContext snapshots value into a new background context.
-func BackgroundLogContext(value LogContext) context.Context {
-	return withLogContextSnapshot(context.Background(), value)
-}
-
-// CaptureLogContext returns a defensive snapshot suitable for queues or
-// goroutines that cannot retain the source context.Context.
-func CaptureLogContext(ctx context.Context) LogContext {
-	value, _ := LogContextFrom(ctx)
-	return value
-}
-
-// WithCapturedLogContext installs a previously captured immutable snapshot.
-func WithCapturedLogContext(parent context.Context, captured LogContext) context.Context {
-	return WithLogContext(parent, captured)
-}
-
 // WithMergedLogContext is an explicit alias for callers that want the merge
 // semantics to be visible at the call site.
 func WithMergedLogContext(parent context.Context, patch LogContext) context.Context {
@@ -271,9 +254,6 @@ func LogContextMiddleware(resolve func(*http.Request) LogContext) func(http.Hand
 // ApplyContext enriches an event from context.Context without retaining the
 // context itself or any mutable map supplied by the caller.
 func (event *Event) ApplyContext(ctx context.Context) *Event {
-	if event == nil {
-		return nil
-	}
 	value, ok := LogContextFrom(ctx)
 	if !ok {
 		return event
@@ -305,7 +285,9 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		event.AddUserInfo(user)
 	}
 	if value.TraceID != "" {
-		event.AddTrace(value.TraceID, event.TraceID == "")
+		// An explicitly attached event trace remains primary; the ambient trace
+		// is still retained in TraceIDs for correlation.
+		event.AddTrace(value.TraceID)
 	}
 	for _, traceID := range value.TraceIDs {
 		event.AddTrace(traceID)
@@ -327,13 +309,4 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		event.AddMeta(item)
 	}
 	return event
-}
-
-// ApplyLogContext is the function-form compatibility API for callers that do
-// not use method chaining.
-func ApplyLogContext(event *Event, ctx context.Context) *Event {
-	if event == nil {
-		return nil
-	}
-	return event.ApplyContext(ctx)
 }

@@ -54,14 +54,14 @@ export function buildSuites({ rootDir = defaultRoot, fileExists = existsSync } =
       args: ['--enable-asserts', 'run', 'test/conformance.dart'],
       cwd: dartCwd,
     });
-    if (fileExists(legacyDartContextTest)) {
-      dartSuites.push({
-        name: 'Dart/Flutter context and shutdown',
-        command: 'dart',
-        args: ['--enable-asserts', 'run', 'test/context_shutdown.dart'],
-        cwd: dartCwd,
-      });
-    }
+  }
+  if (fileExists(legacyDartContextTest)) {
+    dartSuites.push({
+      name: 'Dart/Flutter context and shutdown',
+      command: 'dart',
+      args: ['--enable-asserts', 'run', 'test/context_shutdown.dart'],
+      cwd: dartCwd,
+    });
   }
 
   return [
@@ -101,6 +101,18 @@ export function buildSuites({ rootDir = defaultRoot, fileExists = existsSync } =
       command: 'cargo',
       args: ['test'],
       cwd: path.join(rootDir, 'sdk', 'rust-otel'),
+    },
+    {
+      name: 'Rust context format',
+      command: 'cargo',
+      args: ['fmt', '--', '--check'],
+      cwd: path.join(rootDir, 'sdk', 'rust-context'),
+    },
+    {
+      name: 'Rust thread/Tokio context',
+      command: 'cargo',
+      args: ['test', '--features', 'tokio'],
+      cwd: path.join(rootDir, 'sdk', 'rust-context'),
     },
     {
       name: 'Gleam',

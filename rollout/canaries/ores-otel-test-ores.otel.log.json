@@ -4,7 +4,7 @@
   "productionRepository": "ores-otel/ores.otel.log",
   "canaryRepository": "ores-otel-test/ores.otel.log",
   "canaryBranch": "agent/lifecycle-canary-20260808",
-  "canonicalRepository": "ORESoftware/next-loggers.ts",
+  "canonicalRepository": "ores-otel/ores.otel.log",
   "canonicalBranch": "agent/polyglot-context-shutdown-20260808",
   "state": "canary-pending",
   "staticAudit": {
