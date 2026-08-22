@@ -12,6 +12,7 @@
     "dist",
     "src",
     "contracts",
+    "formal",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"

@@ -26,6 +26,7 @@ The canonical repository is `ores-otel/ores.otel.log`. The historical `ORESoftwa
 | `schemas/backpressure-result.schema.json` | Bounded transport accounting receipt |
 | `schemas/backpressure-conformance-vectors.schema.json` | Schema-valid positive and semantic-negative backpressure vectors |
 | `schemas/backpressure-conformance-report.schema.json` | Receipt-free adapter result with source/runtime identity and vector digest |
+| `schemas/shutdown-transition-vectors.schema.json` | Closed, exhaustive TypeScript/Dart/Rust shutdown transition corpus |
 | `schemas/sdk-manifest.schema.json` | Required logical APIs and runtime guarantees for each SDK |
 | `schemas/test-repository-matrix.schema.json` | Cross-repository test-org contract |
 | `sdk-manifests.json` | Index of per-language symbols, context mechanisms, transports, tests, and promotion blockers |
@@ -45,6 +46,11 @@ contain only vector and rule identifiers; receipt contents are never copied into
 the report.
 
 Every schema uses JSON Schema Draft 2020-12 and a canonical `$id` rooted at the new repository. The old `next-loggers/v1` discriminator is intentionally preserved so the repository move is not a wire-format break.
+
+JSON Schema proves structural validity, not temporal behavior. The shared
+transition vectors, executable state-space explorer, and TLA+ safety/liveness
+models under [`../formal`](../formal/README.md) cover the shutdown and bounded
+delivery semantics that cannot be expressed as a document schema.
 
 ## Logical API
 
