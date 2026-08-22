@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.oresoftware.com/ores-otel/shutdown-transition-vectors/v1",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/shutdown-transition-vectors.schema.json",
   "title": "Cross-language shutdown transition vectors",
   "type": "object",
   "additionalProperties": false,

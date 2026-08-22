@@ -47,18 +47,28 @@ def repair_dart() -> None:
         text,
     )
 
-    flush_repaired = (
+    lifecycle_is_part_of_transport = all(
+        marker in text
+        for marker in (
+            "abstract interface class LogTransport",
+            "FutureOr<void> flush() {}",
+            "FutureOr<void> close() {}",
+            "Future.sync(transport.flush)",
+            "Future.sync(transport.close)",
+        )
+    )
+    flush_repaired = lifecycle_is_part_of_transport or (
         "final flushable = transport as FlushableLogTransport;" in text
         or "transport as FlushableLogTransport).flush()" in text
     )
-    exit_repaired = (
+    exit_repaired = lifecycle_is_part_of_transport or (
         "final exitFlushable = transport as ExitFlushableLogTransport;" in text
         or (
             "transport as ExitFlushableLogTransport" in text
             and ".flushOnExit(" in text
         )
     )
-    close_repaired = (
+    close_repaired = lifecycle_is_part_of_transport or (
         "final closable = transport as ClosableLogTransport;" in text
         or "transport as ClosableLogTransport).close()" in text
     )
