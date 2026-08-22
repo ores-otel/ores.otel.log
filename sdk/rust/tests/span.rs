@@ -6,7 +6,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::future::{pending, Future};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Wake, Waker};
+use std::task::{Context, Poll, Waker};
 
 #[derive(Clone, Debug)]
 struct TestError(&'static str);
@@ -143,11 +143,6 @@ fn recording_span_records_error_and_preserves_identity() {
     );
 }
 
-struct NoopWake;
-impl Wake for NoopWake {
-    fn wake(self: Arc<Self>) {}
-}
-
 #[test]
 fn dropping_async_span_future_ends_application_owned_span() {
     let (logger, _) = logger();
@@ -160,8 +155,7 @@ fn dropping_async_span_future_ends_application_owned_span() {
         JsonObject::from_iter([("test".into(), json!(true))]),
         |_| async { pending::<Result<(), TestError>>().await },
     );
-    let waker = Waker::from(Arc::new(NoopWake));
-    let mut task = Context::from_waker(&waker);
+    let mut task = Context::from_waker(Waker::noop());
     let mut future = Box::pin(future);
     assert!(matches!(future.as_mut().poll(&mut task), Poll::Pending));
     drop(future);

@@ -38,6 +38,7 @@
     "sdk/wasm/Cargo.lock",
     "contracts",
     "docs",
+    "formal",
     ".cli-flags.toml",
     "README.md",
     "LICENSE"
@@ -183,6 +184,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:contracts": "node scripts/validate-contracts.mjs && node scripts/test-observability-contracts.mjs",
+    "test:formal": "npm run build && node scripts/check-formal-model.mjs && node --test tests/formal-model.test.mjs",
     "test:polyglot": "node scripts/test-polyglot.mjs",
     "test:runtimes": "node scripts/test-runtimes.mjs",
     "test:all": "npm run test:contracts && npm test && npm run test:runtimes && npm run test:polyglot",

@@ -15,6 +15,13 @@ export type ShutdownCause =
   | 'programmatic';
 export type ShutdownPhase = 'running' | 'draining' | 'forced' | 'closed';
 export type ShutdownAction = 'begin-graceful' | 'force' | 'ignore';
+export type ShutdownStateEvent = 'trigger' | 'force-now' | 'mark-closed';
+export type ShutdownModelAction = ShutdownAction | 'close';
+
+export interface ShutdownStateTransition {
+  readonly phase: ShutdownPhase;
+  readonly action: ShutdownModelAction;
+}
 
 export interface ShutdownEvent {
   phase: ShutdownPhase;
@@ -565,11 +572,33 @@ export function installNodeServerShutdown(
 }
 
 /** Pure transition helper used by non-Node adapters and conformance tests. */
+export function transitionShutdownState(
+  phase: ShutdownPhase,
+  event: ShutdownStateEvent,
+): ShutdownStateTransition {
+  if (event === 'trigger') {
+    if (phase === 'running') {
+      return { phase: 'draining', action: 'begin-graceful' };
+    }
+    if (phase === 'draining') {
+      return { phase: 'forced', action: 'force' };
+    }
+  }
+  if (event === 'force-now') {
+    if (phase === 'running' || phase === 'draining') {
+      return { phase: 'forced', action: 'force' };
+    }
+  }
+  if (event === 'mark-closed' && phase === 'draining') {
+    return { phase: 'closed', action: 'close' };
+  }
+  return { phase, action: 'ignore' };
+}
+
 export function nextShutdownAction(
   phase: ShutdownPhase,
   _cause: ShutdownCause,
 ): ShutdownAction {
-  if (phase === 'running') return 'begin-graceful';
-  if (phase === 'draining') return 'force';
-  return 'ignore';
+  const action = transitionShutdownState(phase, 'trigger').action;
+  return action === 'close' ? 'ignore' : action;
 }

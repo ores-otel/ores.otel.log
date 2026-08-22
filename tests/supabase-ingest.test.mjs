@@ -190,6 +190,53 @@ test('failed delivery restores the exact batch order and retries with the same i
   assert.equal(transport.snapshot().retryAttempts, 0);
 });
 
+test('failed in-flight delivery cannot overfill a queue refilled by producers', async () => {
+  const dropped = [];
+  const delivered = [];
+  let releaseFirstRequest;
+  let requestCount = 0;
+  const firstResponse = new Promise((resolve) => {
+    releaseFirstRequest = resolve;
+  });
+  const transport = createSupabaseIngestTransport({
+    url: 'https://project.supabase.co',
+    publishableKey: 'sb_publishable_public',
+    accessToken: 'user-token',
+    maxQueueSize: 2,
+    batchSize: 1,
+    flushIntervalMillis: 60_000,
+    retryBaseMillis: 60_000,
+    retryMaxMillis: 60_000,
+    onDrop: (drop) => dropped.push([drop.reason, drop.record.id]),
+    fetch: async (_url, init) => {
+      requestCount += 1;
+      const ids = JSON.parse(init.body).records.map(({ id }) => id);
+      if (requestCount === 1) {
+        await firstResponse;
+        return new Response(null, { status: 503, statusText: 'Unavailable' });
+      }
+      delivered.push(...ids);
+      return new Response(null, { status: 202 });
+    },
+  });
+
+  await transport.write(record('in-flight'));
+  const failedFlush = transport.flush();
+  await transport.write(record('queued-second'));
+  await transport.write(record('queued-newest'));
+  assert.equal(transport.snapshot().queued, 2);
+
+  releaseFirstRequest();
+  await assert.rejects(failedFlush, /returned 503 Unavailable/u);
+  assert.equal(transport.snapshot().queued, 2);
+  assert.equal(transport.snapshot().dropped, 1);
+  assert.deepEqual(dropped, [['queue-full', 'queued-newest']]);
+
+  await transport.flush();
+  assert.deepEqual(delivered, ['in-flight', 'queued-second']);
+  assert.equal(transport.snapshot().queued, 0);
+});
+
 test('oversized records are dropped before network delivery', async () => {
   const drops = [];
   let requests = 0;

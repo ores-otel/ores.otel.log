@@ -1,0 +1,91 @@
+{
+  "$schema": "../contracts/schemas/shutdown-transition-vectors.schema.json",
+  "schema": "ores.otel.log/shutdown-transition-vectors/v1",
+  "machine": "server-shutdown/v1",
+  "cases": [
+    {
+      "id": "running-trigger",
+      "phase": "running",
+      "event": "trigger",
+      "expectedPhase": "draining",
+      "expectedAction": "begin-graceful"
+    },
+    {
+      "id": "draining-trigger",
+      "phase": "draining",
+      "event": "trigger",
+      "expectedPhase": "forced",
+      "expectedAction": "force"
+    },
+    {
+      "id": "forced-trigger",
+      "phase": "forced",
+      "event": "trigger",
+      "expectedPhase": "forced",
+      "expectedAction": "ignore"
+    },
+    {
+      "id": "closed-trigger",
+      "phase": "closed",
+      "event": "trigger",
+      "expectedPhase": "closed",
+      "expectedAction": "ignore"
+    },
+    {
+      "id": "running-force-now",
+      "phase": "running",
+      "event": "force-now",
+      "expectedPhase": "forced",
+      "expectedAction": "force"
+    },
+    {
+      "id": "draining-force-now",
+      "phase": "draining",
+      "event": "force-now",
+      "expectedPhase": "forced",
+      "expectedAction": "force"
+    },
+    {
+      "id": "forced-force-now",
+      "phase": "forced",
+      "event": "force-now",
+      "expectedPhase": "forced",
+      "expectedAction": "ignore"
+    },
+    {
+      "id": "closed-force-now",
+      "phase": "closed",
+      "event": "force-now",
+      "expectedPhase": "closed",
+      "expectedAction": "ignore"
+    },
+    {
+      "id": "running-mark-closed",
+      "phase": "running",
+      "event": "mark-closed",
+      "expectedPhase": "running",
+      "expectedAction": "ignore"
+    },
+    {
+      "id": "draining-mark-closed",
+      "phase": "draining",
+      "event": "mark-closed",
+      "expectedPhase": "closed",
+      "expectedAction": "close"
+    },
+    {
+      "id": "forced-mark-closed",
+      "phase": "forced",
+      "event": "mark-closed",
+      "expectedPhase": "forced",
+      "expectedAction": "ignore"
+    },
+    {
+      "id": "closed-mark-closed",
+      "phase": "closed",
+      "event": "mark-closed",
+      "expectedPhase": "closed",
+      "expectedAction": "ignore"
+    }
+  ]
+}
