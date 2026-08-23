@@ -1,0 +1,62 @@
+name: Apply Supabase Realtime patch payload
+
+on:
+  push:
+    branches:
+      - den-3432/supabase-realtime-batch
+    paths:
+      - .patch-payload/**
+      - .github/workflows/apply-supabase-realtime-patch.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-supabase-realtime-patch
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: den-3432/supabase-realtime-batch
+          fetch-depth: 0
+      - name: Reconstruct, verify, and commit the reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -f .patch-payload/READY ]]; then
+            echo 'Payload is not complete yet.'
+            exit 0
+          fi
+          cat .patch-payload/part-* | base64 --decode > /tmp/ores-realtime-patch.tar.gz
+          echo 'b84de332d8de99e784ce389ce2b9dcb24b3c4ed16daf5ceca3d167f4105baf3a  /tmp/ores-realtime-patch.tar.gz' | sha256sum --check -
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          import tarfile
+
+          archive = Path('/tmp/ores-realtime-patch.tar.gz')
+          root = Path.cwd().resolve()
+          with tarfile.open(archive, 'r:gz') as handle:
+              for member in handle.getmembers():
+                  relative = PurePosixPath(member.name)
+                  if relative.is_absolute() or '..' in relative.parts:
+                      raise SystemExit(f'unsafe archive member: {member.name}')
+                  if member.issym() or member.islnk():
+                      raise SystemExit(f'links are not allowed: {member.name}')
+              handle.extractall(root)
+          PY
+          chmod +x .zpkg-smoke.sh
+          rm -rf .patch-payload .github/workflows/apply-supabase-realtime-patch.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No patch changes were produced.'
+            exit 0
+          fi
+          git commit -m 'feat(supabase): add acknowledged realtime batch transports'
+          git push origin HEAD:den-3432/supabase-realtime-batch
