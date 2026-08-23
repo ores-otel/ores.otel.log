@@ -134,6 +134,20 @@ R withLogContext<R>(LogContext context, R Function() callback) {
 R runWithLogContext<R>(LogContext context, R Function() callback) =>
     withLogContext(context, callback);
 
+/// Captures a defensive snapshot for queue, isolate, or callback handoff.
+LogContext? captureLogContext() => currentLogContext();
+
+R withCapturedLogContext<R>(
+  LogContext? captured,
+  R Function() callback,
+) =>
+    captured == null ? callback() : withLogContext(captured, callback);
+
+R Function() bindLogContext<R>(R Function() callback) {
+  final captured = captureLogContext();
+  return () => withCapturedLogContext(captured, callback);
+}
+
 /// Mutates only the current Zone frame. Returns false outside a context scope.
 bool updateLogContext(LogContext patch) {
   final value = Zone.current[_contextKey];
