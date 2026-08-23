@@ -102,6 +102,18 @@ class CursorQueue<T> {
     return value;
   }
 
+  pop(): T | undefined {
+    if (this.head >= this.values.length) {
+      return undefined;
+    }
+    const value = this.values.pop();
+    if (this.head >= this.values.length) {
+      this.values = [];
+      this.head = 0;
+    }
+    return value;
+  }
+
   prepend(values: readonly T[]): void {
     if (values.length === 0) {
       return;
@@ -407,6 +419,17 @@ export class SupabaseIngestTransport implements LogTransport {
     return batch;
   }
 
+  private restoreFailedBatch(batch: readonly QueuedRecord[]): void {
+    this.queue.prepend(batch);
+    while (this.queue.length > this.resolved.maxQueueSize) {
+      const displaced = this.queue.pop();
+      if (!displaced) {
+        throw new Error('Supabase telemetry retry queue accounting failed');
+      }
+      this.drop(displaced.record, 'queue-full');
+    }
+  }
+
   private scheduleInterval(): void {
     if (
       !this.accepting ||
@@ -558,7 +581,7 @@ export class SupabaseIngestTransport implements LogTransport {
         this.retryAttempts = 0;
       } catch (error) {
         this.failures += 1;
-        this.queue.prepend(batch);
+        this.restoreFailedBatch(batch);
         throw error;
       }
     }
@@ -608,7 +631,7 @@ export class SupabaseIngestTransport implements LogTransport {
         this.retryAttempts = 0;
       } catch (error) {
         this.failures += 1;
-        this.queue.prepend(batch);
+        this.restoreFailedBatch(batch);
         this.reportError(error);
         throw error;
       }

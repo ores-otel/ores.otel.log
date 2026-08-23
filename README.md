@@ -598,6 +598,27 @@ await log.close({ timeoutMillis: 4_000 });
 
 Set `flushOnShutdown: false` for Node/Bun or `flushOnUnload: false` for browser/Deno when the host owns lifecycle coordination. A direct `process.exit()` cannot wait for asynchronous JavaScript; call `await log.close()` before using it. Browser shutdown APIs are inherently best-effort, so use the HTTP transport in addition to WebSocket streaming when the final records must be persisted.
 
+## Formal verification
+
+Wire records and cross-language fixtures are constrained by JSON Schema. The
+behavioral layer is checked separately with TLA+ and executable finite-state
+models under [`formal/`](formal/README.md):
+
+- the shared TypeScript, Dart, and Rust shutdown transition relation is total,
+  monotonic, terminal, and flushes at most once;
+- the bounded OTEL/Supabase delivery model accounts for every attempted record
+  as queued, in flight, acknowledged, or explicitly dropped;
+- queue capacity and retry limits remain invariant when producers refill a
+  queue while a failed batch is in flight;
+- a completed close is drained, flushed, and terminal; TLC also checks eventual
+  completion under the model's fairness assumptions.
+
+`npm run test:formal` runs the executable state-space explorer and TypeScript
+refinement. CI additionally runs the pinned TLA+ checker and the Rust and Dart
+refinement suites. These checks complement concurrency, fault-injection, and
+real-runtime tests; the finite bounds and proof boundary are documented with
+the models.
+
 ## Extending the classes
 
 All logger and event classes are public. Protected event state and logger hooks allow custom event builders, console formatting, dispatch, and runtime fields without forking the package:

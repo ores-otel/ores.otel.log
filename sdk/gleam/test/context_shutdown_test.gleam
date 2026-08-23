@@ -1,4 +1,5 @@
 import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
@@ -149,4 +150,57 @@ pub fn timeout_forces_without_incrementing_signal_count_test() {
   let #(state, action) = shutdown.timeout(state)
   action |> should.equal(shutdown.Force)
   shutdown.signal_count(state) |> should.equal(1)
+}
+
+pub fn formal_shutdown_relation_refines_all_twelve_shared_pairs_test() {
+  let cases = [
+    #(
+      shutdown.Running,
+      shutdown.Trigger,
+      shutdown.Draining,
+      shutdown.ModelBeginGraceful,
+    ),
+    #(shutdown.Draining, shutdown.Trigger, shutdown.Forced, shutdown.ModelForce),
+    #(shutdown.Forced, shutdown.Trigger, shutdown.Forced, shutdown.ModelIgnore),
+    #(shutdown.Closed, shutdown.Trigger, shutdown.Closed, shutdown.ModelIgnore),
+    #(shutdown.Running, shutdown.ForceNow, shutdown.Forced, shutdown.ModelForce),
+    #(
+      shutdown.Draining,
+      shutdown.ForceNow,
+      shutdown.Forced,
+      shutdown.ModelForce,
+    ),
+    #(shutdown.Forced, shutdown.ForceNow, shutdown.Forced, shutdown.ModelIgnore),
+    #(shutdown.Closed, shutdown.ForceNow, shutdown.Closed, shutdown.ModelIgnore),
+    #(
+      shutdown.Running,
+      shutdown.MarkClosed,
+      shutdown.Running,
+      shutdown.ModelIgnore,
+    ),
+    #(
+      shutdown.Draining,
+      shutdown.MarkClosed,
+      shutdown.Closed,
+      shutdown.ModelClose,
+    ),
+    #(
+      shutdown.Forced,
+      shutdown.MarkClosed,
+      shutdown.Forced,
+      shutdown.ModelIgnore,
+    ),
+    #(
+      shutdown.Closed,
+      shutdown.MarkClosed,
+      shutdown.Closed,
+      shutdown.ModelIgnore,
+    ),
+  ]
+
+  list.each(cases, fn(vector) {
+    let #(phase, event, expected_phase, expected_action) = vector
+    shutdown.transition(phase, event)
+    |> should.equal(shutdown.Transition(expected_phase, expected_action))
+  })
 }

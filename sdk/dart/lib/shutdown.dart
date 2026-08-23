@@ -7,7 +7,47 @@ enum ShutdownCause { sigint, sigterm, stdinEof, timeout, programmatic }
 
 enum ShutdownPhase { running, draining, forced, closed }
 
-enum ShutdownAction { beginGraceful, force, ignore }
+enum ShutdownAction { beginGraceful, force, close, ignore }
+
+enum ShutdownStateEvent { trigger, forceNow, markClosed }
+
+class ShutdownTransition {
+  const ShutdownTransition({required this.phase, required this.action});
+
+  final ShutdownPhase phase;
+  final ShutdownAction action;
+}
+
+ShutdownTransition transitionShutdownState(
+  ShutdownPhase phase,
+  ShutdownStateEvent event,
+) =>
+    switch ((phase, event)) {
+      (ShutdownPhase.running, ShutdownStateEvent.trigger) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.draining,
+          action: ShutdownAction.beginGraceful,
+        ),
+      (ShutdownPhase.draining, ShutdownStateEvent.trigger) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.forced,
+          action: ShutdownAction.force,
+        ),
+      (
+        ShutdownPhase.running || ShutdownPhase.draining,
+        ShutdownStateEvent.forceNow,
+      ) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.forced,
+          action: ShutdownAction.force,
+        ),
+      (ShutdownPhase.draining, ShutdownStateEvent.markClosed) =>
+        const ShutdownTransition(
+          phase: ShutdownPhase.closed,
+          action: ShutdownAction.close,
+        ),
+      _ => ShutdownTransition(phase: phase, action: ShutdownAction.ignore),
+    };
 
 class ShutdownStateMachine {
   ShutdownStateMachine({required this.interactive});
@@ -18,40 +58,22 @@ class ShutdownStateMachine {
 
   ShutdownAction trigger(ShutdownCause cause) {
     signalCount += 1;
-    switch (phase) {
-      case ShutdownPhase.running:
-        phase = ShutdownPhase.draining;
-        return ShutdownAction.beginGraceful;
-      case ShutdownPhase.draining:
-        phase = ShutdownPhase.forced;
-        return ShutdownAction.force;
-      case ShutdownPhase.forced:
-      case ShutdownPhase.closed:
-        return ShutdownAction.ignore;
-    }
+    return _apply(ShutdownStateEvent.trigger);
   }
 
-  ShutdownAction forceNow() {
-    switch (phase) {
-      case ShutdownPhase.running:
-      case ShutdownPhase.draining:
-        phase = ShutdownPhase.forced;
-        return ShutdownAction.force;
-      case ShutdownPhase.forced:
-      case ShutdownPhase.closed:
-        return ShutdownAction.ignore;
-    }
-  }
+  ShutdownAction forceNow() => _apply(ShutdownStateEvent.forceNow);
 
   bool markClosed() {
-    if (phase != ShutdownPhase.draining) {
-      return false;
-    }
-    phase = ShutdownPhase.closed;
-    return true;
+    return _apply(ShutdownStateEvent.markClosed) == ShutdownAction.close;
   }
 
   ShutdownAction timeout() => forceNow();
+
+  ShutdownAction _apply(ShutdownStateEvent event) {
+    final transition = transitionShutdownState(phase, event);
+    phase = transition.phase;
+    return transition.action;
+  }
 }
 
 class ShutdownEvent {

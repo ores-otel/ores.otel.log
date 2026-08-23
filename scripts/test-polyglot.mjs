@@ -34,6 +34,14 @@ export function buildSuites({ rootDir = defaultRoot, fileExists = existsSync } =
       args: ['test', 'test/conformance_test.dart'],
       cwd: dartCwd,
     });
+    if (fileExists(legacyDartContextTest)) {
+      dartSuites.push({
+        name: 'Dart/Flutter context and shutdown',
+        command: 'dart',
+        args: ['--enable-asserts', 'run', 'test/context_shutdown.dart'],
+        cwd: dartCwd,
+      });
+    }
   } else {
     if (!fileExists(legacyDartWireTest)) {
       throw new Error(
@@ -75,6 +83,18 @@ export function buildSuites({ rootDir = defaultRoot, fileExists = existsSync } =
       command: 'cargo',
       args: ['test', '--locked'],
       cwd: path.join(rootDir, 'sdk', 'rust'),
+    },
+    {
+      name: 'Rust context format',
+      command: 'cargo',
+      args: ['fmt', '--', '--check'],
+      cwd: path.join(rootDir, 'sdk', 'rust-context'),
+    },
+    {
+      name: 'Rust context',
+      command: 'cargo',
+      args: ['test', '--features', 'tokio'],
+      cwd: path.join(rootDir, 'sdk', 'rust-context'),
     },
     {
       name: 'Rust OpenTelemetry companion',

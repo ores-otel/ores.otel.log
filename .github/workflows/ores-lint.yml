@@ -8,9 +8,11 @@ on:
 
 jobs:
   lint:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Detect project types
         id: detect
@@ -18,20 +20,18 @@ jobs:
           [ -f package.json ] && echo "js=true" >> "$GITHUB_OUTPUT" || echo "js=false" >> "$GITHUB_OUTPUT"
           [ -f Cargo.toml ]   && echo "rs=true" >> "$GITHUB_OUTPUT" || echo "rs=false" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: steps.detect.outputs.js == 'true'
         with:
           node-version: '22'
 
-      # ESLint is a global tool here, not a repo dependency - so this job never
-      # runs `npm install` and never needs the repo's node_modules.
-      - name: Install eslint globally
+      - name: Install JS dependencies
         if: steps.detect.outputs.js == 'true'
-        run: npm i -g eslint typescript-eslint
+        run: npm ci
 
       - name: Install clippy
         if: steps.detect.outputs.rs == 'true'
-        run: rustup component add clippy || true
+        run: rustup component add clippy
 
       - name: Run ores-lint
         run: sh .ores-lint/lint.sh

@@ -154,6 +154,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "oresoftware-next-loggers-otel"
+version = "0.1.0"
+dependencies = [
+ "oresoftware-next-loggers",
+]
+
+[[package]]
 name = "oresoftware-next-loggers-wasm"
 version = "0.1.0"
 

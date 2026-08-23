@@ -23,6 +23,67 @@ const (
 	ShutdownProgrammatic ShutdownCause = "programmatic"
 )
 
+type ShutdownStateEvent string
+
+const (
+	ShutdownTrigger    ShutdownStateEvent = "trigger"
+	ShutdownForceNow   ShutdownStateEvent = "force-now"
+	ShutdownMarkClosed ShutdownStateEvent = "mark-closed"
+)
+
+type ShutdownAction string
+
+const (
+	ShutdownBeginGraceful ShutdownAction = "begin-graceful"
+	ShutdownForce         ShutdownAction = "force"
+	ShutdownClose         ShutdownAction = "close"
+	ShutdownIgnore        ShutdownAction = "ignore"
+)
+
+type ShutdownTransition struct {
+	Phase  ShutdownPhase
+	Action ShutdownAction
+}
+
+type shutdownPattern struct {
+	phase ShutdownPhase
+	event ShutdownStateEvent
+}
+
+// TransitionShutdownState is the pure, total relation refined from the shared
+// TLA+ lifecycle vectors. Go has no algebraic-data-type pattern syntax, so a
+// comparable struct is used as the pair pattern. Invalid open-string values are
+// rejected instead of silently extending the closed formal state space.
+func TransitionShutdownState(
+	phase ShutdownPhase,
+	event ShutdownStateEvent,
+) (ShutdownTransition, error) {
+	validPhase := phase == ShutdownRunning || phase == ShutdownDraining ||
+		phase == ShutdownForced || phase == ShutdownClosed
+	validEvent := event == ShutdownTrigger || event == ShutdownForceNow ||
+		event == ShutdownMarkClosed
+	if !validPhase || !validEvent {
+		return ShutdownTransition{}, fmt.Errorf(
+			"invalid shutdown transition pair %q:%q",
+			phase,
+			event,
+		)
+	}
+
+	switch (shutdownPattern{phase: phase, event: event}) {
+	case shutdownPattern{phase: ShutdownRunning, event: ShutdownTrigger}:
+		return ShutdownTransition{Phase: ShutdownDraining, Action: ShutdownBeginGraceful}, nil
+	case shutdownPattern{phase: ShutdownDraining, event: ShutdownTrigger},
+		shutdownPattern{phase: ShutdownRunning, event: ShutdownForceNow},
+		shutdownPattern{phase: ShutdownDraining, event: ShutdownForceNow}:
+		return ShutdownTransition{Phase: ShutdownForced, Action: ShutdownForce}, nil
+	case shutdownPattern{phase: ShutdownDraining, event: ShutdownMarkClosed}:
+		return ShutdownTransition{Phase: ShutdownClosed, Action: ShutdownClose}, nil
+	default:
+		return ShutdownTransition{Phase: phase, Action: ShutdownIgnore}, nil
+	}
+}
+
 type ShutdownPhase string
 
 const (

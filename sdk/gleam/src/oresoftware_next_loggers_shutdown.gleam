@@ -26,6 +26,37 @@ pub type Action {
   Ignore
 }
 
+/// Closed external event alphabet shared with the TLA+ transition vectors.
+pub type StateEvent {
+  Trigger
+  ForceNow
+  MarkClosed
+}
+
+/// Side effects named by the pure formal relation. These are separate from the
+/// runtime `Action` type because only the formal relation can request `Close`.
+pub type ModelAction {
+  ModelBeginGraceful
+  ModelForce
+  ModelClose
+  ModelIgnore
+}
+
+pub type Transition {
+  Transition(phase: Phase, action: ModelAction)
+}
+
+/// Total pair-pattern transition relation refined from the shared TLA+ model.
+pub fn transition(phase: Phase, event: StateEvent) -> Transition {
+  case phase, event {
+    Running, Trigger -> Transition(Draining, ModelBeginGraceful)
+    Draining, Trigger | Running, ForceNow | Draining, ForceNow ->
+      Transition(Forced, ModelForce)
+    Draining, MarkClosed -> Transition(Closed, ModelClose)
+    _, _ -> Transition(phase, ModelIgnore)
+  }
+}
+
 pub type State {
   State(phase: Phase, interactive: Bool, signal_count: Int, eof_armed: Bool)
 }

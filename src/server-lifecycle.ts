@@ -15,6 +15,29 @@ export type ShutdownCause =
   | 'programmatic';
 export type ShutdownPhase = 'running' | 'draining' | 'forced' | 'closed';
 export type ShutdownAction = 'begin-graceful' | 'force' | 'ignore';
+export type ShutdownStateEvent = 'trigger' | 'force-now' | 'mark-closed';
+export type ShutdownModelAction = ShutdownAction | 'close';
+
+export interface ShutdownStateTransition {
+  readonly phase: ShutdownPhase;
+  readonly action: ShutdownModelAction;
+}
+
+type ShutdownTransitionKey = `${ShutdownPhase}:${ShutdownStateEvent}`;
+
+/** Non-identity cases in the total shutdown relation. Unlisted pairs ignore. */
+const SHUTDOWN_TRANSITIONS: Readonly<
+  Partial<Record<ShutdownTransitionKey, ShutdownStateTransition>>
+> = Object.freeze({
+  'running:trigger': Object.freeze({
+    phase: 'draining',
+    action: 'begin-graceful',
+  }),
+  'draining:trigger': Object.freeze({ phase: 'forced', action: 'force' }),
+  'running:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:mark-closed': Object.freeze({ phase: 'closed', action: 'close' }),
+});
 
 export interface ShutdownEvent {
   phase: ShutdownPhase;
@@ -565,11 +588,20 @@ export function installNodeServerShutdown(
 }
 
 /** Pure transition helper used by non-Node adapters and conformance tests. */
+export function transitionShutdownState(
+  phase: ShutdownPhase,
+  event: ShutdownStateEvent,
+): ShutdownStateTransition {
+  return (
+    SHUTDOWN_TRANSITIONS[`${phase}:${event}`]
+    ?? Object.freeze({ phase, action: 'ignore' as const })
+  );
+}
+
 export function nextShutdownAction(
   phase: ShutdownPhase,
   _cause: ShutdownCause,
 ): ShutdownAction {
-  if (phase === 'running') return 'begin-graceful';
-  if (phase === 'draining') return 'force';
-  return 'ignore';
+  const action = transitionShutdownState(phase, 'trigger').action;
+  return action === 'close' ? 'ignore' : action;
 }

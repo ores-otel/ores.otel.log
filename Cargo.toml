@@ -2,6 +2,7 @@
 members = [
   "sdk/rust",
   "sdk/rust-context",
+  "sdk/rust-otel",
   "sdk/wasm",
 ]
 resolver = "2"

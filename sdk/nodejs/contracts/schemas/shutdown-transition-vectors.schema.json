@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/shutdown-transition-vectors.schema.json",
+  "title": "Cross-language shutdown transition vectors",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schema", "machine", "cases"],
+  "properties": {
+    "$schema": {
+      "const": "../contracts/schemas/shutdown-transition-vectors.schema.json"
+    },
+    "schema": {
+      "const": "ores.otel.log/shutdown-transition-vectors/v1"
+    },
+    "machine": {
+      "const": "server-shutdown/v1"
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "items": {
+        "$ref": "#/$defs/case"
+      }
+    }
+  },
+  "$defs": {
+    "phase": {
+      "type": "string",
+      "enum": ["running", "draining", "forced", "closed"]
+    },
+    "event": {
+      "type": "string",
+      "enum": ["trigger", "force-now", "mark-closed"]
+    },
+    "action": {
+      "type": "string",
+      "enum": ["begin-graceful", "force", "close", "ignore"]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "phase",
+        "event",
+        "expectedPhase",
+        "expectedAction"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "phase": {
+          "$ref": "#/$defs/phase"
+        },
+        "event": {
+          "$ref": "#/$defs/event"
+        },
+        "expectedPhase": {
+          "$ref": "#/$defs/phase"
+        },
+        "expectedAction": {
+          "$ref": "#/$defs/action"
+        }
+      }
+    }
+  }
+}

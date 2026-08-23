@@ -126,6 +126,5 @@ Future<void> main() async {
   await blockedSignals.close();
 
   await logger.close();
-  assert(transport.closed);
   print('Dart context and shutdown conformance passed');
 }

@@ -75,13 +75,11 @@ this directory is managed and will be replaced on the next rollout.
 ## Graceful degradation
 
 Nothing here is allowed to fail loudly for an environmental reason. ESLint not
-installed, too old, clippy not installed, no TypeScript parser available, crate
-deps not fetchable — each is reported as an actionable skip, not an error.
-Repo-specific ESLint config that already existed is never overwritten.
-
-CI follows the same model: the workflow runs `npm i -g eslint typescript-eslint`
-and never runs `npm install` for the repo itself, so linting a PR does not
-require the repo's dependency tree to resolve.
+installed, too old, clippy not installed, no TypeScript parser available, or
+crate dependencies not fetchable — each is reported as an actionable skip,
+not an error. Repo-specific ESLint config that already existed is never
+overwritten. The script accepts a repository-pinned ESLint first and a global
+ESLint fallback; this repository's CI uses `npm ci` for its locked toolchain.
 
 ## Per-repo customisation
 
