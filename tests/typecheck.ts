@@ -18,6 +18,7 @@ import {
 } from '@oresoftware/next-loggers/cloudflare';
 import { createNodeLogger, base as nodeBase } from '@oresoftware/next-loggers/node';
 import eslintPlugin, { requireSendRule } from '@oresoftware/next-loggers/eslint';
+import { withOpenTelemetry } from '@oresoftware/next-loggers/otel';
 
 // `export * as base` must carry types, not only values: every alias below
 // resolves a base type through a runtime entry point's namespace re-export.
@@ -35,6 +36,7 @@ type NodeSharedHttpOptions = nodeBase.HttpTransportOptions;
 type NodeSharedRecord = nodeBase.LogRecord;
 
 const transport: LogTransport = {
+  otel: false,
   write(record: LogRecord): void {
     void record.message;
   },
@@ -61,6 +63,13 @@ void ((record: BrowserSharedRecord | BunSharedRecord | EdgeSharedRecord | Cloudf
 
 void runtimeLogger.info('root logger').send();
 void createLogger({ transports: transport }).info('base').send();
+const routedLogger = createLogger({ otel: false, transports: transport }).useOtel().notOtel();
+void routedLogger.info('opt in').useOtel().resetOtel().withOtel(true).send();
+void routedLogger.info('resolved').isOtelEnabled(routedLogger.isOtelEnabled());
+void withOpenTelemetry(
+  { transports: transport },
+  { logger: { emit() {} } },
+);
 void createBrowserLogger(browserOptions).info('browser').send();
 void createEdgeLogger({ supabase: edgeSupabase }).info('edge').send();
 void createCloudflareWorkerLogger(cloudflareOptions).info('cloudflare').send();

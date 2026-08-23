@@ -51,15 +51,15 @@ test('no export target is a CommonJS file', () => {
   }
 });
 
-test('every exports entry resolves to a build artifact or wildcard directory', () => {
+test('every exports entry resolves to a file the build produced', () => {
   assert.ok(leaves.length > 0, 'exports map should not be empty');
   for (const [trail, target] of leaves) {
-    const filesystemTarget = target.includes('*')
-      ? target.slice(0, target.indexOf('*'))
+    const readableTarget = target.includes('*')
+      ? target.slice(0, target.indexOf('*')).replace(/\/$/u, '')
       : target;
     assert.doesNotThrow(
-      () => accessSync(path.join(root, filesystemTarget), constants.R_OK),
-      `${trail.join(' > ')} -> ${target} does not resolve on disk`,
+      () => accessSync(path.join(root, readableTarget), constants.R_OK),
+      `${trail.join(' > ')} -> ${target} does not exist on disk`,
     );
   }
 });

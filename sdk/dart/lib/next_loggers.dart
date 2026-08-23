@@ -12,7 +12,7 @@ extension LogLevelWire on LogLevel {
   String get wireName => name.toUpperCase();
 }
 
-final class LogContext {
+class LogContext {
   const LogContext({
     this.loggedInUser = const {},
     this.users = const [],
@@ -22,8 +22,8 @@ final class LogContext {
     this.traceFlags,
     this.traceState = '',
     this.baggage = const {},
-    this.routineId = '',
     this.fields = const {},
+    this.routineId = '',
     this.tags = const [],
     this.context = const [],
     this.meta = const [],
@@ -37,8 +37,8 @@ final class LogContext {
   final int? traceFlags;
   final String traceState;
   final Map<String, String> baggage;
-  final String routineId;
   final JsonMap fields;
+  final String routineId;
   final List<String> tags;
   final List<Object?> context;
   final List<Object?> meta;
@@ -52,8 +52,8 @@ final class LogContext {
     int? traceFlags,
     String? traceState,
     Map<String, String>? baggage,
-    String? routineId,
     JsonMap? fields,
+    String? routineId,
     List<String>? tags,
     List<Object?>? context,
     List<Object?>? meta,
@@ -61,9 +61,7 @@ final class LogContext {
       LogContext(
         loggedInUser: Map.unmodifiable(loggedInUser ?? this.loggedInUser),
         users: List.unmodifiable(
-          (users ?? this.users).map(
-            (value) => Map<String, Object?>.unmodifiable(value),
-          ),
+          (users ?? this.users).map((value) => Map.unmodifiable(value)),
         ),
         traceId: traceId ?? this.traceId,
         traceIds: List.unmodifiable(traceIds ?? this.traceIds),
@@ -71,12 +69,14 @@ final class LogContext {
         traceFlags: traceFlags ?? this.traceFlags,
         traceState: traceState ?? this.traceState,
         baggage: Map.unmodifiable(baggage ?? this.baggage),
-        routineId: routineId ?? this.routineId,
         fields: Map.unmodifiable(fields ?? this.fields),
+        routineId: routineId ?? this.routineId,
         tags: List.unmodifiable(tags ?? this.tags),
         context: List.unmodifiable(context ?? this.context),
         meta: List.unmodifiable(meta ?? this.meta),
       );
+
+  LogContext copy() => copyWith();
 
   LogContext merge(LogContext patch) {
     final mergedTraceIds = <String>{
@@ -85,28 +85,24 @@ final class LogContext {
       if (patch.traceId.isNotEmpty) patch.traceId,
       ...patch.traceIds.where((value) => value.isNotEmpty),
     };
-    final mergedTags = <String>{
-      ...tags.where((value) => value.isNotEmpty),
-      ...patch.tags.where((value) => value.isNotEmpty),
-    };
     return LogContext(
-      loggedInUser: Map.unmodifiable({...loggedInUser, ...patch.loggedInUser}),
-      users: List.unmodifiable([
-        ...users.map((value) => Map<String, Object?>.unmodifiable(value)),
-        ...patch.users.map((value) => Map<String, Object?>.unmodifiable(value)),
-      ]),
+      loggedInUser: {...loggedInUser, ...patch.loggedInUser},
+      users: [
+        ...users.map((value) => Map<String, Object?>.of(value)),
+        ...patch.users.map((value) => Map<String, Object?>.of(value)),
+      ],
       traceId: patch.traceId.isNotEmpty ? patch.traceId : traceId,
-      traceIds: List.unmodifiable(mergedTraceIds),
+      traceIds: mergedTraceIds.toList(growable: false),
       spanId: patch.spanId.isNotEmpty ? patch.spanId : spanId,
       traceFlags: patch.traceFlags ?? traceFlags,
       traceState: patch.traceState.isNotEmpty ? patch.traceState : traceState,
-      baggage: Map.unmodifiable({...baggage, ...patch.baggage}),
+      baggage: {...baggage, ...patch.baggage},
+      fields: {...fields, ...patch.fields},
       routineId: patch.routineId.isNotEmpty ? patch.routineId : routineId,
-      fields: Map.unmodifiable({...fields, ...patch.fields}),
-      tags: List.unmodifiable(mergedTags),
-      context: List.unmodifiable([...context, ...patch.context]),
-      meta: List.unmodifiable([...meta, ...patch.meta]),
-    );
+      tags: {...tags, ...patch.tags}.toList(growable: false),
+      context: [...context, ...patch.context],
+      meta: [...meta, ...patch.meta],
+    ).copyWith();
   }
 }
 
@@ -119,19 +115,24 @@ class _LogContextFrame {
 
 LogContext? currentLogContext() {
   final value = Zone.current[_contextKey];
-  if (value is _LogContextFrame) return value.value.copyWith();
-  if (value is LogContext) return value.copyWith();
+  if (value is _LogContextFrame) return value.value.copy();
+  if (value is LogContext) return value.copy();
   return null;
 }
 
-R runWithLogContext<R>(LogContext context, R Function() callback) {
+JsonMap? currentLoggedInUser() {
+  final user = currentLogContext()?.loggedInUser;
+  return user == null || user.isEmpty ? null : Map.of(user);
+}
+
+R withLogContext<R>(LogContext context, R Function() callback) {
   final parent = currentLogContext();
-  final value = parent == null ? context.copyWith() : parent.merge(context);
+  final value = parent == null ? context.copy() : parent.merge(context);
   return runZoned(callback, zoneValues: {_contextKey: _LogContextFrame(value)});
 }
 
-R withLogContext<R>(LogContext context, R Function() callback) =>
-    runWithLogContext(context, callback);
+R runWithLogContext<R>(LogContext context, R Function() callback) =>
+    withLogContext(context, callback);
 
 /// Captures a defensive snapshot for queue, isolate, or callback handoff.
 LogContext? captureLogContext() => currentLogContext();
@@ -147,6 +148,7 @@ R Function() bindLogContext<R>(R Function() callback) {
   return () => withCapturedLogContext(captured, callback);
 }
 
+/// Mutates only the current Zone frame. Returns false outside a context scope.
 bool updateLogContext(LogContext patch) {
   final value = Zone.current[_contextKey];
   if (value is! _LogContextFrame) return false;
@@ -168,6 +170,7 @@ abstract interface class OpenTelemetryLogTransport implements LogTransport {}
 class MemoryTransport implements LogTransport {
   final List<LogRecord> records = [];
   bool _closed = false;
+
   bool get closed => _closed;
 
   @override
@@ -463,6 +466,9 @@ class LogEvent {
       }
       if (ambient.traceId.isNotEmpty) traceIds.add(ambient.traceId);
       traceIds.addAll(ambient.traceIds.where((value) => value.isNotEmpty));
+      if (routineId.isEmpty && ambient.routineId.isNotEmpty) {
+        routineId = ambient.routineId;
+      }
       tags
         ..add('otel')
         ..addAll(ambient.tags);
@@ -495,7 +501,7 @@ class LogEvent {
       ),
       traceId: traceId,
       traceIds: List.unmodifiable(traceIds),
-      routineId: routineId.isNotEmpty ? routineId : ambient?.routineId ?? '',
+      routineId: routineId,
       tags: List.unmodifiable(tags),
       context: List.unmodifiable(
         [...?ambient?.context, ...context].map(_normalize),
@@ -571,17 +577,22 @@ class SupabaseTransport implements LogTransport {
     if (_queue.isEmpty) return Future.value();
     final batch = _queue.take(batchSize).toList(growable: false);
     _queue.removeRange(0, batch.length);
+    var failed = false;
     final task = Future.sync(
       () => sendBatch(
         batch.map((record) => record.toJson()).toList(growable: false),
       ),
     ).catchError((Object error) {
+      failed = true;
       final available = maxQueueSize - _queue.length;
       _queue.insertAll(0, batch.take(available));
       throw error;
     }).whenComplete(() {
       _flushing = null;
-      if (_queue.isNotEmpty && !_closed) {
+      // A failed batch stays queued for an explicit flush or a later write.
+      // Retrying immediately here creates an unbounded microtask loop while a
+      // device is offline or encryption is misconfigured.
+      if (!failed && _queue.isNotEmpty && !_closed) {
         unawaited(flush().catchError((_) {}));
       }
     });

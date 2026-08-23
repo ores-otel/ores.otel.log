@@ -116,6 +116,36 @@ public final class NextLoggersTest {
       }
     }
 
+    List<Map<String, Object>> routedOtel = new ArrayList<>();
+    List<Map<String, Object>> regular = new ArrayList<>();
+    NextLoggers.Logger routedLogger =
+        new NextLoggers.Logger(
+            "routing",
+            null,
+            "java",
+            Map.of(),
+            List.of(
+                new NextLoggers.OtelTransport(routedOtel::add),
+                new NextLoggers.SupabaseTransport(regular::add)),
+            false);
+    NextLoggers.LogEvent defaultOff =
+        routedLogger.event(NextLoggers.Level.INFO, "default-off", Map.of());
+    assert !defaultOff.isOtelEnabled(routedLogger.isOtelEnabled());
+    defaultOff.send();
+    routedLogger.event(NextLoggers.Level.INFO, "forced-on", Map.of()).useOtel().send();
+    routedLogger
+        .event(NextLoggers.Level.INFO, "reset-off", Map.of())
+        .useOtel()
+        .resetOtel()
+        .send();
+    routedLogger.useOtel();
+    routedLogger.event(NextLoggers.Level.WARN, "forced-off", Map.of()).notOtel().send();
+    routedLogger.event(NextLoggers.Level.INFO, "logger-on", Map.of()).withOtel(true).send();
+    assert routedOtel.stream().map(value -> value.get("body")).toList()
+        .equals(List.of("forced-on", "logger-on"));
+    assert regular.stream().map(value -> value.get("message")).toList()
+        .equals(List.of("default-off", "forced-on", "reset-off", "forced-off", "logger-on"));
+
     System.out.println("Java next-loggers conformance passed");
   }
 }

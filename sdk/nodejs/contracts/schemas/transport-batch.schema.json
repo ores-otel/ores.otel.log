@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/transport-batch.schema.json",
+  "title": "next-loggers/batch/v1 transport envelope",
+  "description": "Bounded, idempotent batch envelope used by authenticated client transports such as Supabase ingestion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "batchId", "sentAt", "records"],
+  "properties": {
+    "schema": {"const": "next-loggers/batch/v1"},
+    "batchId": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"},
+    "sentAt": {"type": "string", "format": "date-time", "maxLength": 64},
+    "records": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/log-record.schema.json"}}
+  }
+}

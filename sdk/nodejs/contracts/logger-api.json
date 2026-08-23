@@ -1,0 +1,77 @@
+{
+  "schema": "ores.otel.log/api-contract/v1",
+  "wireSchema": "next-loggers/v1",
+  "operationSet": "core-v1",
+  "levels": [
+    "TRACE",
+    "DEBUG",
+    "INFO",
+    "WARN",
+    "ERROR",
+    "FATAL"
+  ],
+  "operations": {
+    "logger": [
+      {"id":"create","semantics":"Construct a logger without installing global instrumentation.","required":true,"idempotent":false},
+      {"id":"trace","semantics":"Create an unsent TRACE event.","required":true,"idempotent":false},
+      {"id":"debug","semantics":"Create an unsent DEBUG event.","required":true,"idempotent":false},
+      {"id":"info","semantics":"Create an unsent INFO event.","required":true,"idempotent":false},
+      {"id":"warn","semantics":"Create an unsent WARN event.","required":true,"idempotent":false},
+      {"id":"error","semantics":"Create an unsent ERROR event.","required":true,"idempotent":false},
+      {"id":"fatal","semantics":"Create an unsent FATAL event.","required":true,"idempotent":false},
+      {"id":"flush","semantics":"Drain writes that have already been sent.","required":true,"idempotent":true},
+      {"id":"flush_on_exit","semantics":"Send pending events, then invoke transport shutdown hooks.","required":true,"idempotent":true},
+      {"id":"close","semantics":"Flush and release transport resources without double-closing.","required":true,"idempotent":true}
+    ],
+    "event": [
+      {"id":"field","semantics":"Attach one structured field.","required":true,"idempotent":false},
+      {"id":"fields","semantics":"Attach multiple structured fields.","required":true,"idempotent":false},
+      {"id":"user","semantics":"Attach one user-shaped JSON object.","required":true,"idempotent":false},
+      {"id":"users","semantics":"Attach multiple user-shaped JSON objects.","required":true,"idempotent":false},
+      {"id":"trace","semantics":"Attach one trace identifier.","required":true,"idempotent":false},
+      {"id":"traces","semantics":"Attach multiple trace identifiers without duplicates.","required":true,"idempotent":false},
+      {"id":"routine","semantics":"Attach the routine, task, thread, isolate, process, or goroutine identifier.","required":true,"idempotent":false},
+      {"id":"tag","semantics":"Attach one tag.","required":true,"idempotent":false},
+      {"id":"tags","semantics":"Attach multiple tags without duplicates.","required":true,"idempotent":false},
+      {"id":"context","semantics":"Attach JSON-safe contextual values.","required":true,"idempotent":false},
+      {"id":"meta","semantics":"Attach JSON-safe metadata values.","required":true,"idempotent":false},
+      {"id":"error","semantics":"Attach a normalized error without recursively logging it.","required":true,"idempotent":false},
+      {"id":"send","semantics":"Emit at most once to enabled transports; send(false) remains local-only.","required":true,"idempotent":true}
+    ],
+    "transport": [
+      {"id":"write","semantics":"Deliver one complete next-loggers/v1 record.","required":true,"idempotent":false},
+      {"id":"flush","semantics":"Drain queued writes.","required":true,"idempotent":true},
+      {"id":"flush_on_exit","semantics":"Drain the records active during shutdown.","required":true,"idempotent":true},
+      {"id":"close","semantics":"Release owned resources.","required":true,"idempotent":true}
+    ],
+    "context": [
+      {"id":"current","semantics":"Return the current request/task context without creating global mutable state.","required":true,"idempotent":false},
+      {"id":"run","semantics":"Run a callback/future within an isolated context.","required":true,"idempotent":false},
+      {"id":"bind","semantics":"Bind a callback/future to the current context.","required":true,"idempotent":false},
+      {"id":"set","semantics":"Set a JSON-safe context value for the current scope.","required":true,"idempotent":false},
+      {"id":"get","semantics":"Read a context value for the current scope.","required":true,"idempotent":false},
+      {"id":"clear","semantics":"Clear only the current scope.","required":true,"idempotent":true}
+    ],
+    "otel": [
+      {"id":"extract","semantics":"Extract trace context from an explicit carrier.","required":true,"idempotent":false},
+      {"id":"inject","semantics":"Inject trace context into an explicit carrier.","required":true,"idempotent":false},
+      {"id":"correlate","semantics":"Copy valid trace and span identifiers into the log record.","required":true,"idempotent":false},
+      {"id":"create_transport","semantics":"Create an adapter around an application-owned OpenTelemetry logger/provider.","required":true,"idempotent":false},
+      {"id":"preserve_provider_ownership","semantics":"Never shut down a provider owned by the application.","required":true,"idempotent":true},
+      {"id":"no_global_patching","semantics":"Never patch console, HTTP, fetch, module loading, or runtime internals.","required":true,"idempotent":true}
+    ]
+  },
+  "sdkBindings": [
+    {"id":"nodejs","language":"TypeScript/JavaScript","runtimeFamily":"nodejs","path":"sdk/nodejs","package":"@oresoftware/next-loggers","testCommand":"npm test","namingConvention":"camelCase","operationSet":"core-v1","capabilities":["structured-records","context-local-storage","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"python","language":"Python","runtimeFamily":"python","path":"sdk/python","package":"oresoftware-next-loggers","testCommand":"python -m unittest discover -s tests -v","namingConvention":"snake_case","operationSet":"core-v1","capabilities":["structured-records","context-local-storage","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"go","language":"Go","runtimeFamily":"go","path":"sdk/go","package":"github.com/ores-otel/ores.otel.log/sdk/go","testCommand":"go test ./...","namingConvention":"PascalCase","operationSet":"core-v1","capabilities":["structured-records","explicit-context-passing","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"rust","language":"Rust","runtimeFamily":"rust","path":"sdk/rust","package":"oresoftware-next-loggers","testCommand":"cargo test --locked","namingConvention":"snake_case","operationSet":"core-v1","capabilities":["structured-records","context-local-storage","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"java","language":"Java","runtimeFamily":"jvm","path":"sdk/java","package":"io.github.oresoftware:next-loggers","testCommand":"bash test.sh","namingConvention":"camelCase","operationSet":"core-v1","capabilities":["structured-records","context-local-storage","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"dart","language":"Dart/Flutter","runtimeFamily":"dart","path":"sdk/dart","package":"oresoftware_next_loggers","testCommand":"dart run test/conformance.dart","namingConvention":"camelCase","operationSet":"core-v1","capabilities":["structured-records","context-local-storage","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"ruby","language":"Ruby","runtimeFamily":"ruby","path":"sdk/ruby","package":"oresoftware-next-loggers","testCommand":"ruby test/next_loggers_test.rb","namingConvention":"snake_case","operationSet":"core-v1","capabilities":["structured-records","context-local-storage","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"gleam","language":"Gleam","runtimeFamily":"beam","path":"sdk/gleam","package":"oresoftware_next_loggers","testCommand":"gleam test","namingConvention":"snake_case","operationSet":"core-v1","capabilities":["structured-records","explicit-context-passing","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"erlang","language":"Erlang","runtimeFamily":"beam","path":"sdk/erlang","package":"oresoftware_next_loggers_erlang","testCommand":"bash test.sh","namingConvention":"snake_case","operationSet":"core-v1","capabilities":["structured-records","explicit-context-passing","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"elixir","language":"Elixir","runtimeFamily":"beam","path":"sdk/elixir","package":"oresoftware_next_loggers","testCommand":"bash test.sh","namingConvention":"snake_case","operationSet":"core-v1","capabilities":["structured-records","context-local-storage","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]},
+    {"id":"wasm","language":"Rust/WebAssembly","runtimeFamily":"wasm","path":"sdk/wasm","package":"oresoftware-next-loggers-wasm","testCommand":"bash test.sh","namingConvention":"snake_case","operationSet":"core-v1","capabilities":["structured-records","explicit-context-passing","otel-explicit","no-global-patching","transport-lifecycle","deterministic-conformance"]}
+  ]
+}

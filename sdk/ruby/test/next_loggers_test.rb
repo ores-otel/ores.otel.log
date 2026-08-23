@@ -116,4 +116,30 @@ class NextLoggersTest < Minitest::Test
     assert_equal 1, span.ended
     assert records.any? { |record| record.fetch("message") == "inside sampled-out" }
   end
+
+  def test_per_event_otel_routing_preserves_regular_transports
+    otel = []
+    regular = []
+    logger = ORESoftware::NextLoggers::Logger.new(
+      app_name: "routing",
+      otel: false,
+      transports: [
+        ORESoftware::NextLoggers::OtelTransport.new { |record| otel << record },
+        ->(record) { regular << record }
+      ]
+    )
+
+    logger.event(:info, "default-off").send
+    logger.event(:info, "forced-on").use_otel.send
+    logger.event(:info, "reset-off").use_otel.reset_otel.send
+    logger.use_otel
+    logger.event(:warn, "forced-off").not_otel.send
+    logger.event(:info, "logger-on").with_otel(true).send
+
+    assert_equal %w[forced-on logger-on], otel.map { |record| record.fetch("body") }
+    assert_equal(
+      %w[default-off forced-on reset-off forced-off logger-on],
+      regular.map { |record| record.fetch("message") }
+    )
+  end
 end

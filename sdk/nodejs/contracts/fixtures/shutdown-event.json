@@ -1,0 +1,9 @@
+{
+  "phase": "draining",
+  "previousPhase": "running",
+  "trigger": "SIGTERM",
+  "interactive": false,
+  "attempt": 1,
+  "elapsedMillis": 42,
+  "message": "graceful shutdown started; no new work will be accepted"
+}

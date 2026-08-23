@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "contractVersion": "1.0.0",
   "canonical": {
-    "repository": "ORESoftware/next-loggers.ts",
+    "repository": "ores-otel/ores.otel.log",
     "branch": "agent/polyglot-context-shutdown-20260808",
     "state": "draft-pr",
     "productionMergeAllowed": false
@@ -177,7 +177,7 @@
   ],
   "repositories": [
     {
-      "repository": "ORESoftware/next-loggers.ts",
+      "repository": "ores-otel/ores.otel.log",
       "role": "canonical-library",
       "languages": ["node", "go", "rust", "dart", "gleam"],
       "state": "production-pr",

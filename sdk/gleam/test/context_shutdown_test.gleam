@@ -1,11 +1,9 @@
-import gleam/erlang/process
 import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import oresoftware_next_loggers as logging
-import oresoftware_next_loggers/context as branch_context
-import oresoftware_next_loggers/shutdown as branch_shutdown
 import oresoftware_next_loggers_context as context
 import oresoftware_next_loggers_shutdown as shutdown
 
@@ -94,58 +92,115 @@ pub fn explicit_zero_trace_flags_override_parent_test() {
   |> should.equal(Some(0))
 }
 
-pub fn shutdown_transition_contract_test() {
+pub fn first_tty_sigint_arms_eof_and_eof_forces_test() {
   let state = shutdown.new(True)
   let #(state, first) = shutdown.trigger(state, shutdown.Sigint)
   first |> should.equal(shutdown.BeginGraceful)
   shutdown.phase(state) |> should.equal(shutdown.Draining)
+  shutdown.eof_armed(state) |> should.equal(True)
+  shutdown.signal_count(state) |> should.equal(1)
+
   let #(state, second) = shutdown.trigger(state, shutdown.StdinEof)
   second |> should.equal(shutdown.Force)
   shutdown.phase(state) |> should.equal(shutdown.Forced)
-  let #(_, ignored) = shutdown.trigger(state, shutdown.Sigterm)
-  ignored |> should.equal(shutdown.Ignore)
+  shutdown.signal_count(state) |> should.equal(1)
 }
 
-pub fn process_context_is_scoped_and_applied_test() {
-  let value =
-    branch_context.LogContext(
-      ..branch_context.empty(),
-      fields: [#("request.id", json.string("r1"))],
-      logged_in_user: Some([#("id", json.string("u1"))]),
-      trace_id: Some("trace-1"),
-    )
-  let options =
-    logging.options("context-test", "gleam", fn() { "id-1" }, fn() {
-      "2026-01-02T03:04:05.000Z"
-    })
-  let logger = logging.new(options, logging.noop_transport())
-  let record =
-    branch_context.with_log_context(value, fn() {
-      let assert Some(captured) = branch_context.capture()
-      captured.trace_id |> should.equal(Some("trace-1"))
-      branch_context.info(logger, "hello", [json.string("hello")])
-      |> logging.record
-    })
-  branch_context.current() |> should.equal(None)
-  record.trace_id |> should.equal(Some("trace-1"))
-  record.logged_in_user |> should.equal(Some([#("id", json.string("u1"))]))
+pub fn initial_eof_is_ignored_test() {
+  let state = shutdown.new(True)
+  let #(state, action) = shutdown.trigger(state, shutdown.StdinEof)
+  action |> should.equal(shutdown.Ignore)
+  shutdown.phase(state) |> should.equal(shutdown.Running)
+  shutdown.signal_count(state) |> should.equal(0)
 }
 
-pub fn shutdown_is_drain_then_force_test() {
-  let subject = process.new_subject()
-  let coordinator =
-    branch_shutdown.new(fn(event) { process.send(subject, event) })
-  branch_shutdown.request(coordinator, branch_shutdown.Sigint, True)
-  |> should.equal(branch_shutdown.Drain)
-  branch_shutdown.phase(coordinator) |> should.equal(branch_shutdown.Draining)
-  branch_shutdown.request(coordinator, branch_shutdown.StdinEof, True)
-  |> should.equal(branch_shutdown.Force)
-  branch_shutdown.phase(coordinator) |> should.equal(branch_shutdown.Forcing)
-  branch_shutdown.mark_stopped(coordinator, branch_shutdown.StdinEof, True)
-  branch_shutdown.phase(coordinator) |> should.equal(branch_shutdown.Stopped)
+pub fn tty_sigterm_does_not_arm_eof_test() {
+  let state = shutdown.new(True)
+  let #(state, action) = shutdown.trigger(state, shutdown.Sigterm)
+  action |> should.equal(shutdown.BeginGraceful)
+  shutdown.eof_armed(state) |> should.equal(False)
+  shutdown.signal_count(state) |> should.equal(1)
 
-  let assert Ok(first) = process.receive(subject, within: 1000)
-  first.phase |> should.equal(branch_shutdown.Draining)
-  let assert Ok(second) = process.receive(subject, within: 1000)
-  second.phase |> should.equal(branch_shutdown.Forcing)
+  let #(state, eof_action) = shutdown.trigger(state, shutdown.StdinEof)
+  eof_action |> should.equal(shutdown.Ignore)
+  shutdown.phase(state) |> should.equal(shutdown.Draining)
+}
+
+pub fn non_tty_sigint_does_not_arm_eof_test() {
+  let state = shutdown.new(False)
+  let #(state, action) = shutdown.trigger(state, shutdown.Sigint)
+  action |> should.equal(shutdown.BeginGraceful)
+  shutdown.eof_armed(state) |> should.equal(False)
+
+  let #(_, eof_action) = shutdown.trigger(state, shutdown.StdinEof)
+  eof_action |> should.equal(shutdown.Ignore)
+}
+
+pub fn second_signal_forces_and_counts_two_signals_test() {
+  let state = shutdown.new(True)
+  let #(state, _) = shutdown.trigger(state, shutdown.Sigint)
+  let #(state, action) = shutdown.trigger(state, shutdown.Sigterm)
+  action |> should.equal(shutdown.Force)
+  shutdown.signal_count(state) |> should.equal(2)
+}
+
+pub fn timeout_forces_without_incrementing_signal_count_test() {
+  let state = shutdown.new(False)
+  let #(state, _) = shutdown.trigger(state, shutdown.Sigterm)
+  let #(state, action) = shutdown.timeout(state)
+  action |> should.equal(shutdown.Force)
+  shutdown.signal_count(state) |> should.equal(1)
+}
+
+pub fn formal_shutdown_relation_refines_all_twelve_shared_pairs_test() {
+  let cases = [
+    #(
+      shutdown.Running,
+      shutdown.Trigger,
+      shutdown.Draining,
+      shutdown.ModelBeginGraceful,
+    ),
+    #(shutdown.Draining, shutdown.Trigger, shutdown.Forced, shutdown.ModelForce),
+    #(shutdown.Forced, shutdown.Trigger, shutdown.Forced, shutdown.ModelIgnore),
+    #(shutdown.Closed, shutdown.Trigger, shutdown.Closed, shutdown.ModelIgnore),
+    #(shutdown.Running, shutdown.ForceNow, shutdown.Forced, shutdown.ModelForce),
+    #(
+      shutdown.Draining,
+      shutdown.ForceNow,
+      shutdown.Forced,
+      shutdown.ModelForce,
+    ),
+    #(shutdown.Forced, shutdown.ForceNow, shutdown.Forced, shutdown.ModelIgnore),
+    #(shutdown.Closed, shutdown.ForceNow, shutdown.Closed, shutdown.ModelIgnore),
+    #(
+      shutdown.Running,
+      shutdown.MarkClosed,
+      shutdown.Running,
+      shutdown.ModelIgnore,
+    ),
+    #(
+      shutdown.Draining,
+      shutdown.MarkClosed,
+      shutdown.Closed,
+      shutdown.ModelClose,
+    ),
+    #(
+      shutdown.Forced,
+      shutdown.MarkClosed,
+      shutdown.Forced,
+      shutdown.ModelIgnore,
+    ),
+    #(
+      shutdown.Closed,
+      shutdown.MarkClosed,
+      shutdown.Closed,
+      shutdown.ModelIgnore,
+    ),
+  ]
+
+  list.each(cases, fn(vector) {
+    let #(phase, event, expected_phase, expected_action) = vector
+    shutdown.transition(phase, event)
+    |> should.equal(shutdown.Transition(expected_phase, expected_action))
+  })
 }

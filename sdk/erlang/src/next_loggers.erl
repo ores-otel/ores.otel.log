@@ -15,6 +15,7 @@
     error/3,
     log/4,
     log/5,
+    event/4,
     fatal/2,
     add_fields/2,
     add_trace/2,
@@ -35,7 +36,8 @@
     not_otel/1,
     with_otel/2,
     reset_otel/1,
-    is_otel_enabled/1
+    is_otel_enabled/1,
+    is_otel_enabled/2
 ]).
 
 -define(SCHEMA, <<"next-loggers/v1">>).
@@ -99,6 +101,19 @@ event(Logger, Level, Values) ->
         otel => undefined
     }.
 
+%% Compatibility event constructor for the direct/polyglot API.  It returns
+%% the same fluent event value as the native Erlang API, so context, delivery,
+%% idempotence, and per-event OpenTelemetry routing all share one code path.
+event(Logger, Level, Message, EventFields)
+        when is_map(Logger), is_binary(Level), is_binary(Message), is_map(EventFields) ->
+    CompatLogger = Logger#{
+        minimum_level => maps:get(minimum_level, Logger, trace),
+        logged_in_user => maps:get(logged_in_user, Logger, #{}),
+        transport => {multiplex, maps:get(transports, Logger, [])},
+        console => maps:get(console, Logger, false)
+    },
+    add_fields(event(CompatLogger, level_atom(Level), Message), EventFields).
+
 use_otel(Value) -> with_otel(Value, true).
 not_otel(Value) -> with_otel(Value, false).
 with_otel(Value, Enabled) when is_boolean(Enabled) -> Value#{otel => Enabled}.
@@ -106,6 +121,8 @@ reset_otel(Event = #{logger := _}) -> Event#{otel => undefined};
 reset_otel(Logger) -> Logger#{otel => true}.
 is_otel_enabled(#{logger := Logger, otel := undefined}) -> maps:get(otel, Logger, true);
 is_otel_enabled(#{otel := Enabled}) -> Enabled.
+is_otel_enabled(#{otel := undefined}, Fallback) when is_boolean(Fallback) -> Fallback;
+is_otel_enabled(#{otel := Enabled}, _Fallback) when is_boolean(Enabled) -> Enabled.
 
 add_fields(Event, Fields) when is_map(Fields) ->
     Event#{fields := maps:merge(maps:get(fields, Event), Fields)}.
@@ -230,6 +247,12 @@ send(Event) ->
 
 deliver_transport({otel, _Transport}, _Record, false) -> ok;
 deliver_transport({otel, Transport}, Record, true) -> Transport(Record);
+deliver_transport({multiplex, Transports}, Record, Enabled) ->
+    lists:foreach(
+        fun(Transport) -> ok = deliver_transport(Transport, Record, Enabled) end,
+        Transports
+    ),
+    ok;
 deliver_transport(Transport, Record, _Enabled) -> Transport(Record).
 
 info(Logger = #{direct := true}, Message, Fields) ->
@@ -434,6 +457,13 @@ level_index(info) -> 2;
 level_index(warn) -> 3;
 level_index(error) -> 4;
 level_index(fatal) -> 5.
+
+level_atom(<<"TRACE">>) -> trace;
+level_atom(<<"DEBUG">>) -> debug;
+level_atom(<<"INFO">>) -> info;
+level_atom(<<"WARN">>) -> warn;
+level_atom(<<"ERROR">>) -> error;
+level_atom(<<"FATAL">>) -> fatal.
 
 enabled(Level, Minimum) -> level_index(Level) >= level_index(Minimum).
 level_binary(Level) -> list_to_binary(string:uppercase(atom_to_list(Level))).

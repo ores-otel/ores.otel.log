@@ -33,7 +33,7 @@ test('package manifests expose the complete contracts tree', async () => {
 test('the staged Node tarball contains canonical contract artifacts', async () => {
   const { stdout } = await execFileAsync(
     'npm',
-    ['pack', './sdk/nodejs', '--dry-run', '--json'],
+    ['pack', './sdk/nodejs', '--dry-run', '--json', '--ignore-scripts'],
     { cwd: repositoryRoot, maxBuffer: 20 * 1024 * 1024 },
   );
   const [pack] = JSON.parse(stdout);

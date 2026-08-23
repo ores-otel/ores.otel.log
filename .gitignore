@@ -14,7 +14,6 @@ dist/
 # Generated npm release slice; package.json and .zpkg-smoke.sh remain tracked.
 sdk/nodejs/dist/
 sdk/nodejs/src/
-sdk/nodejs/contracts/
 sdk/nodejs/README.md
 sdk/nodejs/LICENSE
 sdk/nodejs/.cli-flags.toml
@@ -53,6 +52,7 @@ coverage.out
 sdk/python/build/
 sdk/python/dist/
 sdk/rust/target/
+/target/
 sdk/rust-otel/target/
 sdk/rust-otel/Cargo.lock
 sdk/rust-context/target/

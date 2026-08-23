@@ -1,0 +1,6 @@
+{
+  "schema": "next-loggers/batch/v1",
+  "batchId": "empty-1",
+  "sentAt": "2026-08-08T12:00:01.000Z",
+  "records": []
+}

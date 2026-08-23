@@ -64,6 +64,44 @@ test('send() is idempotent per event', async () => {
   assert.equal(records.length, 1);
 });
 
+test('per-event OTEL routing overrides the inherited logger default only for OTEL transports', async () => {
+  const otel = [];
+  const namedOtel = [];
+  const regular = [];
+  const logger = createLogger({
+    console: false,
+    otel: false,
+    transports: [
+      { otel: true, write: (record) => otel.push(record.message) },
+      { name: 'opentelemetry', write: (record) => namedOtel.push(record.message) },
+      { name: 'memory', write: (record) => regular.push(record.message) },
+    ],
+  });
+
+  const defaultOff = logger.info('default-off');
+  assert.equal(defaultOff.isOtelEnabled(logger.isOtelEnabled()), false);
+  await defaultOff.send();
+  await logger.info('forced-on').useOtel().send();
+  await logger.info('reset-to-default').useOtel().resetOtel().send();
+
+  logger.useOtel();
+  await logger.warn('forced-off').notOtel().send();
+  await logger.info('logger-on').withOtel(true).send();
+
+  assert.deepEqual(otel, ['forced-on', 'logger-on']);
+  assert.deepEqual(namedOtel, ['forced-on', 'logger-on']);
+  assert.deepEqual(regular, [
+    'default-off',
+    'forced-on',
+    'reset-to-default',
+    'forced-off',
+    'logger-on',
+  ]);
+
+  const child = logger.notOtel().anew();
+  assert.equal(child.isOtelEnabled(), false, 'anew children inherit the write-through default');
+});
+
 test('close() is safe to call twice', async () => {
   const { logger, records } = makeMemoryLogger();
   logger.info('drained at close');

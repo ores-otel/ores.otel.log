@@ -25,6 +25,7 @@ export const RELEASE_TARGET_NAMES = [
 export type ReleaseTargetName = (typeof RELEASE_TARGET_NAMES)[number];
 
 export const ZED_TARGET_NAMES = [
+  'repository',
   'contracts',
   'nodejs',
   'python',

@@ -14,3 +14,21 @@ Maven coordinates:
   <version>0.1.0</version>
 </dependency>
 ```
+
+## Per-event OpenTelemetry routing
+
+The existing logger constructors default OTEL routing to `true`; the overload
+with a final boolean configures an opt-in logger. Immediate `info`/`error`
+calls remain compatible, while `event` exposes the override chain:
+
+```java
+var log = new NextLoggers.Logger("app", null, "java", Map.of(), transports, false);
+log.event(NextLoggers.Level.INFO, "sampled in", Map.of()).useOtel().send();
+log.event(NextLoggers.Level.WARN, "OTEL excluded", Map.of()).notOtel().send();
+log.event(NextLoggers.Level.INFO, "computed", Map.of()).withOtel(routeToOtel).send();
+```
+
+`resetOtel()` restores the logger default and `isOtelEnabled(fallback)`
+resolves it. `setOtelEnabled`, `useOtel`, and `notOtel` update the logger
+default. Only transports whose `isOtel()` marker/name identifies
+OpenTelemetry are filtered.

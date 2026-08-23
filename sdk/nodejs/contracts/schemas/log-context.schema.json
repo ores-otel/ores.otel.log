@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/log-context.schema.json",
+  "title": "ores.otel.log context v1",
+  "description": "Logical context carrier shared by async-local, thread-local, task-local, process-local, zone, fiber, and explicit-host implementations.",
+  "type": "object",
+  "additionalProperties": false,
+  "minProperties": 1,
+  "properties": {
+    "loggedInUser": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonObject"},
+    "users": {"type": "array", "maxItems": 64, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonObject"}},
+    "fields": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/jsonObject"},
+    "traceId": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/traceId"},
+    "traceIds": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/traceId"}},
+    "spanId": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/spanId"},
+    "traceFlags": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/traceFlags"},
+    "traceState": {"type": "string", "maxLength": 512},
+    "remote": {"type": "boolean"},
+    "baggage": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/stringMap"},
+    "routineId": {"type": "string", "minLength": 1, "maxLength": 256},
+    "tags": {"$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/common.schema.json#/$defs/tagList"}
+  }
+}

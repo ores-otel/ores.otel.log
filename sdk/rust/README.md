@@ -25,3 +25,20 @@ let otel = Arc::new(next_loggers::OpenTelemetryTransport::new(|record| {
 }));
 let supabase = Arc::new(next_loggers::SupabaseTransport::new(send_to_supabase));
 ```
+
+## Per-event OpenTelemetry routing
+
+`Options::default().otel` is `true`. Set it to `false` for opt-in telemetry,
+then use the chain on any `Event`:
+
+```rust
+let logger = Logger::new(Options { otel: false, ..Options::default() });
+logger.info(vec![json!("sampled in")]).use_otel().send()?;
+logger.warn(vec![json!("OTEL excluded")]).not_otel().send()?;
+logger.info(vec![json!("computed")]).with_otel(route_to_otel).send()?;
+```
+
+`reset_otel()` restores the logger default and
+`is_otel_enabled(fallback)` resolves it. Logger-level `set_otel_enabled`,
+`use_otel`, and `not_otel` update the inherited default. Non-OTEL transports
+always retain the record.

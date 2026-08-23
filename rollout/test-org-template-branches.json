@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "contractVersion": "1.0.0",
-  "canonicalRepository": "ORESoftware/next-loggers.ts",
+  "canonicalRepository": "ores-otel/ores.otel.log",
   "canonicalBranch": "agent/polyglot-context-shutdown-20260808",
   "stateMeaning": {
     "draft-pr": "Template branch and draft review exist; no repository-level server evidence is implied.",

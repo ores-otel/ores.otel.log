@@ -15,12 +15,36 @@ export type ShutdownCause =
   | 'programmatic';
 export type ShutdownPhase = 'running' | 'draining' | 'forced' | 'closed';
 export type ShutdownAction = 'begin-graceful' | 'force' | 'ignore';
+export type ShutdownStateEvent = 'trigger' | 'force-now' | 'mark-closed';
+export type ShutdownModelAction = ShutdownAction | 'close';
+
+export interface ShutdownStateTransition {
+  readonly phase: ShutdownPhase;
+  readonly action: ShutdownModelAction;
+}
+
+type ShutdownTransitionKey = `${ShutdownPhase}:${ShutdownStateEvent}`;
+
+/** Non-identity cases in the total shutdown relation. Unlisted pairs ignore. */
+const SHUTDOWN_TRANSITIONS: Readonly<
+  Partial<Record<ShutdownTransitionKey, ShutdownStateTransition>>
+> = Object.freeze({
+  'running:trigger': Object.freeze({
+    phase: 'draining',
+    action: 'begin-graceful',
+  }),
+  'draining:trigger': Object.freeze({ phase: 'forced', action: 'force' }),
+  'running:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:force-now': Object.freeze({ phase: 'forced', action: 'force' }),
+  'draining:mark-closed': Object.freeze({ phase: 'closed', action: 'close' }),
+});
 
 export interface ShutdownEvent {
   phase: ShutdownPhase;
   action: ShutdownAction;
   cause: ShutdownCause;
   interactive: boolean;
+  /** Counts operating-system SIGINT/SIGTERM events only. */
   signalCount: number;
   message: string;
   error?: unknown;
@@ -51,9 +75,11 @@ export interface ShutdownProcessLike {
 
 export interface ShutdownStdinLike {
   isTTY?: boolean;
+  readableFlowing?: boolean | null;
   on(event: 'end', listener: () => void): void;
   off(event: 'end', listener: () => void): void;
   resume?(): void;
+  pause?(): void;
 }
 
 export interface NodeServerShutdownOptions {
@@ -65,8 +91,9 @@ export interface NodeServerShutdownOptions {
   /** Overrides stdin TTY detection. */
   interactive?: boolean;
   /**
-   * Watch stdin EOF (Ctrl-D in a terminal). Defaults to true only when stdin is
-   * a TTY. Disable this when the application already consumes stdin.
+   * Permit terminal EOF (Ctrl-D) to replace the second Ctrl-C. The listener is
+   * armed only after the first interactive SIGINT, so installing the lifecycle
+   * controller never consumes application stdin. Defaults to true for a TTY.
    */
   watchStdinEof?: boolean;
   process?: ShutdownProcessLike;
@@ -155,10 +182,8 @@ function getGlobalProcess(): ShutdownProcessLike | undefined {
 }
 
 function getGlobalStdin(): ShutdownStdinLike | undefined {
-  const candidate = (globalThis as {
-    process?: { stdin?: ShutdownStdinLike };
-  }).process;
-  return candidate?.stdin;
+  return (globalThis as { process?: { stdin?: ShutdownStdinLike } }).process
+    ?.stdin;
 }
 
 function asServers(
@@ -180,36 +205,34 @@ function closeGracefully(server: GracefulNodeServer): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     const settle = (error?: Error): void => {
-      if (settled) {
-        return;
-      }
+      if (settled) return;
       settled = true;
-      if (error && !isAlreadyClosedError(error)) {
-        reject(error);
-      } else {
-        resolve();
-      }
+      if (error && !isAlreadyClosedError(error)) reject(error);
+      else resolve();
     };
 
     try {
       const returned = server.close(settle);
-      // Some compatible server implementations return a promise in addition to
-      // (or instead of) invoking the callback. Supporting both is harmless.
       if (
         typeof returned === 'object' &&
         returned !== null &&
         'then' in returned &&
         typeof (returned as { then?: unknown }).then === 'function'
       ) {
-        void Promise.resolve(returned).then(() => settle(), settle);
+        void Promise.resolve(returned).then(() => settle(), (error) => {
+          if (error instanceof Error) settle(error);
+          else {
+            settled = true;
+            reject(error);
+          }
+        });
       }
-      // Node's docs recommend invoking idle/all-connection helpers after close
-      // so no new connection can race between the two operations.
+      // Invoke this after close() to avoid an accept/idle-close race.
       server.closeIdleConnections?.();
     } catch (error) {
-      if (isAlreadyClosedError(error)) {
-        settle();
-      } else {
+      if (isAlreadyClosedError(error)) settle();
+      else {
+        settled = true;
         reject(error);
       }
     }
@@ -218,26 +241,22 @@ function closeGracefully(server: GracefulNodeServer): Promise<void> {
 
 function defaultLog(event: ShutdownEvent): void {
   const line = `[shutdown:${event.phase}] ${event.message}`;
-  if (event.error !== undefined) {
-    console.error(line, event.error);
-  } else if (event.phase === 'forced') {
-    console.warn(line);
-  } else {
-    console.info(line);
-  }
+  if (event.error !== undefined) console.error(line, event.error);
+  else if (event.phase === 'forced') console.warn(line);
+  else console.info(line);
 }
 
 /**
  * Installs one coordinated shutdown owner.
  *
  * Interactive semantics:
- * - first SIGINT or Ctrl-D: begin graceful drain;
- * - second SIGINT, or Ctrl-D while already draining: force close;
- * - SIGTERM begins graceful drain; another termination event forces close.
+ * - the first SIGINT begins graceful drain and only then arms terminal EOF;
+ * - a second SIGINT, another termination signal, or armed Ctrl-D forces close;
+ * - SIGTERM begins graceful drain but does not arm or read stdin.
  *
  * Non-interactive semantics:
- * - one SIGINT/SIGTERM begins graceful drain and the process completes when the
- *   drain finishes; a timeout still escalates to forceful closure.
+ * - one SIGINT/SIGTERM begins graceful drain; stdin is never read;
+ * - a second signal or the deadline escalates to forceful closure.
  */
 export function installNodeServerShutdown(
   options: NodeServerShutdownOptions,
@@ -268,6 +287,8 @@ export function installNodeServerShutdown(
   let flushPromise: Promise<void> | undefined;
   let disposed = false;
   let resolved = false;
+  let eofArmed = false;
+  let resumedStdin = false;
 
   let resolveDone!: (result: ShutdownResult) => void;
   const done = new Promise<ShutdownResult>((resolve) => {
@@ -309,9 +330,7 @@ export function installNodeServerShutdown(
     cause: ShutdownCause,
     callback: (() => void | Promise<void>) | undefined,
   ): Promise<void> => {
-    if (!callback) {
-      return;
-    }
+    if (!callback) return;
     try {
       await callback();
     } catch (error) {
@@ -348,16 +367,41 @@ export function installNodeServerShutdown(
       ]);
     } catch (error) {
       errors.push(error);
-      emit('ignore', cause, `${operation} did not finish before the force deadline`, error);
+      emit(
+        'ignore',
+        cause,
+        `${operation} did not finish before the force deadline`,
+        error,
+      );
     } finally {
       if (timer !== undefined) clearTimeout(timer);
     }
   };
 
-  const cleanup = (): void => {
-    if (disposed) {
+  const onStdinEnd = (): void => {
+    // EOF is not a signal and is valid only after the first interactive SIGINT.
+    if (eofArmed && phase === 'draining') force('stdin-eof');
+  };
+
+  const armInteractiveEof = (): void => {
+    if (
+      eofArmed ||
+      !watchStdinEof ||
+      !interactive ||
+      runtimeStdin === undefined
+    ) {
       return;
     }
+    eofArmed = true;
+    runtimeStdin.on('end', onStdinEnd);
+    if (runtimeStdin.readableFlowing !== true && runtimeStdin.resume) {
+      runtimeStdin.resume();
+      resumedStdin = true;
+    }
+  };
+
+  const cleanup = (): void => {
+    if (disposed) return;
     disposed = true;
     if (timeout !== undefined) {
       clearTimeout(timeout);
@@ -365,21 +409,22 @@ export function installNodeServerShutdown(
     }
     runtimeProcess?.off('SIGINT', onSigint);
     runtimeProcess?.off('SIGTERM', onSigterm);
-    if (watchStdinEof) {
-      runtimeStdin?.off('end', onStdinEnd);
+    if (eofArmed) runtimeStdin?.off('end', onStdinEnd);
+    if (
+      resumedStdin &&
+      runtimeStdin?.readableFlowing === true &&
+      runtimeStdin.pause
+    ) {
+      runtimeStdin.pause();
     }
   };
 
   const finish = (finalPhase: 'forced' | 'closed', cause: ShutdownCause): void => {
-    if (resolved) {
-      return;
-    }
+    if (resolved) return;
     resolved = true;
     phase = finalPhase;
     cleanup();
-    if (runtimeProcess) {
-      runtimeProcess.exitCode = exitCode;
-    }
+    if (runtimeProcess) runtimeProcess.exitCode = exitCode;
     const finishedAt = now();
     emit(
       finalPhase === 'forced' ? 'force' : 'ignore',
@@ -398,12 +443,8 @@ export function installNodeServerShutdown(
   };
 
   const force = (cause: ShutdownCause = 'programmatic'): void => {
-    if (phase === 'forced' || phase === 'closed') {
-      return;
-    }
-    if (startedAt === 0) {
-      startedAt = now();
-    }
+    if (phase === 'forced' || phase === 'closed') return;
+    if (startedAt === 0) startedAt = now();
     phase = 'forced';
     if (timeout !== undefined) {
       clearTimeout(timeout);
@@ -417,19 +458,28 @@ export function installNodeServerShutdown(
 
     for (const server of servers) {
       try {
-        // Ensure listener closure is requested before force-closing connections.
         server.close(() => undefined);
       } catch (error) {
         if (!isAlreadyClosedError(error)) {
           errors.push(error);
-          emit('ignore', cause, 'Server listener close failed during force escalation', error);
+          emit(
+            'ignore',
+            cause,
+            'Server listener close failed during force escalation',
+            error,
+          );
         }
       }
       try {
         server.closeAllConnections?.();
       } catch (error) {
         errors.push(error);
-        emit('ignore', cause, 'Force-closing active server connections failed', error);
+        emit(
+          'ignore',
+          cause,
+          'Force-closing active server connections failed',
+          error,
+        );
       }
     }
 
@@ -437,7 +487,11 @@ export function installNodeServerShutdown(
       await waitBounded(
         'Application force hook',
         cause,
-        capture('Application force hook', cause, options.force && (() => options.force?.(cause))),
+        capture(
+          'Application force hook',
+          cause,
+          options.force && (() => options.force?.(cause)),
+        ),
         forceTimeoutMillis,
       );
       await waitBounded(
@@ -455,19 +509,19 @@ export function installNodeServerShutdown(
       force(cause);
       return;
     }
-    if (phase !== 'running') {
-      return;
-    }
+    if (phase !== 'running') return;
 
     startedAt = now();
     phase = 'draining';
+    const interactiveSigint = interactive && cause === 'SIGINT';
     emit(
       'begin-graceful',
       cause,
-      interactive
+      interactiveSigint
         ? 'Graceful shutdown requested; draining active work. Press Ctrl-C again or Ctrl-D to force.'
         : 'Graceful shutdown requested; draining active work.',
     );
+    if (interactiveSigint) armInteractiveEof();
 
     timeout = setTimeout(() => force('timeout'), timeoutMillis);
 
@@ -477,9 +531,7 @@ export function installNodeServerShutdown(
         cause,
         options.beforeGraceful && (() => options.beforeGraceful?.(cause)),
       );
-      if (phase !== 'draining') {
-        return;
-      }
+      if (phase !== 'draining') return;
 
       const closeResults = await Promise.allSettled(servers.map(closeGracefully));
       let closeFailed = false;
@@ -494,57 +546,35 @@ export function installNodeServerShutdown(
         force(cause);
         return;
       }
-      if (phase !== 'draining') {
-        return;
-      }
+      if (phase !== 'draining') return;
 
       await flushOnce(cause);
-      if (phase !== 'draining') {
-        return;
-      }
+      if (phase !== 'draining') return;
       await capture(
         'Post-shutdown hook',
         cause,
         options.afterGraceful && (() => options.afterGraceful?.(cause)),
       );
-
-      if (phase === 'draining') {
-        finish('closed', cause);
-      }
+      if (phase === 'draining') finish('closed', cause);
     })();
   };
 
   const onSigint = (): void => {
     signalCount += 1;
-    if (phase === 'running') {
-      requestGraceful('SIGINT');
-    } else if (phase === 'draining') {
-      force('SIGINT');
-    }
+    if (phase === 'running') requestGraceful('SIGINT');
+    else if (phase === 'draining') force('SIGINT');
   };
+
   const onSigterm = (): void => {
     signalCount += 1;
-    if (phase === 'running') {
-      requestGraceful('SIGTERM');
-    } else if (phase === 'draining') {
-      force('SIGTERM');
-    }
-  };
-  const onStdinEnd = (): void => {
-    signalCount += 1;
-    if (phase === 'running') {
-      requestGraceful('stdin-eof');
-    } else if (phase === 'draining') {
-      force('stdin-eof');
-    }
+    if (phase === 'running') requestGraceful('SIGTERM');
+    else if (phase === 'draining') force('SIGTERM');
   };
 
   runtimeProcess?.on('SIGINT', onSigint);
   runtimeProcess?.on('SIGTERM', onSigterm);
-  if (watchStdinEof) {
-    runtimeStdin?.on('end', onStdinEnd);
-    runtimeStdin?.resume?.();
-  }
+  // Deliberately do not subscribe to or resume stdin here. EOF becomes a force
+  // input only after the first interactive SIGINT has started draining.
 
   return {
     get phase() {
@@ -558,15 +588,20 @@ export function installNodeServerShutdown(
 }
 
 /** Pure transition helper used by non-Node adapters and conformance tests. */
+export function transitionShutdownState(
+  phase: ShutdownPhase,
+  event: ShutdownStateEvent,
+): ShutdownStateTransition {
+  return (
+    SHUTDOWN_TRANSITIONS[`${phase}:${event}`]
+    ?? Object.freeze({ phase, action: 'ignore' as const })
+  );
+}
+
 export function nextShutdownAction(
   phase: ShutdownPhase,
   _cause: ShutdownCause,
 ): ShutdownAction {
-  if (phase === 'running') {
-    return 'begin-graceful';
-  }
-  if (phase === 'draining') {
-    return 'force';
-  }
-  return 'ignore';
+  const action = transitionShutdownState(phase, 'trigger').action;
+  return action === 'close' ? 'ignore' : action;
 }

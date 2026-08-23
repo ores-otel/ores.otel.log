@@ -19,9 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the immutable canonical interface dependency
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ores-otel/ores-interfaces
+          ref: 6b2e674464933a4de38785c03c33564661290454
+          path: .zed/ci-deps/ores-interfaces
           persist-credentials: false
 
       - name: Check out immutable flags-2-env contract tooling
@@ -102,7 +110,7 @@ jobs:
         run: >-
           cargo install
           --git https://github.com/zed-pkg/zed-cli
-          --rev 822bbdef7ebb9218a83ad7d3b3dca78ade1add79
+          --rev 5cef340b85b91f77c8b8644ac66e3534f58f85b6
           --locked zed-cli
 
       - name: Inspect the deterministic Zed/native release plan
@@ -133,5 +141,18 @@ jobs:
 
       - name: Roundtrip the complete Zed artifact
         run: |
+          set -euo pipefail
+          registry="$RUNNER_TEMP/zed-dependency-registry"
+          mkdir -p "$registry"
+          (
+            cd .zed/ci-deps/ores-interfaces
+            zed \
+              --registry "file://$registry" \
+              --home "$RUNNER_TEMP/zed-seed-home" \
+              publish --skip-vcs-checks
+          )
           zed pack
-          zed r2g --clean
+          zed \
+            --registry "file://$registry" \
+            --home "$RUNNER_TEMP/zed-home" \
+            r2g --r2g-root "$RUNNER_TEMP/zed-r2g" --clean

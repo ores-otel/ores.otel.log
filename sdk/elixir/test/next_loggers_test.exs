@@ -78,6 +78,8 @@ defmodule ORESoftware.NextLoggersTest do
 
     NextLoggers.log(logger, "INFO", "default", %{})
     NextLoggers.log(logger, "INFO", "ordinary-only", %{}, otel: false)
+    assert NextLoggers.use_otel(logger).otel
+    refute NextLoggers.not_otel(logger).otel
 
     assert_receive {:ordinary, "default"}
     assert_receive {:otel, "default"}

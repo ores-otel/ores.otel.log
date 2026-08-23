@@ -1,0 +1,16 @@
+{
+  "manifestSetVersion": "ores.otel.sdk-manifests/v1",
+  "manifests": [
+    "contracts/sdk-manifests/dart.json",
+    "contracts/sdk-manifests/elixir.json",
+    "contracts/sdk-manifests/erlang.json",
+    "contracts/sdk-manifests/gleam.json",
+    "contracts/sdk-manifests/go.json",
+    "contracts/sdk-manifests/java.json",
+    "contracts/sdk-manifests/nodejs.json",
+    "contracts/sdk-manifests/python.json",
+    "contracts/sdk-manifests/ruby.json",
+    "contracts/sdk-manifests/rust.json",
+    "contracts/sdk-manifests/wasm.json"
+  ]
+}

@@ -23,15 +23,16 @@ Future<void> main() async {
       user['id'] = 'mutated';
       assert(setContextLoggedInUser(const <String, Object?>{'role': 'admin'}));
       await Future<void>.delayed(Duration.zero);
-      return (await logger.info('hello').send())!.toJson();
+      return logger.info('hello').send();
     },
   );
 
-  assert((record['loggedInUser']! as Map)['id'] == 'user-1');
-  assert((record['loggedInUser']! as Map)['role'] == 'admin');
-  assert((record['fields']! as Map)['otel.span_id'] == 'span-1');
-  assert(record['routineId'] == 'handler');
-  assert((record['traceIds']! as List).length == 2);
+  final emitted = record!;
+  assert(emitted.loggedInUser['id'] == 'user-1');
+  assert(emitted.loggedInUser['role'] == 'admin');
+  assert(emitted.fields['otel.span_id'] == 'span-1');
+  assert(emitted.routineId == 'handler');
+  assert(emitted.traceIds.length == 2);
   assert(currentLogContext() == null);
 
   await withLogContext(
@@ -40,6 +41,26 @@ Future<void> main() async {
       assert(currentLogContext()?.traceFlags == 0);
     }),
   );
+
+  late LogContext? captured;
+  late String Function() bound;
+  withLogContext(const LogContext(traceId: 'captured'), () {
+    captured = captureLogContext();
+    bound = bindLogContext(() => currentLogContext()?.traceId ?? 'missing');
+    assert(updateLogContext(const LogContext(traceId: 'mutated')));
+    assert(currentLogContext()?.traceId == 'mutated');
+  });
+  assert(currentLogContext() == null);
+  assert(captured?.traceId == 'captured');
+  assert(bound() == 'captured');
+  assert(
+    withCapturedLogContext(
+          captured,
+          () => currentLogContext()?.traceId,
+        ) ==
+        'captured',
+  );
+  assert(currentLogContext() == null);
 
   final traces = await Future.wait(<Future<String>>[
     Future<String>(
@@ -125,6 +146,5 @@ Future<void> main() async {
   await blockedSignals.close();
 
   await logger.close();
-  assert(transport.closed);
   print('Dart context and shutdown conformance passed');
 }

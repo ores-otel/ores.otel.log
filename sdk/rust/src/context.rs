@@ -29,6 +29,8 @@ pub struct LogContext {
     pub baggage: BTreeMap<String, String>,
     pub routine_id: Option<String>,
     pub tags: Vec<String>,
+    pub context: Vec<Value>,
+    pub meta: Vec<Value>,
 }
 
 fn clean(value: Option<String>, maximum: usize) -> Option<String> {
@@ -115,6 +117,12 @@ pub fn merge_log_context(outer: &LogContext, inner: &LogContext) -> LogContext {
         baggage,
         routine_id: inner.routine_id.clone().or(outer.routine_id),
         tags,
+        context: outer
+            .context
+            .into_iter()
+            .chain(inner.context.clone())
+            .collect(),
+        meta: outer.meta.into_iter().chain(inner.meta.clone()).collect(),
     }
     .normalized()
 }
@@ -236,6 +244,10 @@ pub fn with_log_context_async<F: Future>(context: LogContext, future: F) -> Cont
     ContextFuture::new(context, future)
 }
 
+pub fn contextualize_future<F: Future>(context: LogContext, future: F) -> ContextFuture<F> {
+    with_log_context_async(context, future)
+}
+
 pub fn apply_log_context(mut event: Event, context: &LogContext) -> Event {
     let context = context.clone().normalized();
     if let Some(trace_id) = context.trace_id {
@@ -278,7 +290,14 @@ pub fn apply_log_context(mut event: Event, context: &LogContext) -> Event {
     if let Some(routine_id) = context.routine_id {
         event = event.add_routine_id(routine_id);
     }
-    event.add_tags(std::iter::once("otel".to_string()).chain(context.tags))
+    event = event.add_tags(std::iter::once("otel".to_string()).chain(context.tags));
+    for value in context.context {
+        event = event.add_context(value);
+    }
+    for value in context.meta {
+        event = event.add_meta(value);
+    }
+    event
 }
 
 pub fn apply_current_log_context(event: Event) -> Event {

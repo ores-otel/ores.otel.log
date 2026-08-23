@@ -11,10 +11,14 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const manifest = parseToml(await read('.zpkg.toml'));
 const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
-const lock = await read('.zpkg.lock');
+const rustCargo = await read('sdk/rust/Cargo.toml');
 const zedInclude = await read('.zedinclude');
+const zedCliCommit = '5cef340b85b91f77c8b8644ac66e3534f58f85b6';
+const interfacesCommit = '6b2e674464933a4de38785c03c33564661290454';
+const checkoutCommit = '3d3c42e5aac5ba805825da76410c181273ba90b1';
 
 const expectedTargets = {
+  repository: { dir: '.', adapter: 'none' },
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
   nodejs: {
     dir: 'sdk/nodejs',
@@ -125,9 +129,13 @@ test('all language slices are explicit, unique, and registry-correct', () => {
     const actual = manifest.targets[target];
     assert.deepEqual(actual, expected, `${target} target drifted`);
     assert.equal(dirs.has(actual.dir), false, `duplicate target directory: ${actual.dir}`);
-    assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+    if (actual.name === undefined) {
+      assert.equal(target, 'repository', `only the canonical root target may omit name: ${target}`);
+    } else {
+      assert.equal(names.has(actual.name), false, `duplicate Zed target name: ${actual.name}`);
+      names.add(actual.name);
+    }
     dirs.add(actual.dir);
-    names.add(actual.name);
     if (actual.native) {
       assert.equal(tags.has(actual.native.tag_format), false, `duplicate native tag: ${actual.native.tag_format}`);
       tags.add(actual.native.tag_format);
@@ -154,7 +162,15 @@ test('root publish metadata is target-safe', () => {
   assert.equal(manifest.publish.include_readme, true);
   assert.equal(manifest.publish.tag_format, 'v{version}');
   assert.equal(manifest.publish.smoke_test, 'sh "$ZED_PKG_TEST_TARGET/.zpkg-smoke.sh"');
-  for (const pattern of ['.github/**', '.r2g/**', 'pubspec.lock', '**/target/**', '**/*.gem', '**/test.sh']) {
+  for (const pattern of [
+    '.github/**',
+    '.r2g/**',
+    '**/pubspec.lock',
+    '**/target/**',
+    '**/*.egg-info/**',
+    '**/*.gem',
+    '**/test.sh',
+  ]) {
     assert.ok(manifest.publish.exclude.includes(pattern), `publish.exclude should strip ${pattern}`);
   }
 });
@@ -165,6 +181,7 @@ test('generated Node release files use a bounded Zed allowlist', () => {
     .map((line) => line.trim())
     .filter((line) => line && !line.startsWith('#'));
   assert.deepEqual(patterns, [
+    'dist/**',
     'sdk/nodejs/.cli-flags.toml',
     'sdk/nodejs/LICENSE',
     'sdk/nodejs/README.md',
@@ -172,6 +189,15 @@ test('generated Node release files use a bounded Zed allowlist', () => {
     'sdk/nodejs/src/**',
   ]);
   assert.equal(patterns.some((pattern) => ['*', '**', '**/*'].includes(pattern)), false);
+});
+
+test('the Rust SDK exact-pins the audited time release', () => {
+  assert.match(rustCargo, /^rust-version = "1\.88"$/mu);
+  assert.match(
+    rustCargo,
+    /^time = \{ version = "=0\.3\.54", features = \["formatting"\] \}$/mu,
+  );
+  assert.doesNotMatch(rustCargo, /^time = \{ version = "(?:0\.3|=0\.3\.36)",/mu);
 });
 
 test('the root and every slice carry a target-local smoke contract', async () => {
@@ -230,16 +256,45 @@ test('the repository URL and slugs satisfy Zed validation', () => {
   const slug = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
   assert.match(manifest.package.org, slug);
   assert.match(manifest.package.name, slug);
-  for (const target of Object.values(manifest.targets)) assert.match(target.name, slug);
+  for (const [key, target] of Object.entries(manifest.targets)) {
+    if (target.name === undefined) {
+      assert.equal(key, 'repository', `only the canonical root target may omit name: ${key}`);
+    } else {
+      assert.match(target.name, slug);
+    }
+  }
   assert.equal(manifest.package.repository.vcs, 'git');
   assert.match(manifest.package.repository.url, /^(?:https?|ssh|git|git\+ssh):\/\//);
 });
 
-test('the lockfile is the canonical zero-dependency form', () => {
-  assert.equal(lock.trim(), 'version = 1');
-  assert.equal(parseToml(lock).version, 1);
-  assert.deepEqual(Object.keys(manifest.dependencies ?? {}), []);
+test('the Zed manifest declares the canonical interface dependency', () => {
+  assert.deepEqual(manifest.dependencies, {
+    'ores-otel/ores-interfaces': '^0.1.0',
+  });
   assert.equal(pkg.dependencies, undefined);
+});
+
+test('Zed roundtrip workflows seed the canonical interface dependency hermetically', async () => {
+  for (const path of ['.github/workflows/ci.yml', '.github/workflows/packaging.yml']) {
+    const workflow = await read(path);
+    assert.match(workflow, /permissions:\n(?:[^\n]*\n)*?\s+contents: read/u, `${path} must be read-only`);
+    assert.ok(
+      workflow.includes(`uses: actions/checkout@${checkoutCommit} # v7`),
+      `${path} must use the reviewed checkout commit`,
+    );
+    assert.ok(workflow.includes(`ref: ${interfacesCommit}`), `${path} must pin ores-interfaces`);
+    assert.match(workflow, new RegExp(`--rev\\s+${zedCliCommit}`, 'u'), `${path} must pin zed-cli`);
+    assert.match(
+      workflow,
+      /zed \\\n\s+--registry "file:\/\/\$registry" \\\n\s+--home "\$RUNNER_TEMP\/zed-seed-home" \\\n\s+publish --skip-vcs-checks/u,
+      `${path} must seed its file registry in an isolated home`,
+    );
+    assert.match(
+      workflow,
+      /--registry "file:\/\/\$registry" \\\n\s+--home "\$RUNNER_TEMP\/zed-home" \\\n\s+r2g --r2g-root/u,
+      `${path} must roundtrip against the seeded registry in an isolated home`,
+    );
+  }
 });
 
 test('the eslint plugin version tracks package.json', async () => {

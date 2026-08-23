@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/test-repository-matrix.schema.json",
+  "title": "ores-otel-test repository conformance matrix",
+  "description": "Required cross-repository matrix for testing canonical and legacy sources across at least ten repositories and seven languages.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["matrixVersion", "testOrganization", "canonicalSource", "legacySource", "repositories"],
+  "properties": {
+    "matrixVersion": {"const": "ores.otel.test-matrix/v1"},
+    "testOrganization": {"const": "ores-otel-test"},
+    "canonicalSource": {"const": "ores-otel/ores.otel.log"},
+    "legacySource": {"const": "ORESoftware/next-loggers.ts"},
+    "repositories": {
+      "type": "array", "minItems": 10, "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "language", "runtime", "toolchain", "testCommand", "sources", "capabilities", "status"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]{0,99}$"},
+          "language": {"type": "string", "enum": ["nodejs", "python", "go", "rust", "java", "dart", "gleam", "erlang", "elixir", "ruby", "wasm", "browser"]},
+          "runtime": {"type": "string", "minLength": 1, "maxLength": 128},
+          "toolchain": {"type": "string", "minLength": 1, "maxLength": 128},
+          "testCommand": {"type": "string", "minLength": 1, "maxLength": 512},
+          "sources": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "enum": ["ores-otel/ores.otel.log", "ORESoftware/next-loggers.ts"]}},
+          "capabilities": {"type": "array", "minItems": 4, "maxItems": 16, "uniqueItems": true, "items": {"type": "string", "enum": ["record-schema", "api-manifest", "context-isolation", "otel-explicit", "no-monkey-patching", "supabase-client", "lifecycle", "concurrency", "wasm-host", "browser-exit", "prometheus-cardinality", "loki-correlation"]}},
+          "status": {"type": "string", "enum": ["planned", "created", "green", "blocked"]}
+        }
+      }
+    }
+  }
+}

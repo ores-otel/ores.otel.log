@@ -1,0 +1,176 @@
+{
+  "manifestVersion": "ores.otel.sdk-manifest/v1",
+  "language": "java",
+  "ecosystem": "Maven Central",
+  "runtime": "JVM 17+",
+  "sourceRoot": "sdk/java",
+  "package": {
+    "legacyName": "io.github.oresoftware:next-loggers",
+    "canonicalName": "io.github.ores_otel:ores-otel-log",
+    "nativeModule": "cloud.oresoftware.nextloggers"
+  },
+  "repositories": {
+    "canonical": "ores-otel/ores.otel.log",
+    "legacy": "ORESoftware/next-loggers.ts"
+  },
+  "wire": {
+    "recordVersion": "next-loggers/v1",
+    "recordSchema": "contracts/log-record.schema.json",
+    "contextSchema": "contracts/schemas/log-context.schema.json",
+    "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
+    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+  },
+  "api": {
+    "logger": {
+      "trace": [
+        "trace"
+      ],
+      "debug": [
+        "debug"
+      ],
+      "info": [
+        "info",
+        "log"
+      ],
+      "warn": [
+        "warn"
+      ],
+      "error": [
+        "error"
+      ],
+      "fatal": [
+        "fatal"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flushOnExit"
+      ],
+      "close": [
+        "close"
+      ]
+    },
+    "event": {
+      "addFields": [
+        "addFields"
+      ],
+      "addTrace": [
+        "addTrace",
+        "addTraceId"
+      ],
+      "addRoutineId": [
+        "addRoutineId"
+      ],
+      "addTags": [
+        "addTags"
+      ],
+      "addContext": [
+        "addContext"
+      ],
+      "addMeta": [
+        "addMeta"
+      ],
+      "addUser": [
+        "addUserInfo",
+        "addLoggedInUserInfo"
+      ],
+      "send": [
+        "send"
+      ],
+      "otelRouting": [
+        "useOtel",
+        "notOtel",
+        "withOtel",
+        "resetOtel",
+        "isOtelEnabled"
+      ]
+    },
+    "transport": {
+      "write": [
+        "write"
+      ],
+      "flush": [
+        "flush"
+      ],
+      "flushOnExit": [
+        "flushOnExit"
+      ],
+      "close": [
+        "close"
+      ]
+    }
+  },
+  "context": {
+    "status": "partial",
+    "strategy": "thread-local",
+    "propagation": "thread",
+    "isolation": "concurrent-safe",
+    "symbols": {
+      "run": [
+        "withLogContext"
+      ],
+      "current": [
+        "currentLogContext"
+      ],
+      "update": [
+        "updateLogContext"
+      ],
+      "apply": [
+        "Event.applyContext"
+      ],
+      "withSpan": [
+        "withSpan"
+      ]
+    },
+    "mergesLoggedInUser": true,
+    "mergesFields": true,
+    "deduplicatesTraceIds": true,
+    "restoresAfterFailure": true
+  },
+  "telemetry": {
+    "opentelemetry": {
+      "adapterSymbols": [
+        "OtelTransport",
+        "withSpan"
+      ],
+      "explicit": true,
+      "automaticInstrumentation": false,
+      "monkeyPatching": false,
+      "ownsProvider": false,
+      "wrapsLoggerCalls": true,
+      "sampledOutCorrelation": true,
+      "recordingSpanEventsOnly": true
+    },
+    "supabase": {
+      "adapterSymbols": [
+        "SupabaseTransport"
+      ],
+      "authenticatedSender": true,
+      "durableBatchSchema": "next-loggers/batch/v1",
+      "allowsDistributedSecrets": false,
+      "realtimeIsDurable": false
+    }
+  },
+  "conformance": {
+    "command": "bash sdk/java/test.sh",
+    "recordFixture": "contracts/fixtures/conformance-record.json",
+    "sourceFiles": [
+      "sdk/java/src/main/java/cloud/oresoftware/nextloggers/NextLoggers.java",
+      "sdk/java/src/test/java/cloud/oresoftware/nextloggers/NextLoggersTest.java",
+      "sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java",
+      "sdk/java/src/test/java/com/oresoftware/nextloggers/NextLoggersTest.java",
+      "sdk/java/src/test/java/com/oresoftware/nextloggers/NextLoggersAdversarialTest.java"
+    ],
+    "validatesJsonSchema": false,
+    "testsContextIsolation": true,
+    "testsNoMonkeyPatching": true
+  },
+  "promotion": {
+    "ready": false,
+    "blockers": [
+      "Add an explicit executor context capture and propagation helper.",
+      "Validate Java-emitted records directly against the canonical JSON Schema."
+    ]
+  }
+}

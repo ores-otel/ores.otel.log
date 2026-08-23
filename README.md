@@ -219,6 +219,34 @@ const transport: LogTransport = {
 };
 ```
 
+### Route OpenTelemetry per event
+
+OpenTelemetry transports receive records by default. Set `otel: false` on a
+logger to make them opt-in, then override one event without changing delivery
+to HTTP, Supabase, memory, or any other transport:
+
+```ts
+const log = createLogger({
+  otel: false,
+  transports: [otelTransport, supabaseTransport],
+});
+
+await log.info('sampled in').useOtel().send();
+await log.warn('OTEL excluded').notOtel().send();
+await log.info('computed').withOtel(routeToOtel).send();
+await log.info('back to default').useOtel().resetOtel().send();
+```
+
+`event.isOtelEnabled(fallback)` resolves the per-event value. Logger
+`setOtelEnabled()`, `useOtel()`, and `notOtel()` update the default in the
+options object, so `anew()` children inherit it. An OTEL transport is identified
+by `otel: true` or the name `opentelemetry`; the built-in bridge sets both.
+
+`withOpenTelemetry(options, bridge)` appends the built-in bridge while
+preserving existing transports. If the bridge supplies `activeSpan`, it also
+installs span correlation unless the options already contain an explicit
+`contextProvider`.
+
 ## Error tracking
 
 Send `ERROR`/`FATAL` records (configurable via `minLevel`) to a dedicated
@@ -570,6 +598,27 @@ await log.close({ timeoutMillis: 4_000 });
 
 Set `flushOnShutdown: false` for Node/Bun or `flushOnUnload: false` for browser/Deno when the host owns lifecycle coordination. A direct `process.exit()` cannot wait for asynchronous JavaScript; call `await log.close()` before using it. Browser shutdown APIs are inherently best-effort, so use the HTTP transport in addition to WebSocket streaming when the final records must be persisted.
 
+## Formal verification
+
+Wire records and cross-language fixtures are constrained by JSON Schema. The
+behavioral layer is checked separately with TLA+ and executable finite-state
+models under [`formal/`](formal/README.md):
+
+- the shared TypeScript, Dart, and Rust shutdown transition relation is total,
+  monotonic, terminal, and flushes at most once;
+- the bounded OTEL/Supabase delivery model accounts for every attempted record
+  as queued, in flight, acknowledged, or explicitly dropped;
+- queue capacity and retry limits remain invariant when producers refill a
+  queue while a failed batch is in flight;
+- a completed close is drained, flushed, and terminal; TLC also checks eventual
+  completion under the model's fairness assumptions.
+
+`npm run test:formal` runs the executable state-space explorer and TypeScript
+refinement. CI additionally runs the pinned TLA+ checker and the Rust and Dart
+refinement suites. These checks complement concurrency, fault-injection, and
+real-runtime tests; the finite bounds and proof boundary are documented with
+the models.
+
 ## Extending the classes
 
 All logger and event classes are public. Protected event state and logger hooks allow custom event builders, console formatting, dispatch, and runtime fields without forking the package:
@@ -609,6 +658,7 @@ await new AuditLogger().info('changed role').withActor('user-1').send();
 - Set `autoSend: true` to enqueue `.send()` in a microtask.
 - Console output is enabled by default; set `console: false` to disable it.
 - `.send(false)` writes to the console but skips remote transports.
+- `.notOtel()` skips only OTEL transports; all other transports still receive the record.
 - `.flush()` waits for pending transport writes; pass `sendUnsent: true` to recover unfinished chains.
 - `.flushOnExit()` sends unfinished chains and runs transport shutdown hooks.
 - `.close()` performs the shutdown flush and then closes transports.

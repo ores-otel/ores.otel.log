@@ -65,6 +65,34 @@ concurrent_processes_keep_context_isolated_test() ->
     ?assertEqual(<<"trace-a">>, maps:get(<<"a">>, Values)),
     ?assertEqual(<<"trace-b">>, maps:get(<<"b">>, Values)).
 
+per_event_otel_routing_test() ->
+    Parent = self(),
+    Logger0 = next_loggers:new(
+        <<"routing">>,
+        <<"erlang">>,
+        [
+            next_loggers:otel_transport(fun(Value) -> Parent ! {routed_otel, Value} end),
+            next_loggers:supabase_transport(fun(Value) -> Parent ! {regular, Value} end)
+        ]
+    ),
+    Logger = next_loggers:not_otel(Logger0),
+    DefaultOff = next_loggers:event(Logger, <<"INFO">>, <<"default-off">>, #{}),
+    ?assertNot(next_loggers:is_otel_enabled(DefaultOff, maps:get(otel, Logger))),
+    _ = next_loggers:send(DefaultOff),
+    receive {regular, #{message := <<"default-off">>}} -> ok after 1000 -> error(timeout) end,
+    receive {routed_otel, _} -> ?assert(false) after 10 -> ok end,
+
+    Forced = next_loggers:use_otel(next_loggers:event(Logger, <<"INFO">>, <<"forced-on">>, #{})),
+    _ = next_loggers:send(Forced),
+    receive {routed_otel, #{body := <<"forced-on">>}} -> ok after 1000 -> error(timeout) end,
+    receive {regular, #{message := <<"forced-on">>}} -> ok after 1000 -> error(timeout) end,
+
+    LoggerOn = next_loggers:use_otel(Logger),
+    ForcedOff = next_loggers:not_otel(next_loggers:event(LoggerOn, <<"WARN">>, <<"forced-off">>, #{})),
+    _ = next_loggers:send(ForcedOff),
+    receive {regular, #{message := <<"forced-off">>}} -> ok after 1000 -> error(timeout) end,
+    receive {routed_otel, _} -> ?assert(false) after 10 -> ok end.
+
 collect(0, Values) -> Values;
 collect(Remaining, Values) ->
     receive

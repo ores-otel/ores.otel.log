@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/backpressure-result.schema.json",
+  "title": "ores.otel.log/backpressure-result/v1",
+  "description": "Language-neutral accounting receipt for a bounded logger transport. Implementations MUST additionally enforce accepted + dropped = attempted, the sum of dropReasons = dropped, queued and remainingQueued <= capacity, coherent flush flags, and completed shutdowns with zero queued work plus a completed non-timed-out flush.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "transport",
+    "policy",
+    "capacity",
+    "attempted",
+    "accepted",
+    "dropped",
+    "queued",
+    "dropReasons",
+    "flush",
+    "shutdown"
+  ],
+  "properties": {
+    "schema": {"const": "ores.otel.log/backpressure-result/v1"},
+    "transport": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9._-]*$"
+    },
+    "policy": {
+      "enum": ["drop-newest", "drop-oldest", "block-with-timeout", "reject"]
+    },
+    "capacity": {"type": "integer", "minimum": 1, "maximum": 1000000},
+    "attempted": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "accepted": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "dropped": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "queued": {"type": "integer", "minimum": 0, "maximum": 1000000},
+    "dropReasons": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overflow", "shutdown", "transport"],
+      "properties": {
+        "overflow": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "shutdown": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "transport": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "flush": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requested", "completed", "timedOut"],
+      "properties": {
+        "requested": {"type": "boolean"},
+        "completed": {"type": "boolean"},
+        "timedOut": {"type": "boolean"}
+      }
+    },
+    "shutdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "completed", "remainingQueued"],
+      "properties": {
+        "mode": {"enum": ["graceful", "forced", "process-exit"]},
+        "completed": {"type": "boolean"},
+        "remainingQueued": {"type": "integer", "minimum": 0, "maximum": 1000000}
+      }
+    }
+  }
+}
