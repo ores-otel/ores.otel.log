@@ -5,13 +5,21 @@ const MAX_BATCH_RECORDS = 100;
 const BATCH_ID = /^nl-[0-9]+-[0-9a-f]{16}$/u;
 const encoder = new TextEncoder();
 
-function allowedOrigins(): Set<string> {
+function environmentSet(name: string): Set<string> {
   return new Set(
-    (Deno.env.get('TELEMETRY_ALLOWED_ORIGINS') ?? '')
+    (Deno.env.get(name) ?? '')
       .split(',')
       .map((value) => value.trim())
       .filter(Boolean),
   );
+}
+
+function allowedOrigins(): Set<string> {
+  return environmentSet('TELEMETRY_ALLOWED_ORIGINS');
+}
+
+function allowedAppNames(): Set<string> {
+  return environmentSet('TELEMETRY_ALLOWED_APP_NAMES');
 }
 
 function corsHeaders(request: Request): Headers | null {
@@ -58,11 +66,19 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 function positiveRateLimit(): number {
-  const parsed = Number.parseInt(Deno.env.get('TELEMETRY_MAX_RECORDS_PER_MINUTE') ?? '1000', 10);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100_000 ? parsed : 1_000;
+  const parsed = Number.parseInt(
+    Deno.env.get('TELEMETRY_MAX_RECORDS_PER_MINUTE') ?? '1000',
+    10,
+  );
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100_000
+    ? parsed
+    : 1_000;
 }
 
-async function ingest(request: Request, ctx: Awaited<ReturnType<typeof createSupabaseContext>>['data']): Promise<Response> {
+async function ingest(
+  request: Request,
+  ctx: Awaited<ReturnType<typeof createSupabaseContext>>['data'],
+): Promise<Response> {
   if (!ctx) {
     return json(request, { error: 'unauthorized' }, 401);
   }
@@ -71,13 +87,18 @@ async function ingest(request: Request, ctx: Awaited<ReturnType<typeof createSup
     return json(request, { error: 'origin_not_allowed' }, 403);
   }
   if (request.method !== 'POST') {
-    return json(request, { error: 'method_not_allowed' }, 405, { allow: 'POST, OPTIONS' });
+    return json(request, { error: 'method_not_allowed' }, 405, {
+      allow: 'POST, OPTIONS',
+    });
   }
   const contentType = request.headers.get('content-type')?.split(';', 1)[0]?.trim();
   if (contentType !== 'application/json') {
     return json(request, { error: 'content_type_must_be_application_json' }, 415);
   }
-  const declaredLength = Number.parseInt(request.headers.get('content-length') ?? '0', 10);
+  const declaredLength = Number.parseInt(
+    request.headers.get('content-length') ?? '0',
+    10,
+  );
   if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
     return json(request, { error: 'payload_too_large' }, 413);
   }
@@ -123,6 +144,19 @@ async function ingest(request: Request, ctx: Awaited<ReturnType<typeof createSup
     return json(request, { error: 'batch_id_header_mismatch' }, 400);
   }
 
+  const appNames = allowedAppNames();
+  if (appNames.size === 0) {
+    return json(request, { error: 'telemetry_app_allowlist_missing' }, 503);
+  }
+  for (const record of records) {
+    if (!object(record) || typeof record.appName !== 'string') {
+      return json(request, { error: 'invalid_batch' }, 400);
+    }
+    if (!appNames.has(record.appName)) {
+      return json(request, { error: 'app_name_not_allowed' }, 403);
+    }
+  }
+
   const userId = ctx.userClaims?.id;
   if (typeof userId !== 'string' || !userId) {
     return json(request, { error: 'authenticated_user_missing' }, 401);
@@ -137,8 +171,8 @@ async function ingest(request: Request, ctx: Awaited<ReturnType<typeof createSup
 
   if (error) {
     // Never include the batch, bearer token, or raw Postgres error details in
-    // the response. The platform request ID is enough to correlate server-side
-    // diagnostics emitted through a separate, non-recursive logger pipeline.
+    // the response. Correlate server-side diagnostics through a separate,
+    // non-recursive telemetry path.
     const requestId = Deno.env.get('SB_EXECUTION_ID') ?? crypto.randomUUID();
     if (error.code === 'P0001') {
       return json(request, { error: 'rate_limited', requestId }, 429, {
