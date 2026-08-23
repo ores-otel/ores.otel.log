@@ -345,8 +345,9 @@ class SupabaseRealtimeTransport implements LogTransport {
     while (_queue.isNotEmpty) {
       final batch = _takeBatch();
       if (batch.isEmpty) return;
+      final bool usingFallback = _shouldUseFallback();
       try {
-        if (_shouldUseFallback()) {
+        if (usingFallback) {
           final durableFallback = fallback;
           if (durableFallback == null) {
             throw StateError('Supabase Realtime fallback is unavailable');
@@ -360,7 +361,12 @@ class SupabaseRealtimeTransport implements LogTransport {
       } catch (error) {
         _failures += 1;
         _restoreBatch(batch);
-        if (_shouldUseFallback() && fallback != null) continue;
+        // Retry a failed WebSocket batch once through the durable fallback
+        // after crossing the threshold. A fallback failure must escape rather
+        // than spinning forever while the collector is unavailable.
+        if (!usingFallback && _shouldUseFallback() && fallback != null) {
+          continue;
+        }
         rethrow;
       }
     }

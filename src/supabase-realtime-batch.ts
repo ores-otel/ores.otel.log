@@ -508,8 +508,9 @@ export class SupabaseRealtimeBatchTransport implements LogTransport {
     while (this.queue.length > 0) {
       const batch = this.takeBatch();
       if (batch.length === 0) return;
+      const usingFallback = this.shouldUseFallback();
       try {
-        if (this.shouldUseFallback()) {
+        if (usingFallback) {
           const fallback = this.options.fallback;
           if (!fallback) throw new Error('Supabase Realtime fallback is unavailable');
           await this.sendBatchToFallback(batch, fallback);
@@ -521,7 +522,11 @@ export class SupabaseRealtimeBatchTransport implements LogTransport {
       } catch (error) {
         this.failures += 1;
         this.restoreBatch(batch);
-        if (this.shouldUseFallback() && this.options.fallback) continue;
+        // A primary WebSocket failure may cross the configured threshold and
+        // retry this batch once through the durable fallback. A fallback
+        // failure must escape to the caller; otherwise the same batch spins in
+        // an unbounded retry loop while the HTTP collector is unavailable.
+        if (!usingFallback && this.shouldUseFallback() && this.options.fallback) continue;
         throw error;
       }
     }

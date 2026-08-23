@@ -81,6 +81,16 @@ class MemoryFallback {
   }
 }
 
+class FailOnceFallback extends MemoryFallback {
+  attempts = 0;
+
+  async write(item) {
+    this.attempts += 1;
+    if (this.attempts === 1) throw new Error('collector unavailable');
+    await super.write(item);
+  }
+}
+
 test('joins an authenticated private channel and sends an acknowledged batch', async () => {
   let socket;
   const transport = new SupabaseRealtimeBatchTransport({
@@ -203,4 +213,23 @@ test('uses a durable fallback after the configured WebSocket failure threshold',
   assert.equal(transport.snapshot().queued, 0);
   await transport.close();
   assert.equal(fallback.closes, 1);
+});
+
+
+test('surfaces fallback failures without spinning or losing the queued batch', async () => {
+  const fallback = new FailOnceFallback();
+  const transport = new SupabaseRealtimeBatchTransport({
+    url: 'https://project.supabase.co',
+    publishableKey: 'sb_publishable_client',
+    accessToken: 'user-token',
+    channel: 'logs',
+    awaitDelivery: true,
+    fallback,
+    fallbackAfterFailures: 0,
+  });
+
+  await assert.rejects(() => transport.write(record('still-queued')), /collector unavailable/u);
+  assert.equal(fallback.attempts, 1);
+  assert.equal(transport.snapshot().queued, 1);
+  assert.deepEqual(fallback.records, []);
 });
