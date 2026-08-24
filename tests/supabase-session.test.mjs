@@ -254,6 +254,7 @@ test('session transport keeps durable ingest authoritative during a Realtime out
             batchId: payload.batchId,
             accepted: payload.records.length,
             duplicates: 0,
+            requested: payload.records.length,
             committedAt: '2026-08-24T01:30:00.000Z',
           }),
           {

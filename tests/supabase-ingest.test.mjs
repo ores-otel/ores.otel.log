@@ -26,16 +26,23 @@ function jwt(role) {
   return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ role })}.signature`;
 }
 
-function commitAck(init) {
+function commitAck(init, overrides = {}) {
   const body = JSON.parse(init.body);
+  const requested = body.records.length;
   return new Response(JSON.stringify({
-    ok: true,
+    schema: 'next-loggers/ingest-ack/v1',
     batchId: body.batchId,
-    accepted: body.records.length,
-    duplicate: false,
+    accepted: requested,
+    duplicates: 0,
+    requested,
+    committedAt: '2026-08-03T12:34:56.100Z',
+    ...overrides,
   }), {
     status: 202,
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'x-request-id': 'request-123',
+    },
   });
 }
 
@@ -335,4 +342,83 @@ test('publishable-key-only mode must be explicitly enabled', async () => {
   await transport.write(record('public'));
   assert.equal(requests.length, 1);
   assert.equal('authorization' in requests[0].headers, false);
+});
+
+
+test('2xx responses retain the exact batch until a complete post-commit acknowledgement arrives', async () => {
+  const batchIds = [];
+  const acknowledgements = [];
+  let attempt = 0;
+  const transport = createSupabaseIngestTransport({
+    url: 'https://project.supabase.co',
+    publishableKey: 'sb_publishable_public',
+    accessToken: 'user-token',
+    batchSize: 10,
+    flushIntervalMillis: 60_000,
+    retryBaseMillis: 60_000,
+    retryMaxMillis: 60_000,
+    batchIdFactory: () => 'durable-batch-id',
+    onAcknowledged: (acknowledgement) => acknowledgements.push(acknowledgement),
+    fetch: async (_url, init) => {
+      attempt += 1;
+      const batchId = init.headers['x-next-loggers-batch-id'];
+      batchIds.push(batchId);
+      const payload = JSON.parse(init.body);
+      const requested = payload.records.length;
+
+      if (attempt === 1) {
+        return new Response(null, { status: 202 });
+      }
+      if (attempt === 2) {
+        return commitAck(init, { batchId: 'wrong-batch-id' });
+      }
+      if (attempt === 3) {
+        return commitAck(init, { accepted: requested - 1, duplicates: 0 });
+      }
+      return commitAck(init, { accepted: requested - 1, duplicates: 1 });
+    },
+  });
+
+  await transport.write(record('durable-first'));
+  await transport.write(record('durable-second'));
+
+  await assert.rejects(
+    transport.flush(),
+    /did not return JSON commit acknowledgement/u,
+  );
+  assert.equal(transport.snapshot().inFlight, 2);
+
+  await assert.rejects(
+    transport.flush(),
+    /commit acknowledgement batchId mismatch/u,
+  );
+  assert.equal(transport.snapshot().inFlight, 2);
+
+  await assert.rejects(
+    transport.flush(),
+    /does not account for the complete batch/u,
+  );
+  assert.equal(transport.snapshot().inFlight, 2);
+
+  await transport.flush();
+
+  assert.deepEqual(batchIds, [
+    'durable-batch-id',
+    'durable-batch-id',
+    'durable-batch-id',
+    'durable-batch-id',
+  ]);
+  assert.equal(transport.snapshot().inFlight, 0);
+  assert.equal(transport.snapshot().acknowledged, 2);
+  assert.equal(transport.snapshot().failures, 3);
+  assert.deepEqual(acknowledgements, [{
+    schema: 'next-loggers/ingest-ack/v1',
+    batchId: 'durable-batch-id',
+    accepted: 1,
+    duplicates: 1,
+    requested: 2,
+    committedAt: '2026-08-03T12:34:56.100Z',
+    duplicate: false,
+    requestId: 'request-123',
+  }]);
 });
