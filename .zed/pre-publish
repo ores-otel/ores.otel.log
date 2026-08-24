@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+.zed/pre-build
+npm run test:contracts
+npm run test:runtimes
+npm run test:polyglot
+npm run release:check
