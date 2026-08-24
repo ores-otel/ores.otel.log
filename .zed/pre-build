@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+if command -v zed >/dev/null 2>&1; then
+  zed install --locked
+fi
+npm ci --ignore-scripts --no-audit --no-fund
+npm run typecheck
+node --test tests/supabase-websocket-ingest.test.mjs
