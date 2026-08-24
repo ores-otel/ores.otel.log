@@ -8,8 +8,10 @@ import 'package:test/test.dart';
 class FakeChannel implements OresWebSocketChannel {
   FakeChannel({this.onSend});
 
-  final void Function(Map<String, Object?> message, FakeChannel channel)? onSend;
-  final StreamController<Object?> _messages = StreamController<Object?>.broadcast(sync: true);
+  final void Function(Map<String, Object?> message, FakeChannel channel)?
+  onSend;
+  final StreamController<Object?> _messages =
+      StreamController<Object?>.broadcast(sync: true);
   final List<Map<String, Object?>> sent = <Map<String, Object?>>[];
   bool closed = false;
 
@@ -50,18 +52,21 @@ const SupabaseTelemetrySession session = SupabaseTelemetrySession(
 );
 
 LogRecord logRecord([String id = 'log-1']) => LogRecord(
-      id: id,
-      timestamp: '2026-08-24T00:00:00.000Z',
-      level: LogLevel.info,
-      runtime: 'flutter',
-      appName: 'test-app',
-      message: 'hello',
-      values: const <Object?>[],
-      fields: const <String, Object?>{},
-    );
+  id: id,
+  timestamp: '2026-08-24T00:00:00.000Z',
+  level: LogLevel.info,
+  runtime: 'flutter',
+  appName: 'test-app',
+  message: 'hello',
+  values: const <Object?>[],
+  fields: const <String, Object?>{},
+);
 
-SupabaseWebSocketTicket ticket({String scheme = 'wss'}) => SupabaseWebSocketTicket(
-      url: Uri.parse('$scheme://project.functions.supabase.co/telemetry-stream'),
+SupabaseWebSocketTicket ticket({String scheme = 'wss'}) =>
+    SupabaseWebSocketTicket(
+      url: Uri.parse(
+        '$scheme://project.functions.supabase.co/telemetry-stream',
+      ),
       ticket: 'one-time-ticket-1234567890',
     );
 
@@ -70,16 +75,15 @@ Map<String, Object?> commitAck(
   String? batchId,
   int? accepted,
   int duplicates = 0,
-}) =>
-    <String, Object?>{
-      'type': 'commit_ack',
-      'protocol': oresSupabaseWebSocketProtocol,
-      'batchId': batchId ?? batch['batchId']! as String,
-      'sequence': batch['sequence']! as int,
-      'accepted': accepted ?? (batch['records']! as List<Object?>).length,
-      'duplicates': duplicates,
-      'committedAt': '2026-08-24T00:00:01.000Z',
-    };
+}) => <String, Object?>{
+  'type': 'commit_ack',
+  'protocol': oresSupabaseWebSocketProtocol,
+  'batchId': batchId ?? batch['batchId']! as String,
+  'sequence': batch['sequence']! as int,
+  'accepted': accepted ?? (batch['records']! as List<Object?>).length,
+  'duplicates': duplicates,
+  'committedAt': '2026-08-24T00:00:01.000Z',
+};
 
 Future<void> waitUntil(bool Function() predicate) async {
   final deadline = DateTime.now().add(const Duration(seconds: 1));
@@ -96,22 +100,21 @@ SupabaseWebSocketIngestTransport transportFor(
   int maxReconnectAttempts = 0,
   SupabaseTicketProvider? ticketProvider,
   SupabaseExitFallback? exitFallback,
-}) =>
-    SupabaseWebSocketIngestTransport(
-      ticketProvider: ticketProvider ?? () => ticket(),
-      session: session,
-      channelFactory: factory,
-      exitFallback: exitFallback,
-      batchSize: 1,
-      awaitAcknowledgement: true,
-      acknowledgementTimeout: const Duration(milliseconds: 500),
-      reconnectBase: Duration.zero,
-      reconnectMax: Duration.zero,
-      maxReconnectAttempts: maxReconnectAttempts,
-      recordIdFactory: () => 'record-stable',
-      batchIdFactory: () => 'batch-stable',
-      random: _ZeroRandom(),
-    );
+}) => SupabaseWebSocketIngestTransport(
+  ticketProvider: ticketProvider ?? () => ticket(),
+  session: session,
+  channelFactory: factory,
+  exitFallback: exitFallback,
+  batchSize: 1,
+  awaitAcknowledgement: true,
+  acknowledgementTimeout: const Duration(milliseconds: 500),
+  reconnectBase: Duration.zero,
+  reconnectMax: Duration.zero,
+  maxReconnectAttempts: maxReconnectAttempts,
+  recordIdFactory: () => 'record-stable',
+  batchIdFactory: () => 'batch-stable',
+  random: _ZeroRandom(),
+);
 
 class _ZeroRandom implements Random {
   @override
@@ -133,8 +136,12 @@ void main() {
     });
 
     final delivery = transport.write(logRecord());
-    await waitUntil(() => socket.sent.any((message) => message['type'] == 'telemetry_batch'));
-    final batch = socket.sent.firstWhere((message) => message['type'] == 'telemetry_batch');
+    await waitUntil(
+      () => socket.sent.any((message) => message['type'] == 'telemetry_batch'),
+    );
+    final batch = socket.sent.firstWhere(
+      (message) => message['type'] == 'telemetry_batch',
+    );
 
     expect(transport.snapshot().inFlight, 1);
     expect(transport.snapshot().accepted, 0);
@@ -152,15 +159,17 @@ void main() {
     final batches = <Map<String, Object?>>[];
     final transport = transportFor((_) {
       connection += 1;
-      return FakeChannel(onSend: (message, channel) {
-        if (message['type'] != 'telemetry_batch') return;
-        batches.add(message);
-        if (connection == 1) {
-          scheduleMicrotask(() => channel.close(1012, 'worker rotation'));
-        } else {
-          scheduleMicrotask(() => channel.emit(commitAck(message)));
-        }
-      });
+      return FakeChannel(
+        onSend: (message, channel) {
+          if (message['type'] != 'telemetry_batch') return;
+          batches.add(message);
+          if (connection == 1) {
+            scheduleMicrotask(() => channel.close(1012, 'worker rotation'));
+          } else {
+            scheduleMicrotask(() => channel.emit(commitAck(message)));
+          }
+        },
+      );
     }, maxReconnectAttempts: 1);
 
     await transport.write(logRecord());
@@ -175,11 +184,17 @@ void main() {
   });
 
   test('rejects a mismatched ACK without clearing the batch', () async {
-    final transport = transportFor((_) => FakeChannel(onSend: (message, channel) {
+    final transport = transportFor(
+      (_) => FakeChannel(
+        onSend: (message, channel) {
           if (message['type'] == 'telemetry_batch') {
-            scheduleMicrotask(() => channel.emit(commitAck(message, batchId: 'wrong-batch')));
+            scheduleMicrotask(
+              () => channel.emit(commitAck(message, batchId: 'wrong-batch')),
+            );
           }
-        }));
+        },
+      ),
+    );
 
     await expectLater(
       transport.write(logRecord()),

@@ -11,9 +11,8 @@ const oresSupabaseWebSocketProtocol = 'ores-otel/ws-ingest/v1';
 typedef SupabaseTicketProvider = FutureOr<SupabaseWebSocketTicket> Function();
 typedef SupabaseChannelFactory = OresWebSocketChannel Function(Uri uri);
 typedef SupabaseIdFactory = String Function();
-typedef SupabaseExitFallback = Future<SupabaseWebSocketCommitAck> Function(
-  SupabaseWebSocketBatch batch,
-);
+typedef SupabaseExitFallback =
+    Future<SupabaseWebSocketCommitAck> Function(SupabaseWebSocketBatch batch);
 
 class SupabaseWebSocketTicket {
   const SupabaseWebSocketTicket({
@@ -45,13 +44,13 @@ class SupabaseTelemetrySession {
   final String? release;
 
   JsonMap toJson() => <String, Object?>{
-        'appName': appName,
-        'runtime': runtime,
-        'sessionId': sessionId,
-        'clientInstanceId': clientInstanceId,
-        if (appVersion != null) 'appVersion': appVersion,
-        if (release != null) 'release': release,
-      };
+    'appName': appName,
+    'runtime': runtime,
+    'sessionId': sessionId,
+    'clientInstanceId': clientInstanceId,
+    if (appVersion != null) 'appVersion': appVersion,
+    if (release != null) 'release': release,
+  };
 }
 
 class SupabaseWebSocketRecord {
@@ -61,9 +60,9 @@ class SupabaseWebSocketRecord {
   final LogRecord record;
 
   JsonMap toJson() => <String, Object?>{
-        'recordId': recordId,
-        'record': record.toJson(),
-      };
+    'recordId': recordId,
+    'record': record.toJson(),
+  };
 }
 
 class SupabaseWebSocketBatch {
@@ -82,14 +81,14 @@ class SupabaseWebSocketBatch {
   final List<SupabaseWebSocketRecord> records;
 
   JsonMap toJson() => <String, Object?>{
-        'type': 'telemetry_batch',
-        'protocol': oresSupabaseWebSocketProtocol,
-        'batchId': batchId,
-        'sequence': sequence,
-        'sentAt': sentAt.toUtc().toIso8601String(),
-        'session': session.toJson(),
-        'records': records.map((record) => record.toJson()).toList(growable: false),
-      };
+    'type': 'telemetry_batch',
+    'protocol': oresSupabaseWebSocketProtocol,
+    'batchId': batchId,
+    'sequence': sequence,
+    'sentAt': sentAt.toUtc().toIso8601String(),
+    'session': session.toJson(),
+    'records': records.map((record) => record.toJson()).toList(growable: false),
+  };
 }
 
 class SupabaseWebSocketCommitAck {
@@ -236,8 +235,10 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
   final SupabaseIdFactory? batchIdFactory;
   final DateTime Function()? clock;
   final Random? random;
-  final void Function(LogRecord record, String reason, int droppedTotal)? onDrop;
-  final void Function(Object error, SupabaseWebSocketSnapshot snapshot)? onError;
+  final void Function(LogRecord record, String reason, int droppedTotal)?
+  onDrop;
+  final void Function(Object error, SupabaseWebSocketSnapshot snapshot)?
+  onError;
 
   final List<SupabaseWebSocketRecord> _queue = <SupabaseWebSocketRecord>[];
   OresWebSocketChannel? _channel;
@@ -259,20 +260,20 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
   bool _closed = false;
 
   SupabaseWebSocketSnapshot snapshot() => SupabaseWebSocketSnapshot(
-        queued: _queue.length,
-        inFlight: _inFlight?.records.length ?? 0,
-        accepted: _accepted,
-        duplicates: _duplicates,
-        replayedBatches: _replayedBatches,
-        dropped: _dropped,
-        failures: _failures,
-        protocolErrors: _protocolErrors,
-        reconnects: _reconnects,
-        connected: _channel != null,
-        accepting: _accepting,
-        closed: _closed,
-        lastAcknowledgedSequence: _lastAcknowledgedSequence,
-      );
+    queued: _queue.length,
+    inFlight: _inFlight?.records.length ?? 0,
+    accepted: _accepted,
+    duplicates: _duplicates,
+    replayedBatches: _replayedBatches,
+    dropped: _dropped,
+    failures: _failures,
+    protocolErrors: _protocolErrors,
+    reconnects: _reconnects,
+    connected: _channel != null,
+    accepting: _accepting,
+    closed: _closed,
+    lastAcknowledgedSequence: _lastAcknowledgedSequence,
+  );
 
   @override
   Future<void> write(LogRecord record) async {
@@ -304,7 +305,9 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
     return task;
   }
 
-  Future<void> flushOnExit([List<LogRecord> records = const <LogRecord>[]]) async {
+  Future<void> flushOnExit([
+    List<LogRecord> records = const <LogRecord>[],
+  ]) async {
     for (final record in records) {
       _enqueue(record);
     }
@@ -351,10 +354,12 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
       final displaced = _queue.removeAt(0);
       _drop(displaced.record, 'queue-full');
     }
-    _queue.add(SupabaseWebSocketRecord(
-      recordId: recordIdFactory?.call() ?? _randomId('record'),
-      record: record,
-    ));
+    _queue.add(
+      SupabaseWebSocketRecord(
+        recordId: recordIdFactory?.call() ?? _randomId('record'),
+        record: record,
+      ),
+    );
     return true;
   }
 
@@ -417,12 +422,14 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
         },
         cancelOnError: false,
       );
-      channel.add(jsonEncode(<String, Object?>{
-        'type': 'hello',
-        'protocol': oresSupabaseWebSocketProtocol,
-        'ticket': ticket.ticket,
-        'session': session.toJson(),
-      }));
+      channel.add(
+        jsonEncode(<String, Object?>{
+          'type': 'hello',
+          'protocol': oresSupabaseWebSocketProtocol,
+          'ticket': ticket.ticket,
+          'session': session.toJson(),
+        }),
+      );
     } catch (_) {
       _channel = null;
       rethrow;
@@ -433,7 +440,8 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
     SupabaseWebSocketBatch batch,
   ) async {
     final channel = _channel;
-    if (channel == null) throw StateError('Supabase WebSocket is not connected');
+    if (channel == null)
+      throw StateError('Supabase WebSocket is not connected');
     if (_ackCompleter != null) {
       throw StateError('only one Supabase telemetry batch may be in flight');
     }
@@ -443,10 +451,12 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
     try {
       return await completer.future.timeout(acknowledgementTimeout);
     } on TimeoutException {
-      _rejectAck(TimeoutException(
-        'Supabase commit ACK timed out for ${batch.batchId}',
-        acknowledgementTimeout,
-      ));
+      _rejectAck(
+        TimeoutException(
+          'Supabase commit ACK timed out for ${batch.batchId}',
+          acknowledgementTimeout,
+        ),
+      );
       rethrow;
     }
   }
@@ -454,7 +464,9 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
   void _handleMessage(Object? raw) {
     JsonMap value;
     try {
-      final decoded = jsonDecode(raw is String ? raw : utf8.decode(raw as List<int>));
+      final decoded = jsonDecode(
+        raw is String ? raw : utf8.decode(raw as List<int>),
+      );
       if (decoded is! Map<String, Object?>) return;
       value = decoded;
     } catch (error) {
@@ -481,17 +493,16 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
     }
   }
 
-  void _commit(
-    SupabaseWebSocketBatch batch,
-    SupabaseWebSocketCommitAck ack,
-  ) {
+  void _commit(SupabaseWebSocketBatch batch, SupabaseWebSocketCommitAck ack) {
     if (ack.batchId != batch.batchId || ack.sequence != batch.sequence) {
       throw const FormatException('commit ACK batchId or sequence mismatch');
     }
     if (ack.accepted < 0 ||
         ack.duplicates < 0 ||
         ack.accepted + ack.duplicates != batch.records.length) {
-      throw const FormatException('commit ACK does not account for complete batch');
+      throw const FormatException(
+        'commit ACK does not account for complete batch',
+      );
     }
     _accepted += ack.accepted;
     _duplicates += ack.duplicates;
@@ -509,7 +520,8 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
   void _rejectAck(Object error) {
     final completer = _ackCompleter;
     _ackCompleter = null;
-    if (completer != null && !completer.isCompleted) completer.completeError(error);
+    if (completer != null && !completer.isCompleted)
+      completer.completeError(error);
   }
 
   Future<void> _disconnect(int code, String reason) async {
@@ -572,14 +584,20 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
       session.clientInstanceId,
     ]) {
       if (value.trim().isEmpty) {
-        throw ArgumentError('Supabase telemetry session values must be non-empty');
+        throw ArgumentError(
+          'Supabase telemetry session values must be non-empty',
+        );
       }
     }
   }
 
   void _validateTicket(SupabaseWebSocketTicket ticket) {
     if (ticket.url.scheme != 'wss') {
-      throw ArgumentError.value(ticket.url, 'url', 'Supabase telemetry requires wss');
+      throw ArgumentError.value(
+        ticket.url,
+        'url',
+        'Supabase telemetry requires wss',
+      );
     }
     if (ticket.url.userInfo.isNotEmpty) {
       throw ArgumentError('Supabase WebSocket URL must not embed credentials');
