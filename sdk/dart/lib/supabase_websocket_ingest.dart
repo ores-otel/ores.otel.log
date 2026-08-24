@@ -45,13 +45,13 @@ class SupabaseTelemetrySession {
   final String? release;
 
   JsonMap toJson() => <String, Object?>{
-    'appName': appName,
-    'runtime': runtime,
-    'sessionId': sessionId,
-    'clientInstanceId': clientInstanceId,
-    if (appVersion != null) 'appVersion': appVersion,
-    if (release != null) 'release': release,
-  };
+        'appName': appName,
+        'runtime': runtime,
+        'sessionId': sessionId,
+        'clientInstanceId': clientInstanceId,
+        if (appVersion != null) 'appVersion': appVersion,
+        if (release != null) 'release': release,
+      };
 }
 
 class SupabaseWebSocketRecord {
@@ -61,9 +61,9 @@ class SupabaseWebSocketRecord {
   final LogRecord record;
 
   JsonMap toJson() => <String, Object?>{
-    'recordId': recordId,
-    'record': record.toJson(),
-  };
+        'recordId': recordId,
+        'record': record.toJson(),
+      };
 }
 
 class SupabaseWebSocketBatch {
@@ -82,14 +82,15 @@ class SupabaseWebSocketBatch {
   final List<SupabaseWebSocketRecord> records;
 
   JsonMap toJson() => <String, Object?>{
-    'type': 'telemetry_batch',
-    'protocol': oresSupabaseWebSocketProtocol,
-    'batchId': batchId,
-    'sequence': sequence,
-    'sentAt': sentAt.toUtc().toIso8601String(),
-    'session': session.toJson(),
-    'records': records.map((record) => record.toJson()).toList(growable: false),
-  };
+        'type': 'telemetry_batch',
+        'protocol': oresSupabaseWebSocketProtocol,
+        'batchId': batchId,
+        'sequence': sequence,
+        'sentAt': sentAt.toUtc().toIso8601String(),
+        'session': session.toJson(),
+        'records':
+            records.map((record) => record.toJson()).toList(growable: false),
+      };
 }
 
 class SupabaseWebSocketCommitAck {
@@ -237,9 +238,9 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
   final DateTime Function()? clock;
   final Random? random;
   final void Function(LogRecord record, String reason, int droppedTotal)?
-  onDrop;
+      onDrop;
   final void Function(Object error, SupabaseWebSocketSnapshot snapshot)?
-  onError;
+      onError;
 
   final List<SupabaseWebSocketRecord> _queue = <SupabaseWebSocketRecord>[];
   OresWebSocketChannel? _channel;
@@ -261,20 +262,20 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
   bool _closed = false;
 
   SupabaseWebSocketSnapshot snapshot() => SupabaseWebSocketSnapshot(
-    queued: _queue.length,
-    inFlight: _inFlight?.records.length ?? 0,
-    accepted: _accepted,
-    duplicates: _duplicates,
-    replayedBatches: _replayedBatches,
-    dropped: _dropped,
-    failures: _failures,
-    protocolErrors: _protocolErrors,
-    reconnects: _reconnects,
-    connected: _channel != null,
-    accepting: _accepting,
-    closed: _closed,
-    lastAcknowledgedSequence: _lastAcknowledgedSequence,
-  );
+        queued: _queue.length,
+        inFlight: _inFlight?.records.length ?? 0,
+        accepted: _accepted,
+        duplicates: _duplicates,
+        replayedBatches: _replayedBatches,
+        dropped: _dropped,
+        failures: _failures,
+        protocolErrors: _protocolErrors,
+        reconnects: _reconnects,
+        connected: _channel != null,
+        accepting: _accepting,
+        closed: _closed,
+        lastAcknowledgedSequence: _lastAcknowledgedSequence,
+      );
 
   @override
   Future<void> write(LogRecord record) async {
