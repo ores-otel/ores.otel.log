@@ -3,8 +3,23 @@ import test from 'node:test';
 
 import { SupabaseIngestTransport } from '../dist/supabase-ingest.js';
 
-function okAck(batchId, accepted = 1, duplicate = false) {
-  return new Response(JSON.stringify({ ok: true, batchId, accepted, duplicate }), {
+function okAck(
+  batchId,
+  {
+    accepted = 1,
+    duplicates = 0,
+    requested = accepted + duplicates,
+    committedAt = '2026-08-24T02:00:00.000Z',
+  } = {},
+) {
+  return new Response(JSON.stringify({
+    schema: 'next-loggers/ingest-ack/v1',
+    batchId,
+    accepted,
+    duplicates,
+    requested,
+    committedAt,
+  }), {
     status: 200,
     headers: { 'content-type': 'application/json', 'x-request-id': 'req-test' },
   });
@@ -83,7 +98,9 @@ test('retains the batch when the ACK does not account for every record', async (
   const transport = new SupabaseIngestTransport(options(async (_url, init) => {
     const body = JSON.parse(init.body);
     calls += 1;
-    return calls === 1 ? okAck(body.batchId, 0, false) : okAck(body.batchId, 1, false);
+    return calls === 1
+      ? okAck(body.batchId, { accepted: 0, duplicates: 0, requested: 1 })
+      : okAck(body.batchId);
   }));
 
   await assert.rejects(
