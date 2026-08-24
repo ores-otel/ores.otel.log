@@ -1,42 +1,60 @@
 # Supabase telemetry-ingest reference deployment
 
-This example provides the server half of
-`@oresoftware/next-loggers/supabase-ingest`:
+This example is the durable, authenticated storage boundary for
+`@oresoftware/next-loggers/observability`.
 
-- a private Postgres storage schema;
-- a service-role-only ingestion RPC;
-- atomic per-user per-minute quotas;
-- idempotency on `(user_id, app_name, record_id)`;
-- a bounded retention/pruning RPC;
-- an authenticated Edge Function with strict CORS and payload limits.
+It provides:
+
+- a non-exposed `telemetry_private` schema;
+- a service-role-only ingestion RPC called only by the Edge Function;
+- authenticated user ownership derived from the verified JWT;
+- atomic per-user rate limiting;
+- stable-record idempotency;
+- an indexed generated `session_id` for user-session queries;
+- strict origin and app-name allowlists; and
+- bounded retention/pruning.
+
+Realtime Broadcast is a separate live-tail path. Realtime acknowledgements are
+not a substitute for this durable insert boundary.
 
 ## Install
 
-Copy `migrations/0001_next_logger_ingest.sql`, `functions/telemetry-ingest`, and
-the function stanza from `config.toml` into the target Supabase project. Then:
+Copy this directory into the consuming Supabase project. Keep only the canonical
+`0001_next_logger_ingest.sql` migration plus later numbered migrations; the
+removed timestamped migration used a conflicting public-table design.
 
 ```sh
 supabase db push
 supabase secrets set \
   TELEMETRY_ALLOWED_ORIGINS='https://app.example.com,https://admin.example.com' \
+  TELEMETRY_ALLOWED_APP_NAMES='customer-web,customer-flutter' \
   TELEMETRY_MAX_RECORDS_PER_MINUTE='1000'
 supabase functions deploy telemetry-ingest
 ```
 
-Supabase provides the project URL, publishable/secret key sets, and JWKS to Edge
-Functions. Keep JWT verification enabled. Never copy a secret or legacy
-service-role key into browser, Flutter, desktop, or other distributed client
-configuration.
+JWT verification must remain enabled. Browser, Flutter, desktop, and WASM code
+receive only a publishable/legacy anon key plus the signed-in user's access
+token. Never distribute a secret or service-role key.
 
-The function imports `@supabase/server@^1`; generate and commit the Deno lockfile
-in the consuming Supabase project so deployment uses a reviewed immutable
-resolution:
+The function imports `@supabase/server@^1`. Generate and commit the Deno lockfile
+in the consuming project so deployment uses a reviewed immutable resolution:
 
 ```sh
 cd supabase/functions/telemetry-ingest
 deno install
 deno check index.ts
 ```
+
+## Project isolation
+
+Deploy these objects once per Supabase project/org. The table name is fixed
+server-side. `TELEMETRY_ALLOWED_APP_NAMES` further restricts which `appName`
+values that project accepts. A client cannot select a schema/table or write under
+an unapproved application name.
+
+A deliberately shared Supabase project needs a reviewed server-side routing
+registry or separate schemas/functions. Never implement dynamic SQL from a
+client-supplied table name.
 
 ## Retention
 
@@ -50,36 +68,12 @@ select cron.schedule(
 );
 ```
 
-Choose retention based on contractual, privacy, legal, and incident-response
-requirements. High-volume installations should partition
-`telemetry_private.next_logger_events` by `received_at` before production load.
+Choose retention based on privacy, contractual, legal, and incident-response
+requirements. High-volume installations should review time partitioning before
+production load.
 
 ## Querying
 
-The tables are intentionally outside the exposed Data API. Query them from
-trusted backend infrastructure, SQL tooling, Grafana/Postgres, or a separately
-authorized server API. Do not weaken the schema grants merely to make browser
-queries convenient.
-# Supabase telemetry-ingest reference
-
-This example is an authenticated storage boundary for
-`@oresoftware/next-loggers/supabase-ingest`.
-
-## Layout
-
-- `functions/telemetry-ingest/index.ts`: user-authenticated Edge Function using
-  `@supabase/server@^1`; CORS preflight is handled by the wrapper.
-- `migrations/202608020001_next_loggers_ingest.sql`: RLS-protected tables,
-  validation, per-user quota, and idempotent ingestion RPC.
-- `config.toml`: keeps JWT verification explicit.
-
-## Deployment
-
-Copy these files into the matching paths of a Supabase project, apply the
-migration, test locally, and deploy `telemetry-ingest`. Client applications pass
-only a publishable/legacy anon key plus the signed-in user's access token.
-Never expose a secret or service-role credential.
-
-The example quota is 1,000 attempted records per authenticated user per minute,
-with a maximum of 100 records and 512 KiB per batch. Tune those values alongside
-retention, product traffic, and abuse monitoring.
+The tables are outside the exposed Data API. Query them from trusted backend
+infrastructure, SQL tooling, Grafana/Postgres, or a separately authorized API.
+Do not weaken grants merely to make browser queries convenient.

@@ -1,170 +1,157 @@
-# Durable browser and client ingestion through Supabase
+# Supabase session telemetry
 
-`@oresoftware/next-loggers/supabase-ingest` sends already-redacted
-`next-loggers/v1` records to an authenticated Supabase Edge Function. It is the
-durable client transport. The existing Supabase Realtime transport can be added
-separately for live tailing, but Realtime is not used as the durable write path.
-# Durable Supabase ingestion for browser and mobile clients
+`@oresoftware/next-loggers/observability` provides two complementary client
+transports:
 
-`@oresoftware/next-loggers/supabase-ingest` batches already-redacted
-`next-loggers/v1` records to an authenticated Supabase Edge Function. It is the
-durable client path. The existing Realtime transport may be added separately
-for live tailing, but Realtime broadcast is not treated as durable storage.
+- `SupabaseIngestTransport` batches authenticated `next-loggers/v1` records to
+  the `telemetry-ingest` Edge Function for authoritative Postgres storage.
+- `SupabaseRealtimeAckTransport` broadcasts records over a private Supabase
+  Realtime channel and waits for the matching Phoenix acknowledgement.
+- `SupabaseSessionTransport` mirrors records to both. The durable Edge Function
+  path remains authoritative when Realtime is unavailable.
 
-## Security boundary
+A Realtime acknowledgement proves that the Realtime server received a
+broadcast. It does **not** prove that a Postgres row was committed. Do not use a
+Realtime-only transport for audit trails, billing, security evidence, or any
+other durable record.
 
-Client code may contain a publishable key (or a legacy anon key during
-migration) and the signed-in user's access token. It must never contain:
-
-- an `sb_secret_*` key;
-- a `service_role` key or JWT;
-- a backend database credential.
-
-The transport rejects obvious elevated credentials. The reference Edge Function
-uses `withSupabase({ auth: 'user' })`, so authentication and browser CORS
-preflight handling occur before the handler. Its RPC uses the caller-scoped
-Supabase client. The SQL function derives ownership from `auth.uid()` and never
-trusts identity or role fields inside a log record.
-
-## Client setup
+## Browser and JavaScript setup
 
 ```ts
 import { createBrowserLogger } from '@oresoftware/next-loggers/browser';
-import { createSupabaseIngestTransport } from '@oresoftware/next-loggers/supabase-ingest';
+import {
+  createSupabaseSessionTransport,
+} from '@oresoftware/next-loggers/observability';
 
-const ingest = createSupabaseIngestTransport({
-  url: 'https://PROJECT_REF.supabase.co',
-  publishableKey: 'sb_publishable_...',
-const transport = createSupabaseIngestTransport({
+const sessionId = crypto.randomUUID();
+
+const supabaseTransport = createSupabaseSessionTransport({
   url: import.meta.env.PUBLIC_SUPABASE_URL,
   publishableKey: import.meta.env.PUBLIC_SUPABASE_PUBLISHABLE_KEY,
   accessToken: async () => {
     const { data } = await supabase.auth.getSession();
     return data.session?.access_token;
   },
-  batchSize: 50,
-  maxQueueSize: 2_000,
-  maxRecordBytes: 128 * 1024,
-  maxBatchBytes: 480 * 1024,
-  flushIntervalMillis: 1_000,
-  onDrop(drop) {
-    // Increment a local bounded counter; do not recursively send the dropped
-    // record back through this same transport.
-    droppedTelemetry += 1;
+  session: {
+    appName: 'customer-web',
+    sessionId,
   },
-  onError(error, snapshot) {
-    // Report through a distinct diagnostic path or user-visible health state.
+  realtime: {
+    // Keep live-tail work bounded. The durable ingest path still persists when
+    // this retry budget is exhausted.
+    maxReconnectAttempts: 10,
+    maxQueueSize: 2_000,
+    maxInFlight: 16,
+  },
+  ingest: {
+    batchSize: 50,
+    maxQueueSize: 2_000,
+    maxRecordBytes: 128 * 1024,
+    maxBatchBytes: 480 * 1024,
+    flushIntervalMillis: 1_000,
+  },
+  onRealtimeError(error, snapshot) {
+    // Report a bounded local health signal. Never recursively feed the same
+    // error into this transport.
     telemetryHealth = { error: String(error), ...snapshot };
   },
 });
 
-const logger = createBrowserLogger({
+export const logger = createBrowserLogger({
   appName: 'customer-web',
   console: false,
-  transports: [ingest],
+  fields: { release: import.meta.env.PUBLIC_RELEASE_SHA },
+  transports: [supabaseTransport],
 });
 ```
 
-Authenticated ingestion is required by default. `allowUnauthenticated: true`
-must be set explicitly for a deliberately public endpoint. The transport rejects
-`sb_secret_*`, legacy service-role strings, and service-role JWTs before any
-request is made.
+`SupabaseSessionTransport` verifies that every record uses the configured
+`appName` and copies the configured opaque `sessionId` into `fields.sessionId`.
+Its default private Realtime topic is scoped to that app/session. The server
+still derives the authenticated user from the JWT; client-supplied identity
+fields are never an authorization source.
 
-## Delivery behavior
+## Credential boundary
 
-- records are serialized once and placed in a bounded cursor queue;
-- oversized records are dropped before network delivery;
-- queue overflow drops the oldest record so recent client state remains visible;
-- ordinary batches respect record-count and byte budgets;
-- failed batches are restored in their original order;
-- retries use bounded exponential backoff with jitter;
-- the deterministic batch ID is reused when the same batch is retried;
-- request timeouts use `AbortController` without patching global `fetch`;
-- response bodies are never reflected into client telemetry;
-- `close()` is idempotent and uses a smaller exit/keepalive budget;
-- writes after close are explicitly reported as bounded drops.
+Distributed clients may contain only:
 
-Set `awaitDelivery: true` only when a caller must await the HTTP result. Normal
-browser logging should enqueue quickly and let `flush()`, the interval, or
-`close()` perform delivery.
+- a current `sb_publishable_*` key, or a legacy anon key while migrating; and
+- the signed-in user's access token.
 
-## Server deployment
+Never ship an `sb_secret_*` key, a `service_role` key/JWT, a database password,
+or a backend-only secret in JavaScript, Flutter, WASM, desktop, or mobile
+configuration. The transports reject obvious elevated credentials before
+network delivery.
 
-The repository includes a hardened reference deployment under
-`examples/supabase`:
+Authenticated ingestion is required by default. Set `allowUnauthenticated:
+true` only for a deliberately public endpoint with independent abuse controls.
+Private Realtime channels should have Realtime Authorization policies that bind
+the topic to the authenticated user/session.
 
-1. apply `migrations/0001_next_logger_ingest.sql`;
-2. configure allowed browser origins and the per-user rate limit;
-3. deploy the `telemetry-ingest` Edge Function with JWT verification enabled;
-4. schedule the bounded pruning function with the desired retention period.
+## Delivery and failure semantics
 
-The database objects live in a non-exposed `telemetry_private` schema. Clients
-cannot call the ingestion RPC or read/write the tables directly. The Edge
-Function authenticates the user and calls a service-role-only, security-definer
-RPC that validates the batch, enforces an atomic per-user rate limit, and inserts
-records idempotently.
+The acknowledged Realtime transport:
 
-## Privacy and data minimization
+- retains a record until the server replies to its exact Phoenix `ref`;
+- replays unacknowledged records with the same stable record ID after reconnect;
+- limits queued and in-flight records;
+- drops the oldest waiting record on queue overflow and reports the reason;
+- bounds broadcast attempts and connection retries;
+- refreshes the user token by invoking the access-token callback for each new
+  connection;
+- detects missing heartbeat acknowledgements;
+- uses capped exponential backoff with jitter;
+- makes `flush()` and `close()` explicit, bounded operations; and
+- does not patch `fetch`, `WebSocket`, console methods, or global telemetry
+  providers.
 
-Client telemetry can contain personal or regulated information. Configure
-`next-loggers` redaction before this transport, keep user objects minimal, and do
-not add access tokens, cookies, authorization headers, payment data, or raw
-request/response bodies to log fields.
+The durable ingest transport independently enforces record, batch, queue,
+timeout, keepalive, and retry limits. Postgres deduplicates by stable record ID,
+so a reconnect or a repeated HTTP batch does not create duplicate rows.
 
-The reference Edge Function never logs the bearer token or request body and does
-not return raw Postgres errors. Use a separate server-side logger/OTEL pipeline
-for ingestion-service diagnostics so a failure in client ingestion cannot
-recursively ingest itself.
-  onDrop(drop) {
-    // Record only the bounded reason/count in a separate local metric.
-    observeDrop(drop.reason);
-  },
-  onError(error, snapshot) {
-    reportLocalDiagnostic(error, snapshot);
-  },
-});
+## Flutter, Rust, Leptos, Dioxus, and WASM
 
-export const logger = createBrowserLogger({
-  appName: 'web',
-  console: false,
-  transports: transport,
-});
-```
+All native SDKs emit the same `next-loggers/v1` record. Apply these rules across
+runtimes:
 
-Authenticated ingestion is the default. `allowUnauthenticated` should be used
-only for a deliberately publishable-key-only endpoint with independent abuse
-controls.
+- Flutter/Dart: use the Dart SDK's application-injected Supabase sender for the
+  authenticated Edge Function; attach `fields.sessionId` from the login/device
+  session. Use `supabase_flutter` Realtime only as an optional live-tail mirror.
+- Rust services: use the Rust SDK and OTEL bridge for traces/metrics/logs; send
+  durable client-session records through a server-owned adapter or the same
+  Edge Function contract. Service-role credentials stay server-side.
+- Leptos/Dioxus/Mash browser or WASM code: use the WASM SDK/host callback and
+  the browser's user token. Do not embed server credentials in the WASM bundle.
+- Server-rendered frontends: correlate the browser session ID with request trace
+  context, but keep browser and server authorization boundaries separate.
 
-## Batching and failure behavior
+## Per-project storage
 
-The transport:
+Apply the reference migrations separately in every consuming Supabase project.
+That gives each project/org its own `telemetry_private.next_logger_events` table.
+The Edge Function's `TELEMETRY_ALLOWED_APP_NAMES` environment variable is a
+server-side allowlist; clients cannot select a table or impersonate another
+application namespace.
 
-- pre-serializes and bounds records, batches, the queue, and exit payloads;
-- drops the oldest queued record on overflow and reports a bounded reason;
-- preserves record order when a request fails;
-- retries with capped exponential backoff and jitter;
-- uses a deterministic batch ID for the same records on retry;
-- uses `keepalive` only when the serialized exit request fits the configured
-  budget;
-- never reads or re-logs an error response body;
-- isolates `onDrop` and `onError` callback failures;
-- makes `close()` idempotent and stops accepting new records before draining.
-
-The server migration additionally enforces record and batch sizes, validates the
-wire schema, applies a transactional per-user quota, and deduplicates by
-`(user_id, record_id)`.
+For a deliberately shared Supabase project, route only through a reviewed
+server-side app registry. Do not accept a client-provided schema or table name.
+Use `app_name`, the authenticated `user_id`, and indexed `session_id` for
+partitioning/querying, or deploy separate schemas/functions per tenant.
 
 ## Deploy the reference endpoint
 
-The deployable reference files are under `examples/supabase/`:
+Copy `examples/supabase` into the consuming Supabase project, then:
 
-1. apply `migrations/202608020001_next_loggers_ingest.sql`;
-2. copy `functions/telemetry-ingest` into the project's `supabase/functions/`;
-3. copy the `telemetry-ingest` function stanza from `config.toml` so JWT
-   verification remains explicit;
-4. run the local Supabase function tests for the consuming project;
-5. deploy the function and verify authenticated browser/mobile calls;
-6. schedule retention for records and quota buckets according to policy.
+```sh
+supabase db push
+supabase secrets set \
+  TELEMETRY_ALLOWED_ORIGINS='https://app.example.com' \
+  TELEMETRY_ALLOWED_APP_NAMES='customer-web,customer-flutter' \
+  TELEMETRY_MAX_RECORDS_PER_MINUTE='1000'
+supabase functions deploy telemetry-ingest
+```
 
-The storage tables intentionally grant no direct access to `anon` or
-`authenticated`. Only the validated RPC is executable by authenticated users.
+Keep JWT verification enabled. Query the private table only from trusted
+backend infrastructure, SQL tooling, or a separately authorized API. Configure
+bounded retention and never log bearer tokens, cookies, authorization headers,
+payment data, raw request/response bodies, or unreviewed personal data.
