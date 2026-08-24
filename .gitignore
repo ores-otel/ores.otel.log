@@ -4,6 +4,14 @@ node_modules/
 # `zed install --frozen` requires it even at zero dependencies.
 zed_modules/
 .zed/
+!.zed/
+.zed/*
+!.zed/pre-install
+!.zed/post-install
+!.zed/pre-build
+!.zed/post-build
+!.zed/pre-pack
+!.zed/pre-publish
 
 # Build and framework output
 dist/

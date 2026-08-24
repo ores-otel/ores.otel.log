@@ -5,6 +5,7 @@ if command -v zed >/dev/null 2>&1; then
 fi
 npm ci --ignore-scripts --no-audit --no-fund
 npm run typecheck
+npm run build
 node --test tests/supabase-websocket-ingest.test.mjs
 if ! command -v dart >/dev/null 2>&1; then
   echo 'dart is required for ORES pre-build conformance' >&2

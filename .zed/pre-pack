@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+just env-check
+npm run release:check

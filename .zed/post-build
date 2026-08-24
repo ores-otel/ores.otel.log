@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+npm run test:contracts
+node --test tests/zpkg.test.mjs
