@@ -1,4 +1,7 @@
-import type { SupabaseIngestOptions } from './types.js';
+import type {
+  SupabaseIngestAcknowledgement,
+  SupabaseIngestOptions,
+} from './types.js';
 import { SupabaseIngestHttpError, SupabaseIngestProtocolError } from './errors.js';
 import type { LogRecord } from '../base-logger.js';
 
@@ -7,11 +10,7 @@ export interface PendingBatch {
   readonly records: readonly LogRecord[];
 }
 
-interface ParsedAcknowledgement {
-  batchId: string;
-  accepted: number;
-  duplicate: boolean;
-}
+type ParsedAcknowledgement = Omit<SupabaseIngestAcknowledgement, 'requestId'>;
 
 export function timerUnref(timer: ReturnType<typeof setTimeout>): void {
   const candidate = timer as ReturnType<typeof setTimeout> & { unref?: () => void };
@@ -84,43 +83,84 @@ export async function resolveToken(
   return token.trim() || undefined;
 }
 
+function acknowledgementInteger(
+  value: unknown,
+  field: 'accepted' | 'duplicates' | 'requested',
+): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new SupabaseIngestProtocolError(
+      `Supabase telemetry commit acknowledgement has invalid ${field} count`,
+    );
+  }
+  return value;
+}
+
 export async function parseAcknowledgement(
   response: Response,
   batch: PendingBatch,
   required: boolean,
 ): Promise<ParsedAcknowledgement> {
+  const requestedCount = batch.records.length;
   if (!required) {
-    return { batchId: batch.batchId, accepted: batch.records.length, duplicate: false };
+    return {
+      schema: 'next-loggers/ingest-ack/v1',
+      batchId: batch.batchId,
+      accepted: requestedCount,
+      duplicates: 0,
+      requested: requestedCount,
+      duplicate: false,
+    };
   }
+
   let data: unknown;
   try {
     data = await response.json();
   } catch {
     throw new SupabaseIngestProtocolError(
-      `Supabase telemetry ingest did not return JSON acknowledgement for batch ${batch.batchId}`,
+      `Supabase telemetry ingest did not return JSON commit acknowledgement for batch ${batch.batchId}`,
     );
   }
-  if (!data || typeof data !== 'object') {
-    throw new SupabaseIngestProtocolError('Supabase telemetry acknowledgement must be an object');
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new SupabaseIngestProtocolError(
+      'Supabase telemetry commit acknowledgement must be an object',
+    );
   }
+
   const value = data as Record<string, unknown>;
+  if (value.schema !== 'next-loggers/ingest-ack/v1') {
+    throw new SupabaseIngestProtocolError(
+      'Supabase telemetry commit acknowledgement has an invalid schema',
+    );
+  }
   if (value.batchId !== batch.batchId) {
     throw new SupabaseIngestProtocolError(
-      `Supabase telemetry acknowledgement batchId mismatch: expected ${batch.batchId}`,
+      `Supabase telemetry commit acknowledgement batchId mismatch: expected ${batch.batchId}`,
     );
   }
-  if (!Number.isInteger(value.accepted) || (value.accepted as number) < 0) {
-    throw new SupabaseIngestProtocolError('Supabase telemetry acknowledgement has invalid accepted count');
-  }
-  if (value.duplicate !== undefined && typeof value.duplicate !== 'boolean') {
-    throw new SupabaseIngestProtocolError('Supabase telemetry acknowledgement has invalid duplicate flag');
-  }
-  const accepted = value.accepted as number;
-  const duplicate = value.duplicate === true;
-  if ((duplicate && accepted !== 0) || (!duplicate && accepted !== batch.records.length)) {
+
+  const accepted = acknowledgementInteger(value.accepted, 'accepted');
+  const duplicates = acknowledgementInteger(value.duplicates, 'duplicates');
+  const requested = acknowledgementInteger(value.requested, 'requested');
+  if (requested !== requestedCount || accepted + duplicates !== requestedCount) {
     throw new SupabaseIngestProtocolError(
-      'Supabase telemetry acknowledgement does not account for the complete batch',
+      'Supabase telemetry commit acknowledgement does not account for the complete batch',
     );
   }
-  return { batchId: batch.batchId, accepted, duplicate };
+
+  const committedAt = value.committedAt;
+  if (typeof committedAt !== 'string' || Number.isNaN(Date.parse(committedAt))) {
+    throw new SupabaseIngestProtocolError(
+      'Supabase telemetry commit acknowledgement has invalid committedAt',
+    );
+  }
+
+  return {
+    schema: 'next-loggers/ingest-ack/v1',
+    batchId: batch.batchId,
+    accepted,
+    duplicates,
+    requested,
+    committedAt,
+    duplicate: duplicates === requested,
+  };
 }

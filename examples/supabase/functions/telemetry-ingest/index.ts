@@ -191,7 +191,41 @@ async function ingest(
     });
   }
 
-  return json(request, data, 202);
+  if (
+    !object(data) ||
+    data.batchId !== batchId ||
+    typeof data.accepted !== 'number' ||
+    !Number.isInteger(data.accepted) ||
+    data.accepted < 0 ||
+    typeof data.duplicates !== 'number' ||
+    !Number.isInteger(data.duplicates) ||
+    data.duplicates < 0 ||
+    typeof data.requested !== 'number' ||
+    !Number.isInteger(data.requested) ||
+    data.requested !== records.length ||
+    data.accepted + data.duplicates !== records.length
+  ) {
+    const requestId = Deno.env.get('SB_EXECUTION_ID') ?? crypto.randomUUID();
+    return json(request, { error: 'ingest_unavailable', requestId }, 503, {
+      'retry-after': '1',
+      'x-request-id': requestId,
+    });
+  }
+
+  // The RPC response is available only after Supabase commits its transaction.
+  // Generate this timestamp after that response so clients can distinguish a
+  // durable commit acknowledgement from a generic HTTP success.
+  const requestId = Deno.env.get('SB_EXECUTION_ID') ?? crypto.randomUUID();
+  return json(request, {
+    schema: 'next-loggers/ingest-ack/v1',
+    batchId,
+    accepted: data.accepted,
+    duplicates: data.duplicates,
+    requested: data.requested,
+    committedAt: new Date().toISOString(),
+  }, 202, {
+    'x-request-id': requestId,
+  });
 }
 
 export default {

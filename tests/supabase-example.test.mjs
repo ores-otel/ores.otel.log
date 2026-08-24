@@ -67,3 +67,15 @@ test('Supabase session correlation is indexed but never used as ownership', () =
   assert.match(sessionMigration, /never an authorization source/iu);
   assert.equal(/auth\.uid\(\).*session_id/isu.test(sessionMigration), false);
 });
+
+
+test('Supabase function validates committed RPC accounting before acknowledging the client', () => {
+  assert.match(functionSource, /data\.batchId !== batchId/u);
+  assert.match(functionSource, /data\.accepted \+ data\.duplicates !== records\.length/u);
+  assert.match(functionSource, /schema: 'next-loggers\/ingest-ack\/v1'/u);
+  assert.match(functionSource, /committedAt: new Date\(\)\.toISOString\(\)/u);
+  assert.match(functionSource, /\{ error: 'ingest_unavailable', requestId \}, 503/u);
+  assert.match(migration, /'duplicates', v_requested - v_inserted/iu);
+  assert.match(migration, /'requested', v_requested/iu);
+  assert.match(migration, /'batchId', p_batch_id/iu);
+});

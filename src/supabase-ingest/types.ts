@@ -22,8 +22,14 @@ export interface SupabaseIngestSnapshot {
 }
 
 export interface SupabaseIngestAcknowledgement {
+  schema: 'next-loggers/ingest-ack/v1';
   batchId: string;
   accepted: number;
+  duplicates: number;
+  requested: number;
+  /** Present only when the server confirms the database transaction completed. */
+  committedAt?: string;
+  /** @deprecated Use duplicates; this is true only for a whole-batch replay. */
   duplicate: boolean;
   requestId?: string;
 }
