@@ -90,6 +90,7 @@ test('authenticated batches use a normalized Edge Function URL and bounded clien
     batchSize: 10,
     flushIntervalMillis: 60_000,
     clock: () => new Date('2026-08-03T12:34:56.000Z'),
+    batchIdFactory: () => 'batch-stable',
     fetch: async (url, init) => {
       requests.push({ url, init });
       return commitAck(init);
@@ -109,7 +110,7 @@ test('authenticated batches use a normalized Edge Function URL and bounded clien
   assert.equal(requests[0].init.headers.apikey, 'sb_publishable_public');
   assert.equal(requests[0].init.headers.authorization, 'Bearer user-access-token');
   assert.equal(requests[0].init.headers['x-next-loggers-schema'], 'next-loggers/batch/v1');
-  assert.match(requests[0].init.headers['x-next-loggers-batch-id'], /^nl-2-[0-9a-f]{16}$/u);
+  assert.equal(requests[0].init.headers['x-next-loggers-batch-id'], 'batch-stable');
   assert.equal(requests[0].init.headers['x-client-info'], '@oresoftware/next-loggers');
 
   const body = JSON.parse(requests[0].init.body);
