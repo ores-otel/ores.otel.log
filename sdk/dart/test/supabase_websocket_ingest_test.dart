@@ -131,23 +131,28 @@ class _ZeroRandom implements Random {
 
 void main() {
   test('retains records until a matching database commit ACK', () async {
-    late FakeChannel socket;
+    FakeChannel? socket;
     final transport = transportFor((_) {
       socket = FakeChannel();
-      return socket;
+      return socket!;
     });
 
     final delivery = transport.write(logRecord());
     await waitUntil(
-      () => socket.sent.any((message) => message['type'] == 'telemetry_batch'),
+      () =>
+          socket?.sent.any(
+            (message) => message['type'] == 'telemetry_batch',
+          ) ??
+          false,
     );
-    final batch = socket.sent.firstWhere(
+    final activeSocket = socket!;
+    final batch = activeSocket.sent.firstWhere(
       (message) => message['type'] == 'telemetry_batch',
     );
 
     expect(transport.snapshot().inFlight, 1);
     expect(transport.snapshot().accepted, 0);
-    socket.emit(commitAck(batch));
+    activeSocket.emit(commitAck(batch));
     await delivery;
 
     expect(transport.snapshot().inFlight, 0);
