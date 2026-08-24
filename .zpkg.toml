@@ -28,6 +28,10 @@ url = "https://github.com/ores-otel/ores.otel.log"
 [dependencies]
 "ores-otel/ores-interfaces" = "^0.1.0"
 
+[lifecycle]
+pre_build = ".zed/pre-build"
+pre_publish = ".zed/pre-publish"
+
 [publish]
 include_readme = true
 tag_format = "v{version}"

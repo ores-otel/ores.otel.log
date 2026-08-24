@@ -1,0 +1,47 @@
+name: Temporary Dart format autofix
+
+on:
+  push:
+    branches:
+      - fix/supabase-commit-ack-websocket-v1
+    paths:
+      - sdk/dart/lib/supabase_websocket_ingest.dart
+      - sdk/dart/test/supabase_websocket_ingest_test.dart
+      - .github/workflows/dart-format-autofix-temporary.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dart-format-autofix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: fix/supabase-commit-ack-websocket-v1
+          fetch-depth: 0
+      - name: Set up Dart
+        uses: dart-lang/setup-dart@65eb853c7ba17dde3be364c3d2858773e7144260
+        with:
+          sdk: stable
+      - name: Apply canonical Dart formatting
+        run: dart format sdk/dart/lib/supabase_websocket_ingest.dart sdk/dart/test/supabase_websocket_ingest_test.dart
+      - name: Commit formatter output
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- sdk/dart/lib/supabase_websocket_ingest.dart sdk/dart/test/supabase_websocket_ingest_test.dart; then
+            echo 'No formatter changes required.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add sdk/dart/lib/supabase_websocket_ingest.dart sdk/dart/test/supabase_websocket_ingest_test.dart
+          git commit -m 'style(dart): apply canonical formatter'
+          git push origin HEAD:fix/supabase-commit-ack-websocket-v1

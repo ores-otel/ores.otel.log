@@ -26,6 +26,19 @@ function jwt(role) {
   return `${encode({ alg: 'none', typ: 'JWT' })}.${encode({ role })}.signature`;
 }
 
+function commitAck(init) {
+  const body = JSON.parse(init.body);
+  return new Response(JSON.stringify({
+    ok: true,
+    batchId: body.batchId,
+    accepted: body.records.length,
+    duplicate: false,
+  }), {
+    status: 202,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 test('client transport rejects secret credentials, embedded URL credentials, and missing authentication', async () => {
   assert.throws(
     () => new SupabaseIngestTransport({
@@ -77,9 +90,10 @@ test('authenticated batches use a normalized Edge Function URL and bounded clien
     batchSize: 10,
     flushIntervalMillis: 60_000,
     clock: () => new Date('2026-08-03T12:34:56.000Z'),
+    batchIdFactory: () => 'batch-stable',
     fetch: async (url, init) => {
       requests.push({ url, init });
-      return new Response(null, { status: 202 });
+      return commitAck(init);
     },
   });
 
@@ -96,7 +110,7 @@ test('authenticated batches use a normalized Edge Function URL and bounded clien
   assert.equal(requests[0].init.headers.apikey, 'sb_publishable_public');
   assert.equal(requests[0].init.headers.authorization, 'Bearer user-access-token');
   assert.equal(requests[0].init.headers['x-next-loggers-schema'], 'next-loggers/batch/v1');
-  assert.match(requests[0].init.headers['x-next-loggers-batch-id'], /^nl-2-[0-9a-f]{16}$/u);
+  assert.equal(requests[0].init.headers['x-next-loggers-batch-id'], 'batch-stable');
   assert.equal(requests[0].init.headers['x-client-info'], '@oresoftware/next-loggers');
 
   const body = JSON.parse(requests[0].init.body);
@@ -106,9 +120,13 @@ test('authenticated batches use a normalized Edge Function URL and bounded clien
   assert.deepEqual(body.records.map(({ id }) => id), ['one', 'two']);
   assert.deepEqual(transport.snapshot(), {
     queued: 0,
+    inFlight: 0,
+    acknowledged: 2,
+    rejected: 0,
     dropped: 0,
     failures: 0,
     retryAttempts: 0,
+    retries: 0,
     accepting: true,
     closed: false,
   });
@@ -130,7 +148,7 @@ test('bounded queue drops the oldest record and isolates drop callbacks', async 
     },
     fetch: async (_url, init) => {
       delivered.push(...JSON.parse(init.body).records.map(({ id }) => id));
-      return new Response(null, { status: 202 });
+      return commitAck(init);
     },
   });
 
@@ -144,7 +162,7 @@ test('bounded queue drops the oldest record and isolates drop callbacks', async 
   assert.equal(transport.snapshot().dropped, 1);
 });
 
-test('failed delivery restores the exact batch order and retries with the same idempotency key', async () => {
+test('failed delivery retains the exact batch order and retries with the same idempotency key', async () => {
   const requests = [];
   const errors = [];
   let attempt = 0;
@@ -168,7 +186,7 @@ test('failed delivery restores the exact batch order and retries with the same i
       });
       return attempt === 1
         ? new Response(null, { status: 503, statusText: 'Unavailable' })
-        : new Response(null, { status: 202 });
+        : commitAck(init);
     },
   });
 
@@ -176,8 +194,9 @@ test('failed delivery restores the exact batch order and retries with the same i
   await transport.write(record('second'));
   await assert.rejects(transport.flush(), /returned 503 Unavailable/u);
   assert.equal(transport.snapshot().failures, 1);
-  assert.equal(transport.snapshot().queued, 2);
-  assert.equal(transport.snapshot().retryAttempts, 1);
+  assert.equal(transport.snapshot().queued, 0);
+  assert.equal(transport.snapshot().inFlight, 2);
+  assert.equal(transport.snapshot().retryAttempts, 0);
 
   await transport.flush();
   assert.deepEqual(requests.map(({ ids }) => ids), [
@@ -185,12 +204,13 @@ test('failed delivery restores the exact batch order and retries with the same i
     ['first', 'second'],
   ]);
   assert.equal(requests[0].batchId, requests[1].batchId);
-  assert.deepEqual(errors, [['Supabase telemetry ingest returned 503 Unavailable', 1, 2]]);
+  assert.deepEqual(errors, []);
   assert.equal(transport.snapshot().queued, 0);
+  assert.equal(transport.snapshot().inFlight, 0);
   assert.equal(transport.snapshot().retryAttempts, 0);
 });
 
-test('failed in-flight delivery cannot overfill a queue refilled by producers', async () => {
+test('failed in-flight delivery retains the exact batch beside a bounded producer queue', async () => {
   const dropped = [];
   const delivered = [];
   let releaseFirstRequest;
@@ -216,7 +236,7 @@ test('failed in-flight delivery cannot overfill a queue refilled by producers', 
         return new Response(null, { status: 503, statusText: 'Unavailable' });
       }
       delivered.push(...ids);
-      return new Response(null, { status: 202 });
+      return commitAck(init);
     },
   });
 
@@ -229,12 +249,14 @@ test('failed in-flight delivery cannot overfill a queue refilled by producers', 
   releaseFirstRequest();
   await assert.rejects(failedFlush, /returned 503 Unavailable/u);
   assert.equal(transport.snapshot().queued, 2);
-  assert.equal(transport.snapshot().dropped, 1);
-  assert.deepEqual(dropped, [['queue-full', 'queued-newest']]);
+  assert.equal(transport.snapshot().inFlight, 1);
+  assert.equal(transport.snapshot().dropped, 0);
+  assert.deepEqual(dropped, []);
 
   await transport.flush();
-  assert.deepEqual(delivered, ['in-flight', 'queued-second']);
+  assert.deepEqual(delivered, ['in-flight', 'queued-second', 'queued-newest']);
   assert.equal(transport.snapshot().queued, 0);
+  assert.equal(transport.snapshot().inFlight, 0);
 });
 
 test('oversized records are dropped before network delivery', async () => {
@@ -271,7 +293,7 @@ test('close is idempotent, uses the exit keepalive budget, and drops later write
     onDrop: (drop) => drops.push([drop.reason, drop.record.id]),
     fetch: async (_url, init) => {
       requests.push(init);
-      return new Response(null, { status: 202 });
+      return commitAck(init);
     },
   });
 
@@ -285,9 +307,13 @@ test('close is idempotent, uses the exit keepalive budget, and drops later write
   assert.deepEqual(drops, [['closed', 'after-close']]);
   assert.deepEqual(transport.snapshot(), {
     queued: 0,
+    inFlight: 0,
+    acknowledged: 1,
+    rejected: 0,
     dropped: 1,
     failures: 0,
     retryAttempts: 0,
+    retries: 0,
     accepting: false,
     closed: true,
   });
@@ -302,7 +328,7 @@ test('publishable-key-only mode must be explicitly enabled', async () => {
     awaitDelivery: true,
     fetch: async (_url, init) => {
       requests.push(init);
-      return new Response(null, { status: 202 });
+      return commitAck(init);
     },
   });
 
