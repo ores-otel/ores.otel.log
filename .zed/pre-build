@@ -6,3 +6,13 @@ fi
 npm ci --ignore-scripts --no-audit --no-fund
 npm run typecheck
 node --test tests/supabase-websocket-ingest.test.mjs
+if ! command -v dart >/dev/null 2>&1; then
+  echo 'dart is required for ORES pre-build conformance' >&2
+  exit 1
+fi
+(
+  cd sdk/dart
+  dart pub get
+  dart analyze
+  dart test
+)
