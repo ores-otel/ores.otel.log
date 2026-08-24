@@ -111,6 +111,8 @@ await log
   .send();
 
 await log.flush({ timeoutMillis: 2_000 });
+// At a logout/release boundary, require evidence instead of fail-open draining:
+await log.flush({ timeoutMillis: 2_000, throwOnError: true });
 ```
 
 Circular references, errors, dates, bigints, maps, sets, functions, and symbols are normalized before transport.
@@ -659,6 +661,6 @@ await new AuditLogger().info('changed role').withActor('user-1').send();
 - Console output is enabled by default; set `console: false` to disable it.
 - `.send(false)` writes to the console but skips remote transports.
 - `.notOtel()` skips only OTEL transports; all other transports still receive the record.
-- `.flush()` waits for pending transport writes; pass `sendUnsent: true` to recover unfinished chains.
+- `.flush()` waits for pending transport writes; pass `sendUnsent: true` to recover unfinished chains and `throwOnError: true` when a bounded lifecycle boundary must observe delivery/timeout failure.
 - `.flushOnExit()` sends unfinished chains and runs transport shutdown hooks.
 - `.close()` performs the shutdown flush and then closes transports.

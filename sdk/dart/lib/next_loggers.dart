@@ -137,10 +137,7 @@ R runWithLogContext<R>(LogContext context, R Function() callback) =>
 /// Captures a defensive snapshot for queue, isolate, or callback handoff.
 LogContext? captureLogContext() => currentLogContext();
 
-R withCapturedLogContext<R>(
-  LogContext? captured,
-  R Function() callback,
-) =>
+R withCapturedLogContext<R>(LogContext? captured, R Function() callback) =>
     captured == null ? callback() : withLogContext(captured, callback);
 
 R Function() bindLogContext<R>(R Function() callback) {
@@ -345,10 +342,18 @@ class Logger {
     }
   }
 
-  Future<void> flush() async {
-    await Future.wait(
-      transports.map((transport) => Future.sync(transport.flush)),
-    );
+  Future<void> flush({bool throwOnError = false}) async {
+    final failures = <Object>[];
+    for (final transport in transports) {
+      try {
+        await Future.sync(transport.flush);
+      } catch (error) {
+        failures.add(error);
+      }
+    }
+    if (throwOnError && failures.isNotEmpty) {
+      throw StateError('next-loggers flush failed: $failures');
+    }
   }
 
   Future<void> close() async {
@@ -614,9 +619,23 @@ class SupabaseTransport implements LogTransport {
 
 /// Application-owned OTEL log sink. No provider or global instrumentation is installed.
 class OpenTelemetryTransport implements OpenTelemetryLogTransport {
-  OpenTelemetryTransport(this.emit);
+  OpenTelemetryTransport(
+    this.emit, {
+    List<FutureOr<void> Function()> forceFlushCallbacks = const [],
+  }) : forceFlushCallbacks = List.unmodifiable(forceFlushCallbacks) {
+    if (forceFlushCallbacks.length > 32) {
+      throw RangeError.range(
+        forceFlushCallbacks.length,
+        0,
+        32,
+        'forceFlushCallbacks.length',
+      );
+    }
+  }
 
   final FutureOr<void> Function(JsonMap record) emit;
+  final List<FutureOr<void> Function()> forceFlushCallbacks;
+  Future<void>? _forceFlushOperation;
 
   @override
   FutureOr<void> write(LogRecord record) {
@@ -648,9 +667,26 @@ class OpenTelemetryTransport implements OpenTelemetryLogTransport {
   }
 
   @override
-  FutureOr<void> flush() {}
+  Future<void> flush() {
+    final active = _forceFlushOperation;
+    if (active != null) return active;
+    if (forceFlushCallbacks.isEmpty) return Future<void>.value();
+    late final Future<void> operation;
+    operation = Future.wait(
+      forceFlushCallbacks.map((callback) => Future<void>.sync(callback)),
+      eagerError: false,
+    ).whenComplete(() {
+      if (identical(_forceFlushOperation, operation)) {
+        _forceFlushOperation = null;
+      }
+    });
+    _forceFlushOperation = operation;
+    return operation;
+  }
 
   @override
+
+  /// The application owns provider shutdown; Logger.close only force-flushes it.
   FutureOr<void> close() {}
 }
 
