@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+set -eu
+test -f .zpkg.lock
+node --check scripts/validate-contracts.mjs

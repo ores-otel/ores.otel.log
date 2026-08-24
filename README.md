@@ -444,6 +444,14 @@ missing `dist/` is only a warning — `zed r2g` is what catches it:
 npm run build && zed r2g && zed publish
 ```
 
+Zed lifecycle uses executable convention files under `.zed/<phase>` for pre/post
+install, pre/post build, pre-pack, and pre-publish. The explicit
+`[lifecycle.<phase>]` form stays deferred until the strict Zed manifest validator
+accepts it. The hooks run the
+same JSON Schema, package, runtime, and `just env-check` gates used by CI. They do
+not contain secrets: public age recipients live in `.sops.yaml`, ciphertext in
+`env/enc`, and decrypted mode-0600 files only in ignored `env/dec`.
+
 ## Streaming browser logs over a WebSocket
 
 `BrowserStreamTransport` keeps a persistent socket open and ships records in

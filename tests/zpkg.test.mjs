@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -106,6 +106,10 @@ const expectedTargets = {
   elixir: { dir: 'sdk/elixir', name: 'next-loggers-elixir', adapter: 'none' },
 };
 
+const expectedLifecyclePhases = [
+  'pre-install', 'post-install', 'pre-build', 'post-build', 'pre-pack', 'pre-publish',
+];
+
 function capture(text, expression, label) {
   const value = text.match(expression)?.[1];
   assert.ok(value, `${label} version was not found`);
@@ -118,6 +122,21 @@ test('.zpkg.toml and package.json agree on the root Zed identity', () => {
   assert.equal(manifest.package.license, pkg.license);
   assert.deepEqual(manifest.package.keywords, pkg.keywords);
   assert.equal(`@${manifest.package.org}/${manifest.package.name}`, pkg.name);
+});
+
+test('Zed lifecycle phases use reviewed executable repository hooks', async () => {
+  assert.equal(
+    manifest.lifecycle,
+    undefined,
+    'convention hooks avoid the manifest field until zed validate accepts it',
+  );
+  for (const phase of expectedLifecyclePhases) {
+    const path = new URL(`../.zed/${phase}`, import.meta.url);
+    const metadata = await stat(path);
+    assert.equal(metadata.isFile(), true, `.zed/${phase} must be a regular file`);
+    assert.notEqual(metadata.mode & 0o111, 0, `.zed/${phase} must be executable`);
+    assert.match(await read(`.zed/${phase}`), /^#!\/usr\/bin\/env sh\nset -eu\n/u);
+  }
 });
 
 test('all language slices are explicit, unique, and registry-correct', () => {
