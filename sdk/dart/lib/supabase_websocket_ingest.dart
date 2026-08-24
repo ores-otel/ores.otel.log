@@ -11,8 +11,9 @@ const oresSupabaseWebSocketProtocol = 'ores-otel/ws-ingest/v1';
 typedef SupabaseTicketProvider = FutureOr<SupabaseWebSocketTicket> Function();
 typedef SupabaseChannelFactory = OresWebSocketChannel Function(Uri uri);
 typedef SupabaseIdFactory = String Function();
-typedef SupabaseExitFallback =
-    Future<SupabaseWebSocketCommitAck> Function(SupabaseWebSocketBatch batch);
+typedef SupabaseExitFallback = Future<SupabaseWebSocketCommitAck> Function(
+  SupabaseWebSocketBatch batch,
+);
 
 class SupabaseWebSocketTicket {
   const SupabaseWebSocketTicket({
