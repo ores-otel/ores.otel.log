@@ -179,7 +179,6 @@ test('bounded offline queues report displaced and terminally undeliverable recor
   await transport.close();
 });
 
-
 test('awaited writes reject on a terminal connection failure', async () => {
   const transport = new SupabaseRealtimeAckTransport({
     url: 'https://project.supabase.co',
@@ -197,7 +196,6 @@ test('awaited writes reject on a terminal connection failure', async () => {
   assert.equal(transport.snapshot().dropped, 1);
   await transport.close();
 });
-
 
 test('reconnect retries are bounded even when jitter hooks fail', async () => {
   let attempts = 0;
@@ -248,8 +246,21 @@ test('session transport keeps durable ingest authoritative during a Realtime out
     ingest: {
       awaitDelivery: true,
       fetch: async (url, init) => {
+        const payload = JSON.parse(String(init.body));
         requests.push({ url: String(url), init });
-        return new Response(null, { status: 202 });
+        return new Response(
+          JSON.stringify({
+            schema: 'next-loggers/ingest-ack/v1',
+            batchId: payload.batchId,
+            accepted: payload.records.length,
+            duplicates: 0,
+            committedAt: '2026-08-24T01:30:00.000Z',
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        );
       },
     },
   });
