@@ -119,6 +119,10 @@
       "types": "./dist/supabase-websocket-ingest.d.ts",
       "default": "./dist/supabase-websocket-ingest.js"
     },
+    "./supabase-websocket-persistent": {
+      "types": "./dist/supabase-websocket-persistent.d.ts",
+      "default": "./dist/supabase-websocket-persistent.js"
+    },
     "./wasm": {
       "types": "./dist/wasm-logger.d.ts",
       "default": "./dist/wasm-logger.js"
