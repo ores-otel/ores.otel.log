@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ores-otel/ores.otel.log/sidecar/adoption-candidates.schema.json",
+  "title": "Ores OTEL Kubernetes sidecar adoption catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "observedAt", "policy", "candidates"],
+  "properties": {
+    "$schema": { "const": "./adoption-candidates.schema.json" },
+    "schemaVersion": { "const": "1.0.0" },
+    "observedAt": { "type": "string", "format": "date-time" },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumCandidates",
+        "maximumCandidates",
+        "sidecarPackage",
+        "sidecarVersion",
+        "collectorImage",
+        "upstreamEndpoint",
+        "productionMutation"
+      ],
+      "properties": {
+        "minimumCandidates": { "const": 7 },
+        "maximumCandidates": { "const": 15 },
+        "sidecarPackage": { "const": "oresoftware/otel-k8s-sidecar" },
+        "sidecarVersion": { "const": "0.1.0" },
+        "collectorImage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository", "tag", "digest", "releaseUrl", "publishedAt"],
+          "properties": {
+            "repository": { "const": "otel/opentelemetry-collector-contrib" },
+            "tag": { "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+            "digest": { "pattern": "^sha256:[0-9a-f]{64}$" },
+            "releaseUrl": { "format": "uri" },
+            "publishedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "upstreamEndpoint": {
+          "type": "string",
+          "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?:[0-9]{2,5}$"
+        },
+        "productionMutation": { "const": false }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 15,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "repository",
+          "ref",
+          "visibility",
+          "workload",
+          "current",
+          "adoption",
+          "selectionEvidence"
+        ],
+        "properties": {
+          "repository": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+          },
+          "ref": { "pattern": "^[0-9a-f]{40}$" },
+          "visibility": { "enum": ["public", "private", "internal"] },
+          "workload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["apiVersion", "kind", "name", "container", "manifests"],
+            "properties": {
+              "apiVersion": { "const": "apps/v1" },
+              "kind": { "enum": ["Deployment", "StatefulSet"] },
+              "name": { "$ref": "#/$defs/kubernetesName" },
+              "container": { "$ref": "#/$defs/kubernetesName" },
+              "manifests": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          },
+          "current": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["endpoint", "protocol", "protocolSource"],
+            "properties": {
+              "endpoint": { "type": "string", "pattern": "^http://[^/]+:(4317|4318)$" },
+              "protocol": { "enum": ["grpc", "http/protobuf"] },
+              "protocolSource": { "enum": ["explicit", "inferred-from-port"] }
+            }
+          },
+          "adoption": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["localEndpoint", "rolloutWave", "requiresLiveCanary"],
+            "properties": {
+              "localEndpoint": { "enum": ["http://127.0.0.1:4317", "http://127.0.0.1:4318"] },
+              "rolloutWave": { "type": "integer", "minimum": 1, "maximum": 4 },
+              "requiresLiveCanary": { "const": true }
+            }
+          },
+          "selectionEvidence": {
+            "type": "array",
+            "minItems": 3,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "kubernetes-workload-at-exact-head",
+                "direct-remote-otlp-export",
+                "no-pod-local-collector",
+                "multi-signal-runtime",
+                "existing-network-policy"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "kubernetesName": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$",
+      "maxLength": 253
+    }
+  }
+}

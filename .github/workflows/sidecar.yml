@@ -1,0 +1,40 @@
+name: Kubernetes OTLP sidecar
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: catalog, patches, and collector config
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+      - name: Validate candidate catalog and every rendered patch
+        run: node --test tests/sidecar.test.mjs
+      - name: Validate collector configuration with the pinned runtime
+        run: >-
+          docker run --rm
+          --env ORES_OTEL_UPSTREAM_ENDPOINT=collector.observability.svc.cluster.local:4317
+          --env ORES_OTEL_GITHUB_REPOSITORY=ores-otel/ores.otel.log
+          --env POD_NAME=validation
+          --env POD_NAMESPACE=validation
+          --env NODE_NAME=validation
+          --volume "$PWD/sidecar/k8s/base/collector.yaml:/etc/ores-otel/config.yaml:ro"
+          otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc
+          validate --config=/etc/ores-otel/config.yaml

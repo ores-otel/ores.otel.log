@@ -77,6 +77,11 @@ dir = "contracts"
 name = "next-loggers-contracts"
 adapter = "none"
 
+[targets.k8s-sidecar]
+dir = "sidecar"
+name = "otel-k8s-sidecar"
+adapter = "none"
+
 [targets.nodejs]
 dir = "sdk/nodejs"
 name = "next-loggers-nodejs"

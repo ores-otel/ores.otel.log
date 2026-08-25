@@ -36,6 +36,8 @@ Run `next-loggers --help` or `next-loggers <command> --help` for the complete ge
 | `erlang` | Erlang | Hex `oresoftware_next_loggers_erlang` | `sdk/erlang/vX.Y.Z` | `hex` |
 | `elixir` | Elixir | Hex `oresoftware_next_loggers_elixir` | `sdk/elixir/vX.Y.Z` | `hex` |
 
+The root `vX.Y.Z` Zed release publishes every target declared in `.zpkg.toml`, including the target-only `oresoftware/otel-k8s-sidecar` package. It deliberately does not have a second, independently advancing release tag.
+
 The nested `sdk/go/vX.Y.Z` prefix is required for the Go module rooted at `sdk/go`; a root `vX.Y.Z` tag would describe a different module.
 
 ### Human-readable plans

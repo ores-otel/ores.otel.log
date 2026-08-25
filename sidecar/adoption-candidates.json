@@ -1,0 +1,365 @@
+{
+  "$schema": "./adoption-candidates.schema.json",
+  "schemaVersion": "1.0.0",
+  "observedAt": "2026-08-25T15:34:00Z",
+  "policy": {
+    "minimumCandidates": 7,
+    "maximumCandidates": 15,
+    "sidecarPackage": "oresoftware/otel-k8s-sidecar",
+    "sidecarVersion": "0.1.0",
+    "collectorImage": {
+      "repository": "otel/opentelemetry-collector-contrib",
+      "tag": "0.159.0",
+      "digest": "sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
+      "releaseUrl": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/tag/v0.159.0",
+      "publishedAt": "2026-08-18T01:09:57Z"
+    },
+    "upstreamEndpoint": "dd-otel-collector.observability.svc.cluster.local:4317",
+    "productionMutation": false
+  },
+  "candidates": [
+    {
+      "repository": "3FA-app/3fa-backend.rs",
+      "ref": "bb470b4e2737db775718110a03623a87b636cdee",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "threefa-sync-server",
+        "container": "server",
+        "manifests": ["deploy/k8s/deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 1,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime",
+        "existing-network-policy"
+      ]
+    },
+    {
+      "repository": "3FA-app/3fa-web-server.rs",
+      "ref": "3fded3a9779a3a6da14e0a681742cf85f9ee77ee",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-threefa-web-server",
+        "container": "threefa-web-server",
+        "manifests": ["k8s/ec2/dd-threefa-web-server.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 1,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "athlet-o/athleto-app-rs",
+      "ref": "102ebbc2f37d256ddc55418225fff99370e3b306",
+      "visibility": "public",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "athleto-app-rs",
+        "container": "app",
+        "manifests": ["deploy/k8s/deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 2,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "athlet-o/athleto-backend.rs",
+      "ref": "bfa03d04ecfb32c3213467a17de15783169a35b8",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-athleto-backend",
+        "container": "athleto-backend",
+        "manifests": ["k8s/ec2/dd-athleto-backend.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 2,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime",
+        "existing-network-policy"
+      ]
+    },
+    {
+      "repository": "benefactor-cc/backend.rs",
+      "ref": "0b118fdea09e20bc698343b06237bcf44235280b",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "benefactor-backend-rs",
+        "container": "api",
+        "manifests": ["k8s/ec2/benefactor-backend-rs.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 3,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "quaestor-ledger/quaestor-ledger-server.rs",
+      "ref": "a3759dc3980e2fca305977a1cd0584f169a45af0",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-billing-server-candidate",
+        "container": "billing-server",
+        "manifests": ["deploy/k8s/deployment.yaml", "k8s/ec2/dd-billing-server.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 3,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime",
+        "existing-network-policy"
+      ]
+    },
+    {
+      "repository": "daedalus-fab/daedalus-api-server.rs",
+      "ref": "aef9908f10c7898eff219c1faeb001694a335334",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "daedalus-api-server",
+        "container": "server",
+        "manifests": ["deploy/k8s/deployment.yaml", "k8s/deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 2,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime",
+        "existing-network-policy"
+      ]
+    },
+    {
+      "repository": "daedalus-fab/daedalus-web-server.rs",
+      "ref": "27c02bdebe198becdce4566d20b47a6ff4aaa432",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "daedalus-web-server",
+        "container": "server",
+        "manifests": ["deploy/k8s/deployment.yaml", "k8s/deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 2,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime",
+        "existing-network-policy"
+      ]
+    },
+    {
+      "repository": "daedalus-fab/fabrication-server.rs",
+      "ref": "b5617b5b002fbf9748e9f01ae66d477deb0bc810",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-fabrication-server",
+        "container": "server",
+        "manifests": ["deploy/k8s/deployment.yaml", "k8s/deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "inferred-from-port"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 3,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime",
+        "existing-network-policy"
+      ]
+    },
+    {
+      "repository": "scintilla-run/gleam-lambda-runner",
+      "ref": "75c44bd160e3c79328a7a4d35b2b5f085c4cd18c",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-gleam-lambda-runner",
+        "container": "gleam-lambda-runner",
+        "manifests": ["k8s/ec2/dd-gleam-lambda-runner.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "explicit"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 4,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "ORESoftware/mip-solver-node.rs",
+      "ref": "e61d20b337f64f9e80fe5ce36aa3695e737c4dff",
+      "visibility": "public",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-in-house-mip-solver-node-master",
+        "container": "solver",
+        "manifests": ["k8s/master-deployment.yaml", "k8s/slave-deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "explicit"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 4,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "ORESoftware/tor-server.rs",
+      "ref": "3124b1a8e305e0aa141c4b6e87846c740405b22e",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "tor-client",
+        "container": "client",
+        "manifests": ["k8s/client.yaml", "k8s/relays.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "explicit"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 4,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime",
+        "existing-network-policy"
+      ]
+    }
+  ]
+}

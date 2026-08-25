@@ -19,6 +19,8 @@
 | Erlang | Hex `oresoftware_next_loggers_erlang` | `sdk/erlang/vX.Y.Z` | `hex` |
 | Elixir | Hex `oresoftware_next_loggers_elixir` | `sdk/elixir/vX.Y.Z` | `hex` |
 
+The root `vX.Y.Z` Zed release also publishes target-only packages that do not have an independent native-registry route. This includes `oresoftware/otel-k8s-sidecar`; its version remains locked to the root package family.
+
 The Go tag prefix is part of the Go module protocol for a module rooted in `sdk/go`; do not shorten it to `vX.Y.Z`.
 
 ## Inspecting the release catalog
