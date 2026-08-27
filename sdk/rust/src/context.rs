@@ -71,12 +71,17 @@ pub fn merge_log_context(outer: &LogContext, inner: &LogContext) -> LogContext {
     let outer = outer.clone().normalized();
     let inner = inner.clone().normalized();
 
-    let mut logged_in_user = outer.logged_in_user;
-    logged_in_user.extend(inner.logged_in_user.clone());
-    let mut fields = outer.fields;
-    fields.extend(inner.fields.clone());
-    let mut baggage = outer.baggage;
-    baggage.extend(inner.baggage.clone());
+    let logged_in_user = outer
+        .logged_in_user
+        .into_iter()
+        .chain(inner.logged_in_user.clone())
+        .collect();
+    let fields = outer.fields.into_iter().chain(inner.fields.clone()).collect();
+    let baggage = outer
+        .baggage
+        .into_iter()
+        .chain(inner.baggage.clone())
+        .collect();
 
     let trace_id = inner.trace_id.clone().or(outer.trace_id.clone());
     let trace_ids = unique_strings(
