@@ -413,6 +413,9 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
     _channel = channel;
     try {
       await channel.ready.timeout(acknowledgementTimeout);
+      // Durable until `_disconnect` cancels it; same-function cancel would
+      // drop the socket on the first message.
+      // ignore: cancel_subscriptions
       _subscription = channel.stream.listen(
         _handleMessage,
         onError: (Object error, StackTrace stackTrace) {
