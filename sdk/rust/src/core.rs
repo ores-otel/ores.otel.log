@@ -660,6 +660,7 @@ impl EventState {
     }
 }
 
+#[must_use = "call .send() or .send_with_store(store) to deliver this log event"]
 #[derive(Clone)]
 pub struct Event {
     logger: Logger,
