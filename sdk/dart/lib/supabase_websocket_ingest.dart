@@ -244,6 +244,8 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
 
   final List<SupabaseWebSocketRecord> _queue = <SupabaseWebSocketRecord>[];
   OresWebSocketChannel? _channel;
+  // Durable until `_disconnect` cancels it (same-function cancel would drop the socket).
+  // ignore: cancel_subscriptions
   StreamSubscription<Object?>? _subscription;
   SupabaseWebSocketBatch? _inFlight;
   Completer<SupabaseWebSocketCommitAck>? _ackCompleter;
