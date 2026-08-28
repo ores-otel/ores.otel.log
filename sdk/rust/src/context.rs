@@ -44,13 +44,15 @@ fn clean(value: Option<String>, maximum: usize) -> Option<String> {
     }
 }
 
-fn append_unique(target: &mut Vec<String>, values: impl IntoIterator<Item = String>) {
-    for value in values {
+fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    values.into_iter().fold(Vec::new(), |unique, value| {
         let value = value.trim().to_string();
-        if !value.is_empty() && !target.contains(&value) {
-            target.push(value);
+        if value.is_empty() || unique.contains(&value) {
+            unique
+        } else {
+            unique.into_iter().chain(std::iter::once(value)).collect()
         }
-    }
+    })
 }
 
 impl LogContext {
@@ -59,17 +61,8 @@ impl LogContext {
         self.span_id = clean(self.span_id, 256);
         self.trace_state = clean(self.trace_state, 512);
         self.routine_id = clean(self.routine_id, 256);
-
-        let mut trace_ids = Vec::new();
-        append_unique(&mut trace_ids, self.trace_ids);
-        if let Some(trace_id) = &self.trace_id {
-            append_unique(&mut trace_ids, [trace_id.clone()]);
-        }
-        self.trace_ids = trace_ids;
-
-        let mut tags = Vec::new();
-        append_unique(&mut tags, self.tags);
-        self.tags = tags;
+        self.trace_ids = unique_strings(self.trace_ids.into_iter().chain(self.trace_id.clone()));
+        self.tags = unique_strings(self.tags);
         self
     }
 }
@@ -78,22 +71,27 @@ pub fn merge_log_context(outer: &LogContext, inner: &LogContext) -> LogContext {
     let outer = outer.clone().normalized();
     let inner = inner.clone().normalized();
 
-    let mut logged_in_user = outer.logged_in_user;
-    logged_in_user.extend(inner.logged_in_user.clone());
-    let mut fields = outer.fields;
-    fields.extend(inner.fields.clone());
-    let mut baggage = outer.baggage;
-    baggage.extend(inner.baggage.clone());
+    let logged_in_user = outer
+        .logged_in_user
+        .into_iter()
+        .chain(inner.logged_in_user.clone())
+        .collect();
+    let fields = outer.fields.into_iter().chain(inner.fields.clone()).collect();
+    let baggage = outer
+        .baggage
+        .into_iter()
+        .chain(inner.baggage.clone())
+        .collect();
 
     let trace_id = inner.trace_id.clone().or(outer.trace_id.clone());
-    let mut trace_ids = outer.trace_ids;
-    append_unique(&mut trace_ids, inner.trace_ids.clone());
-    if let Some(value) = &trace_id {
-        append_unique(&mut trace_ids, [value.clone()]);
-    }
-
-    let mut tags = outer.tags;
-    append_unique(&mut tags, inner.tags.clone());
+    let trace_ids = unique_strings(
+        outer
+            .trace_ids
+            .into_iter()
+            .chain(inner.trace_ids)
+            .chain(trace_id.clone()),
+    );
+    let tags = unique_strings(outer.tags.into_iter().chain(inner.tags));
     let inner_has_span_context = inner.trace_id.is_some()
         || inner.span_id.is_some()
         || inner.trace_state.is_some()
@@ -248,56 +246,66 @@ pub fn contextualize_future<F: Future>(context: LogContext, future: F) -> Contex
     with_log_context_async(context, future)
 }
 
-pub fn apply_log_context(mut event: Event, context: &LogContext) -> Event {
+pub fn apply_log_context(event: Event, context: &LogContext) -> Event {
     let context = context.clone().normalized();
-    if let Some(trace_id) = context.trace_id {
-        event = event.add_trace(trace_id, true);
-    }
-    for trace_id in context.trace_ids {
-        event = event.add_trace(trace_id, false);
-    }
+    let event = match context.trace_id {
+        Some(trace_id) => event.add_trace(trace_id, true),
+        None => event,
+    };
+    let event = context
+        .trace_ids
+        .into_iter()
+        .fold(event, |event, trace_id| event.add_trace(trace_id, false));
 
-    let mut fields = context.fields;
-    if let Some(span_id) = context.span_id {
-        fields.insert("otel.span_id".into(), Value::String(span_id));
-    }
-    fields.insert(
-        "otel.trace_flags".into(),
-        Value::Number(context.trace_flags.into()),
-    );
-    if let Some(trace_state) = context.trace_state {
-        fields.insert("otel.trace_state".into(), Value::String(trace_state));
-    }
-    if let Some(remote) = context.remote {
-        fields.insert("otel.remote".into(), Value::Bool(remote));
-    }
-    if !context.baggage.is_empty() {
-        let baggage = context
-            .baggage
+    let span_fields = [
+        context
+            .span_id
+            .map(|span_id| ("otel.span_id".into(), Value::String(span_id))),
+        Some((
+            "otel.trace_flags".into(),
+            Value::Number(context.trace_flags.into()),
+        )),
+        context
+            .trace_state
+            .map(|trace_state| ("otel.trace_state".into(), Value::String(trace_state))),
+        context
+            .remote
+            .map(|remote| ("otel.remote".into(), Value::Bool(remote))),
+        (!context.baggage.is_empty()).then(|| {
+            (
+                "otel.baggage".into(),
+                Value::Object(
+                    context
+                        .baggage
+                        .into_iter()
+                        .map(|(key, value)| (key, Value::String(value)))
+                        .collect(),
+                ),
+            )
+        }),
+    ];
+    let fields =
+        span_fields
             .into_iter()
-            .map(|(key, value)| (key, Value::String(value)))
-            .collect();
-        fields.insert("otel.baggage".into(), Value::Object(baggage));
-    }
-    event = event.add_fields(fields);
-
-    if !context.logged_in_user.is_empty() {
-        event = event.add_logged_in_user_info(context.logged_in_user);
-    }
-    for user in context.users {
-        event = event.add_user_info(user);
-    }
-    if let Some(routine_id) = context.routine_id {
-        event = event.add_routine_id(routine_id);
-    }
-    event = event.add_tags(std::iter::once("otel".to_string()).chain(context.tags));
-    for value in context.context {
-        event = event.add_context(value);
-    }
-    for value in context.meta {
-        event = event.add_meta(value);
-    }
-    event
+            .flatten()
+            .fold(context.fields, |mut fields, (key, value)| {
+                fields.insert(key, value);
+                fields
+            });
+    let event = event.add_fields(fields);
+    let event = if context.logged_in_user.is_empty() {
+        event
+    } else {
+        event.add_logged_in_user_info(context.logged_in_user)
+    };
+    let event = context.users.into_iter().fold(event, Event::add_user_info);
+    let event = match context.routine_id {
+        Some(routine_id) => event.add_routine_id(routine_id),
+        None => event,
+    };
+    let event = event.add_tags(std::iter::once("otel".to_string()).chain(context.tags));
+    let event = context.context.into_iter().fold(event, Event::add_context);
+    context.meta.into_iter().fold(event, Event::add_meta)
 }
 
 pub fn apply_current_log_context(event: Event) -> Event {

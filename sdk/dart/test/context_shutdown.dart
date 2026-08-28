@@ -42,6 +42,26 @@ Future<void> main() async {
     }),
   );
 
+  late LogContext? captured;
+  late String Function() bound;
+  withLogContext(const LogContext(traceId: 'captured'), () {
+    captured = captureLogContext();
+    bound = bindLogContext(() => currentLogContext()?.traceId ?? 'missing');
+    assert(updateLogContext(const LogContext(traceId: 'mutated')));
+    assert(currentLogContext()?.traceId == 'mutated');
+  });
+  assert(currentLogContext() == null);
+  assert(captured?.traceId == 'captured');
+  assert(bound() == 'captured');
+  assert(
+    withCapturedLogContext(
+          captured,
+          () => currentLogContext()?.traceId,
+        ) ==
+        'captured',
+  );
+  assert(currentLogContext() == null);
+
   final traces = await Future.wait(<Future<String>>[
     Future<String>(
       () => withLogContext(const LogContext(traceId: 'a'), () async {

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/supabase-websocket-persistent-queue.schema.json",
+  "title": "ores-otel persistent Supabase WebSocket queue",
+  "description": "Client-side, crash/reload replay state. Records remain until the Supabase ingest service returns a matching post-transaction commit_ack. Replay is at-least-once and requires recordId deduplication at the database boundary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "protocol",
+    "sessionFingerprint",
+    "savedAtMillis",
+    "nextSequence",
+    "entries"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores-otel/supabase-websocket-queue/v1"
+    },
+    "protocol": {
+      "const": "ores-otel/ws-ingest/v1"
+    },
+    "sessionFingerprint": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 2048
+    },
+    "savedAtMillis": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "nextSequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recordId", "sequence", "createdAtMillis", "record"],
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "createdAtMillis": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "record": {
+          "$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/log-record.schema.json"
+        }
+      }
+    }
+  }
+}

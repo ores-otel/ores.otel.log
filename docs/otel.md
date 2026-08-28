@@ -201,6 +201,29 @@ The application owns OTEL provider startup, flushing, and shutdown. A logger
 transport must never shut down a shared provider unless an application-specific
 wrapper explicitly grants that ownership.
 
+Pass bound provider methods through `forceFlushCallbacks` when logout or another
+application boundary needs export evidence:
+
+```ts
+const otelTransport = createOpenTelemetryTransport({
+  logger: otelLogger,
+  forceFlushCallbacks: [
+    loggerProvider.forceFlush.bind(loggerProvider),
+    tracerProvider.forceFlush.bind(tracerProvider),
+    meterProvider.forceFlush.bind(meterProvider),
+  ],
+});
+
+// Run while the authenticated exporter/session still exists.
+await logger.flush({ timeoutMillis: 2_000, throwOnError: true });
+// The application, not ores.otel.log, decides if/when providers shut down.
+```
+
+Concurrent flush callers coalesce into one call per callback. Ordinary logger
+flushes remain fail-open; `throwOnError: true` makes provider failure or timeout
+observable to an authenticated logout coordinator. Neither transport `close()`
+nor logger `close()` calls an application-owned provider's `shutdown()`.
+
 ## Cluster flow
 
 The supported production flow is:

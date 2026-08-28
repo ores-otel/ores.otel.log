@@ -13,6 +13,10 @@ const migration = await readFile(
   path.join(root, 'examples/supabase/migrations/0001_next_logger_ingest.sql'),
   'utf8',
 );
+const sessionMigration = await readFile(
+  path.join(root, 'examples/supabase/migrations/0002_next_logger_session_index.sql'),
+  'utf8',
+);
 const functionConfig = await readFile(
   path.join(root, 'examples/supabase/config.toml'),
   'utf8',
@@ -27,7 +31,18 @@ test('Supabase function requires a verified user and never embeds an elevated cl
   assert.equal(/sb_secret_/u.test(functionSource), false);
   assert.match(functionConfig, /\[functions\.telemetry-ingest\]/u);
   assert.match(functionConfig, /verify_jwt\s*=\s*true/u);
-  assert.match(functionSource, /Never include the batch, bearer token, or raw Postgres error details/u);
+  assert.match(
+    functionSource,
+    /Never include the batch, bearer token, or raw Postgres error details/u,
+  );
+});
+
+test('Supabase function enforces a server-side application allowlist', () => {
+  assert.match(functionSource, /TELEMETRY_ALLOWED_APP_NAMES/u);
+  assert.match(functionSource, /telemetry_app_allowlist_missing/u);
+  assert.match(functionSource, /app_name_not_allowed/u);
+  assert.match(functionSource, /appNames\.has\(record\.appName\)/u);
+  assert.equal(/body\.(?:table|schemaName|tableName)/u.test(functionSource), false);
 });
 
 test('Supabase migration derives ownership from auth, forces RLS, rate-limits, and deduplicates', () => {
@@ -35,9 +50,32 @@ test('Supabase migration derives ownership from auth, forces RLS, rate-limits, a
   assert.match(migration, /set search_path = pg_catalog, telemetry_private/iu);
   assert.match(migration, /p_user_id uuid/iu);
   assert.match(migration, /force row level security/iu);
-  assert.match(migration, /revoke all on telemetry_private\.next_logger_events from public, anon, authenticated, service_role/iu);
+  assert.match(
+    migration,
+    /revoke all on telemetry_private\.next_logger_events from public, anon, authenticated, service_role/iu,
+  );
   assert.match(migration, /if v_window_count > p_max_records_per_minute/iu);
   assert.match(migration, /on conflict \(user_id, app_name, record_id\) do nothing/iu);
   assert.match(migration, /trace_id ~ '\^\[0-9a-f\]\{32\}\$'/iu);
   assert.match(migration, /grant execute .* to service_role/isu);
+});
+
+test('Supabase session correlation is indexed but never used as ownership', () => {
+  assert.match(sessionMigration, /record #>> '\{fields,sessionId\}'/u);
+  assert.match(sessionMigration, /generated always/u);
+  assert.match(sessionMigration, /next_logger_events_user_session_time_idx/u);
+  assert.match(sessionMigration, /never an authorization source/iu);
+  assert.equal(/auth\.uid\(\).*session_id/isu.test(sessionMigration), false);
+});
+
+
+test('Supabase function validates committed RPC accounting before acknowledging the client', () => {
+  assert.match(functionSource, /data\.batchId !== batchId/u);
+  assert.match(functionSource, /data\.accepted \+ data\.duplicates !== records\.length/u);
+  assert.match(functionSource, /schema: 'next-loggers\/ingest-ack\/v1'/u);
+  assert.match(functionSource, /committedAt: new Date\(\)\.toISOString\(\)/u);
+  assert.match(functionSource, /\{ error: 'ingest_unavailable', requestId \}, 503/u);
+  assert.match(migration, /'duplicates', v_requested - v_inserted/iu);
+  assert.match(migration, /'requested', v_requested/iu);
+  assert.match(migration, /'batchId', p_batch_id/iu);
 });

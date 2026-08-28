@@ -178,9 +178,9 @@ installed, no TypeScript parser available, crate deps not fetchable — each is
 reported as an actionable skip, not an error.
 Repo-specific ESLint config that already existed is never overwritten.
 The same is true of `analysis_options.yaml`.
-
-CI follows the same model: the workflow runs `npm i -g eslint typescript-eslint`
-and never runs `npm install` for the repo itself, so linting a PR does not
+The script accepts a repository-pinned ESLint first and a global ESLint
+fallback. This repository's app CI uses `npm ci` for its locked toolchain; the
+ores-lint workflow also installs eslint globally so a lint-only job does not
 require the repo's dependency tree to resolve.
 
 ## Per-repo customisation
