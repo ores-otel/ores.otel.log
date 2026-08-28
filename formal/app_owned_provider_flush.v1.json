@@ -1,0 +1,44 @@
+{
+  "schema": "ores.otel.log/app-owned-provider-flush/v1",
+  "maximumCallbacks": 32,
+  "invariants": {
+    "concurrentFlushesCoalesce": true,
+    "providerShutdownNeverCalled": true,
+    "strictFlushReportsFailure": true,
+    "ordinaryFlushRemainsFailOpen": true
+  },
+  "vectors": [
+    {
+      "id": "two-providers",
+      "callbackCount": 2,
+      "concurrentFlushCallers": 3,
+      "expectedValid": true,
+      "expectedForceFlushCallsPerProvider": 1,
+      "expectedShutdownCalls": 0
+    },
+    {
+      "id": "maximum-provider-count",
+      "callbackCount": 32,
+      "concurrentFlushCallers": 2,
+      "expectedValid": true,
+      "expectedForceFlushCallsPerProvider": 1,
+      "expectedShutdownCalls": 0
+    },
+    {
+      "id": "provider-count-overflow",
+      "callbackCount": 33,
+      "concurrentFlushCallers": 1,
+      "expectedValid": false,
+      "expectedForceFlushCallsPerProvider": 0,
+      "expectedShutdownCalls": 0
+    },
+    {
+      "id": "empty-provider-list",
+      "callbackCount": 0,
+      "concurrentFlushCallers": 2,
+      "expectedValid": true,
+      "expectedForceFlushCallsPerProvider": 0,
+      "expectedShutdownCalls": 0
+    }
+  ]
+}

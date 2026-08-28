@@ -216,6 +216,8 @@ export interface LoggerOptions {
 export interface FlushOptions {
   timeoutMillis?: number;
   sendUnsent?: boolean;
+  /** Reject on a transport failure or timeout instead of the default fail-open drain. */
+  throwOnError?: boolean;
 }
 
 /** All in-flight writes, shared across logger instances like a small dd-proms registry. */
@@ -225,7 +227,11 @@ export function getPendingLogCount(): number {
   return pendingLogPromises.size;
 }
 
-async function waitWithTimeout(promise: Promise<void>, timeoutMillis?: number): Promise<void> {
+async function waitWithTimeout(
+  promise: Promise<void>,
+  timeoutMillis?: number,
+  throwOnTimeout = false,
+): Promise<void> {
   if (!timeoutMillis) {
     await promise;
     return;
@@ -234,8 +240,14 @@ async function waitWithTimeout(promise: Promise<void>, timeoutMillis?: number): 
   try {
     await Promise.race([
       promise,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, timeoutMillis);
+      new Promise<void>((resolve, reject) => {
+        timer = setTimeout(() => {
+          if (throwOnTimeout) {
+            reject(new Error(`next-loggers flush exceeded ${timeoutMillis}ms`));
+          } else {
+            resolve();
+          }
+        }, timeoutMillis);
       }),
     ]);
   } finally {
@@ -1559,10 +1571,20 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
       await Promise.allSettled(Array.from(this.unsentEvents, async (event) => event.send()));
     }
     const settle = async (): Promise<void> => {
-      await Promise.allSettled(Array.from(this.pending));
-      await Promise.allSettled(this.transports.map(async (transport) => transport.flush?.()));
+      const results = await Promise.allSettled([
+        ...Array.from(this.pending),
+        ...this.transports.map(async (transport) => transport.flush?.()),
+      ]);
+      if (options.throwOnError) {
+        const failures = results.flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : [],
+        );
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'next-loggers flush failed');
+        }
+      }
     };
-    await waitWithTimeout(settle(), options.timeoutMillis);
+    await waitWithTimeout(settle(), options.timeoutMillis, options.throwOnError === true);
   }
 
   async flushOnExit(options: FlushOptions = {}): Promise<void> {

@@ -216,9 +216,17 @@ export interface OtelLoggerLike {
   emit(record: OtelLogRecordLike): void;
 }
 
+/** Bound method or adapter for an application-owned OTEL provider. */
+export type OtelForceFlushCallback = () => void | Promise<void>;
+
 export interface OpenTelemetryTransportOptions extends OtelAttributeLimits {
   /** Logger obtained by the application from its chosen OpenTelemetry SDK. */
   logger: OtelLoggerLike;
+  /**
+   * Bound `forceFlush` methods for application-owned logger, tracer, or meter
+   * providers. The bridge never calls provider shutdown.
+   */
+  forceFlushCallbacks?: readonly OtelForceFlushCallback[];
   /** Explicit active-span lookup. Never imported from a global OTEL singleton. */
   activeSpan?: () => OtelSpanLike | null | undefined;
   /** Explicit context lookup passed back to the OTEL log emitter, when needed. */
@@ -585,10 +593,17 @@ export function createOpenTelemetryContextProvider(
 export class OpenTelemetryTransport implements LogTransport {
   readonly name = 'opentelemetry';
   readonly otel = true;
+  private forceFlushOperation: Promise<void> | undefined;
 
   constructor(private readonly options: OpenTelemetryTransportOptions) {
     if (!options?.logger || typeof options.logger.emit !== 'function') {
       throw new TypeError('OpenTelemetryTransport requires an injected OTEL logger with emit()');
+    }
+    if ((options.forceFlushCallbacks?.length ?? 0) > 32) {
+      throw new RangeError('OpenTelemetryTransport accepts at most 32 forceFlush callbacks');
+    }
+    if (options.forceFlushCallbacks?.some((callback) => typeof callback !== 'function')) {
+      throw new TypeError('forceFlushCallbacks must contain functions');
     }
   }
 
@@ -705,6 +720,42 @@ export class OpenTelemetryTransport implements LogTransport {
     if (emitFailure !== undefined && this.options.failOpen === false) {
       throw emitFailure;
     }
+  }
+
+  /**
+   * Force-flush every injected application-owned provider exactly once per
+   * concurrent flush wave. Failures are reported and propagated to the logger,
+   * whose default drain remains fail-open unless `throwOnError` is requested.
+   */
+  flush(): Promise<void> {
+    const active = this.forceFlushOperation;
+    if (active) return active;
+    const callbacks = this.options.forceFlushCallbacks ?? [];
+    if (callbacks.length === 0) return Promise.resolve();
+
+    const operation = Promise.allSettled(callbacks.map(async (callback) => callback())).then(
+      (results) => {
+        const failures = results.flatMap((result) =>
+          result.status === 'rejected' ? [result.reason] : [],
+        );
+        for (const failure of failures) {
+          reportDiagnostic(this.options.onBridgeError, failure, 'provider.forceFlush');
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'application-owned OTEL provider forceFlush failed');
+        }
+      },
+    );
+    this.forceFlushOperation = operation;
+    void operation.then(
+      () => {
+        if (this.forceFlushOperation === operation) this.forceFlushOperation = undefined;
+      },
+      () => {
+        if (this.forceFlushOperation === operation) this.forceFlushOperation = undefined;
+      },
+    );
+    return operation;
   }
 }
 
