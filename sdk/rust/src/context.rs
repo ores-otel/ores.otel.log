@@ -76,7 +76,11 @@ pub fn merge_log_context(outer: &LogContext, inner: &LogContext) -> LogContext {
         .into_iter()
         .chain(inner.logged_in_user.clone())
         .collect();
-    let fields = outer.fields.into_iter().chain(inner.fields.clone()).collect();
+    let fields = outer
+        .fields
+        .into_iter()
+        .chain(inner.fields.clone())
+        .collect();
     let baggage = outer
         .baggage
         .into_iter()

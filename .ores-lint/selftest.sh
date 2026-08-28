@@ -19,6 +19,18 @@ fail() { echo "  FAIL - $1"; FAIL=1; }
 echo "ores-lint self-test"
 
 # --- Rust -------------------------------------------------------------------
+# rustup clippy needs an explicit toolchain when no default is configured.
+if command -v rustup >/dev/null 2>&1 && [ -z "${RUSTUP_TOOLCHAIN:-}" ]; then
+  if ! cargo clippy --version >/dev/null 2>&1; then
+    for _tc in stable nightly; do
+      if rustup run "$_tc" cargo clippy --version >/dev/null 2>&1; then
+        export RUSTUP_TOOLCHAIN="$_tc"
+        break
+      fi
+    done
+    unset _tc
+  fi
+fi
 if command -v cargo >/dev/null 2>&1 && cargo clippy --version >/dev/null 2>&1; then
   T=$(mktemp -d)
   mkdir -p "$T/src"
@@ -58,6 +70,9 @@ fi
 
 # --- JavaScript -------------------------------------------------------------
 if command -v node >/dev/null 2>&1; then
+  if [ -d "$DIR/test-tools/node_modules" ]; then
+    export NODE_PATH="${DIR}/test-tools/node_modules${NODE_PATH:+:$NODE_PATH}"
+  fi
   if node --input-type=module -e "
     const p = await import('$DIR/eslint/plugin.mjs');
     const names = Object.keys(p.default.rules);
@@ -67,8 +82,36 @@ if command -v node >/dev/null 2>&1; then
   else
     fail "vendored eslint plugin failed to load"
   fi
+
+  if node --test "$DIR/require-send.test.mjs" "$DIR/eslint/plugin.test.mjs" >/dev/null 2>&1; then
+    pass "require-send + eslint plugin fixtures"
+  else
+    fail "require-send / eslint plugin fixtures failed"
+    node --test "$DIR/require-send.test.mjs" "$DIR/eslint/plugin.test.mjs" 2>&1 | sed -n '1,30p' | sed 's/^/         /'
+  fi
+
+  if node "$DIR/tests/integration.mjs" >/dev/null 2>&1; then
+    pass "require-send integration fixture repo"
+  else
+    fail "require-send integration fixture repo failed"
+    node "$DIR/tests/integration.mjs" 2>&1 | sed 's/^/         /'
+  fi
 else
   echo "  skip - node unavailable"
+fi
+
+# --- Dart -------------------------------------------------------------------
+if command -v dart >/dev/null 2>&1 || command -v flutter >/dev/null 2>&1; then
+  pass "dart/flutter available for analyzer pass"
+else
+  echo "  skip - dart/flutter unavailable (dart.sh will no-op)"
+fi
+
+# --- Gleam ------------------------------------------------------------------
+if command -v gleam >/dev/null 2>&1; then
+  pass "gleam available for format/check pass"
+else
+  echo "  skip - gleam unavailable (gleam.sh will no-op)"
 fi
 
 [ "$FAIL" = "0" ] && echo "self-test passed" || echo "self-test FAILED"

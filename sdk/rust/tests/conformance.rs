@@ -57,7 +57,9 @@ fn matches_shared_record_fixture() {
 fn shutdown_recovers_unsent_events() {
     let transport = Arc::new(MemoryTransport::default());
     let logger = Logger::new(Options::default().with_transport(transport.clone()));
-    logger.warn(vec![json!("created but not explicitly sent")]);
+    // Intentionally unsent: shutdown must recover the event.
+    // ores-lint-disable-next-line require-send
+    let _ = logger.warn(vec![json!("created but not explicitly sent")]);
     logger.close().expect("close logger");
 
     assert_eq!(transport.records().len(), 1);

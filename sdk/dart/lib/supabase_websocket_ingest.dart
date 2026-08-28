@@ -244,6 +244,8 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
 
   final List<SupabaseWebSocketRecord> _queue = <SupabaseWebSocketRecord>[];
   OresWebSocketChannel? _channel;
+  // Durable until `_disconnect` cancels it (same-function cancel would drop the socket).
+  // ignore: cancel_subscriptions
   StreamSubscription<Object?>? _subscription;
   SupabaseWebSocketBatch? _inFlight;
   Completer<SupabaseWebSocketCommitAck>? _ackCompleter;
@@ -413,6 +415,9 @@ class SupabaseWebSocketIngestTransport implements LogTransport {
     _channel = channel;
     try {
       await channel.ready.timeout(acknowledgementTimeout);
+      // Durable until `_disconnect` cancels it; same-function cancel would
+      // drop the socket on the first message.
+      // ignore: cancel_subscriptions
       _subscription = channel.stream.listen(
         _handleMessage,
         onError: (Object error, StackTrace stackTrace) {
