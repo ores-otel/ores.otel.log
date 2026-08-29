@@ -72,10 +72,10 @@ test('browser-safe internal diagnostics cannot pull in backend or cloud runtimes
   assert.doesNotMatch(backendSource, /@aws-sdk|@google-cloud|@azure\//);
 });
 
-test('the staged Node tarball contains canonical contract artifacts', async () => {
+test('the built Node tarball contains canonical contract artifacts', async () => {
   const { stdout } = await execFileAsync(
     'npm',
-    ['pack', './sdk/nodejs', '--dry-run', '--json', '--ignore-scripts'],
+    ['pack', '.', '--dry-run', '--json', '--ignore-scripts'],
     { cwd: repositoryRoot, maxBuffer: 20 * 1024 * 1024 },
   );
   const [pack] = JSON.parse(stdout);
