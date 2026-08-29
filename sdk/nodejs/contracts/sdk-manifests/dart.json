@@ -18,7 +18,8 @@
     "recordSchema": "contracts/log-record.schema.json",
     "contextSchema": "contracts/schemas/log-context.schema.json",
     "otelLogSchema": "contracts/schemas/otel-log-record.schema.json",
-    "batchSchema": "contracts/schemas/transport-batch.schema.json"
+    "batchSchema": "contracts/schemas/transport-batch.schema.json",
+    "realtimeBatchVersion": "next-loggers/realtime-batch/v1"
   },
   "api": {
     "logger": {
@@ -144,10 +145,15 @@
     },
     "supabase": {
       "adapterSymbols": [
-        "SupabaseTransport"
+        "SupabaseTransport",
+        "SupabaseRealtimeTransport"
       ],
       "authenticatedSender": true,
       "durableBatchSchema": "next-loggers/batch/v1",
+      "realtimeBatchSchema": "next-loggers/realtime-batch/v1",
+      "privateChannelsByDefault": true,
+      "realtimeAcknowledgements": true,
+      "durableFallbackSupported": true,
       "allowsDistributedSecrets": false,
       "realtimeIsDurable": false
     }
@@ -157,11 +163,15 @@
     "recordFixture": "contracts/fixtures/conformance-record.json",
     "sourceFiles": [
       "sdk/dart/lib/next_loggers.dart",
-      "sdk/dart/test/conformance_test.dart"
+      "sdk/dart/lib/supabase_realtime_transport.dart",
+      "sdk/dart/test/conformance_test.dart",
+      "sdk/dart/test/supabase_realtime_transport_test.dart"
     ],
     "validatesJsonSchema": false,
     "testsContextIsolation": true,
-    "testsNoMonkeyPatching": false
+    "testsNoMonkeyPatching": false,
+    "testsRealtimeAcknowledgements": true,
+    "testsDurableFallback": true
   },
   "promotion": {
     "ready": false,

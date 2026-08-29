@@ -338,10 +338,212 @@ export function checkDeliveryModel(
   });
 }
 
+export function initialInternalDiagnosticState() {
+  return Object.freeze({
+    phase: 'idle',
+    reports: 0,
+    delivered: 0,
+    failed: 0,
+    suppressed: 0,
+    pendingSuppressed: 0,
+    pendingSaturated: false,
+    inFlightSuppressed: 0,
+    inFlightSaturated: false,
+    closedRejected: 0,
+    inFlight: 0,
+    sinkIndex: 0,
+    sinkCount: 0,
+  });
+}
+
+export function internalDiagnosticTransitions(
+  state,
+  bounds = Object.freeze({ maxReports: 5, maxSuppressed: 1 }),
+) {
+  const { maxReports, maxSuppressed, maxSinks = 3 } = bounds;
+  assert(Number.isInteger(maxReports) && maxReports >= 2, 'diagnostic report bound is invalid');
+  assert(
+    Number.isInteger(maxSuppressed) && maxSuppressed >= 1,
+    'diagnostic suppression bound is invalid',
+  );
+  assert(Number.isInteger(maxSinks) && maxSinks >= 1 && maxSinks <= 3, 'diagnostic sink bound is invalid');
+  const transitions = [];
+  const add = (action, patch) => {
+    transitions.push({ action, state: Object.freeze({ ...state, ...patch }) });
+  };
+
+  if (state.reports < maxReports) {
+    if (state.phase === 'idle') {
+      for (let sinkCount = 1; sinkCount <= maxSinks; sinkCount += 1) {
+        add('begin-report', {
+          phase: 'reporting',
+          reports: state.reports + 1,
+          inFlight: 1,
+          inFlightSuppressed: state.pendingSuppressed,
+          inFlightSaturated: state.pendingSaturated,
+          pendingSuppressed: 0,
+          pendingSaturated: false,
+          sinkIndex: 1,
+          sinkCount,
+        });
+      }
+    } else if (state.phase === 'reporting' || state.phase === 'closing') {
+      if (state.pendingSuppressed < maxSuppressed) {
+        add('suppress-report', {
+          reports: state.reports + 1,
+          suppressed: state.suppressed + 1,
+          pendingSuppressed: state.pendingSuppressed + 1,
+        });
+      } else {
+        add('suppress-saturated', {
+          reports: state.reports + 1,
+          suppressed: state.suppressed + 1,
+          pendingSaturated: true,
+        });
+      }
+    } else {
+      add('reject-closed', {
+        reports: state.reports + 1,
+        closedRejected: state.closedRejected + 1,
+      });
+    }
+  }
+
+  if (state.phase === 'idle') add('close-idle', { phase: 'closed' });
+  if (state.phase === 'reporting') add('begin-close', { phase: 'closing' });
+  if (state.phase === 'reporting' || state.phase === 'closing') {
+    const terminalPhase = state.phase === 'closing' ? 'closed' : 'idle';
+    add('sink-success', {
+      phase: terminalPhase,
+      delivered: state.delivered + 1,
+      inFlight: 0,
+      inFlightSuppressed: 0,
+      inFlightSaturated: false,
+      sinkIndex: 0,
+      sinkCount: 0,
+    });
+    if (state.sinkIndex < state.sinkCount) {
+      add('sink-failure-next', { sinkIndex: state.sinkIndex + 1 });
+    } else {
+      add('sinks-failed', {
+        phase: terminalPhase,
+        failed: state.failed + 1,
+        inFlight: 0,
+        inFlightSuppressed: 0,
+        inFlightSaturated: false,
+        sinkIndex: 0,
+        sinkCount: 0,
+      });
+    }
+  }
+  return transitions;
+}
+
+function assertInternalDiagnosticInvariants(state, bounds, transitions) {
+  assert(
+    ['idle', 'reporting', 'closing', 'closed'].includes(state.phase),
+    'invalid diagnostic phase',
+  );
+  assert(state.reports >= 0 && state.reports <= bounds.maxReports, 'diagnostic report bound');
+  assert(
+    state.pendingSuppressed >= 0 && state.pendingSuppressed <= bounds.maxSuppressed,
+    'diagnostic pending-suppression bound',
+  );
+  assert(state.suppressed >= 0 && state.suppressed <= state.reports, 'diagnostic suppression total');
+  assert(typeof state.pendingSaturated === 'boolean', 'diagnostic pending saturation type');
+  assert(
+    state.inFlightSuppressed >= 0 && state.inFlightSuppressed <= bounds.maxSuppressed,
+    'diagnostic in-flight suppression bound',
+  );
+  assert(typeof state.inFlightSaturated === 'boolean', 'diagnostic in-flight saturation type');
+  assert(state.sinkCount >= 0 && state.sinkCount <= (bounds.maxSinks ?? 3), 'diagnostic sink-count bound');
+  assert(state.sinkIndex >= 0 && state.sinkIndex <= state.sinkCount, 'diagnostic sink-index bound');
+  assert(
+    state.inFlight === (state.phase === 'reporting' || state.phase === 'closing' ? 1 : 0),
+    'diagnostic in-flight phase agreement',
+  );
+  if (state.inFlight === 1) {
+    assert(state.sinkCount >= 1 && state.sinkIndex >= 1, 'in-flight diagnostic has no active sink');
+  } else {
+    assert(state.sinkCount === 0 && state.sinkIndex === 0, 'terminal diagnostic retains a sink');
+  }
+  assert(
+    state.reports
+      === state.delivered
+        + state.failed
+        + state.suppressed
+        + state.closedRejected
+        + state.inFlight,
+    'diagnostic report conservation',
+  );
+  if (state.phase === 'closed') {
+    assert(
+      transitions.every(({ state: next }) => next.phase === 'closed'),
+      'closed diagnostic reporter is not terminal',
+    );
+  }
+  if (state.phase === 'closing') {
+    assert(
+      transitions.some(({ state: next }) => next.phase === 'closed'),
+      'closing diagnostic reporter cannot finish',
+    );
+  }
+}
+
+export function checkInternalDiagnosticModel(
+  bounds = Object.freeze({ maxReports: 5, maxSuppressed: 1 }),
+) {
+  const initial = initialInternalDiagnosticState();
+  const pending = [initial];
+  const visited = new Map([[JSON.stringify(initial), initial]]);
+  const actions = new Set();
+  let transitionsChecked = 0;
+  let closedStates = 0;
+
+  for (let index = 0; index < pending.length; index += 1) {
+    const state = pending[index];
+    const transitions = internalDiagnosticTransitions(state, bounds);
+    assertInternalDiagnosticInvariants(state, bounds, transitions);
+    if (state.phase === 'closed') closedStates += 1;
+    for (const transition of transitions) {
+      transitionsChecked += 1;
+      actions.add(transition.action);
+      const key = JSON.stringify(transition.state);
+      if (!visited.has(key)) {
+        visited.set(key, transition.state);
+        pending.push(transition.state);
+      }
+    }
+  }
+
+  for (const action of [
+    'begin-report',
+    'suppress-report',
+    'suppress-saturated',
+    'reject-closed',
+    'close-idle',
+    'begin-close',
+    'sink-success',
+    'sink-failure-next',
+    'sinks-failed',
+  ]) {
+    assert(actions.has(action), `unreachable internal diagnostic action: ${action}`);
+  }
+  assert(closedStates > 0, 'internal diagnostic model has no closed states');
+
+  return Object.freeze({
+    states: visited.size,
+    transitions: transitionsChecked,
+    closedStates,
+    actions: Object.freeze([...actions].sort()),
+  });
+}
+
 export async function checkFormalModels() {
   return Object.freeze({
     shutdown: await checkShutdownVectors(),
     delivery: checkDeliveryModel(),
+    internalDiagnostics: checkInternalDiagnosticModel(),
   });
 }
 

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/internal-diagnostic.schema.json",
+  "title": "ores.otel.log/internal-diagnostic/v1",
+  "description": "Closed, payload-free control-plane diagnostic emitted when an observability component cannot safely report through the primary telemetry pipeline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "timestamp",
+    "service",
+    "severity",
+    "component",
+    "operation",
+    "outcome",
+    "retryable",
+    "attempt",
+    "dropped",
+    "suppressed",
+    "suppressionSaturated"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores.otel.log/internal-diagnostic/v1"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 24,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "severity": {
+      "enum": ["warn", "error", "fatal"]
+    },
+    "component": {
+      "enum": [
+        "otel_bridge",
+        "loki_transport",
+        "prometheus_exporter",
+        "supabase_transport",
+        "cloudwatch_logs",
+        "google_cloud_logging",
+        "azure_monitor",
+        "outage_spool",
+        "collector",
+        "sidecar"
+      ]
+    },
+    "operation": {
+      "enum": [
+        "exporter_initialize",
+        "exporter_write",
+        "exporter_flush",
+        "transport_send",
+        "transport_flush",
+        "queue_overflow",
+        "queue_retry",
+        "shutdown_flush",
+        "provider_write",
+        "provider_flush",
+        "upload_grant_validate",
+        "upload_put",
+        "sidecar_configure",
+        "sidecar_listen",
+        "sidecar_probe"
+      ]
+    },
+    "outcome": {
+      "enum": ["failed", "dropped", "suppressed", "rejected", "recovered"]
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 8
+    },
+    "dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "suppressed": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "suppressionSaturated": {
+      "type": "boolean"
+    }
+  }
+}

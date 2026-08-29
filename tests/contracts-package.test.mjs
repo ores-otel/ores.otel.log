@@ -14,8 +14,18 @@ const requiredContractFiles = [
   'contracts/log-record.schema.json',
   'contracts/sdk-manifests.json',
   'contracts/schemas/sdk-manifest.schema.json',
+  'contracts/schemas/internal-diagnostic.schema.json',
+  'contracts/schemas/internal-diagnostic-batch.schema.json',
+  'contracts/schemas/internal-diagnostic-upload-grant.schema.json',
   'contracts/migration/test-repository-matrix.json',
   'contracts/fixtures/manifest.json',
+  'formal/InternalDiagnostics.tla',
+  'formal/InternalDiagnostics.cfg',
+  'docs/internal-diagnostics.md',
+  'dist/internal-diagnostics.js',
+  'dist/internal-diagnostics.d.ts',
+  'dist/internal-diagnostics-backend.js',
+  'dist/internal-diagnostics-backend.d.ts',
 ];
 
 test('package manifests expose the complete contracts tree', async () => {
@@ -27,7 +37,39 @@ test('package manifests expose the complete contracts tree', async () => {
       './contracts/*',
       `${relative} must expose contract subpaths`,
     );
+    assert.deepEqual(manifest.exports['./internal-diagnostics'], {
+      types: './dist/internal-diagnostics.d.ts',
+      default: './dist/internal-diagnostics.js',
+    });
+    assert.deepEqual(manifest.exports['./internal-diagnostics/backend'], {
+      types: './dist/internal-diagnostics-backend.d.ts',
+      default: './dist/internal-diagnostics-backend.js',
+    });
   }
+});
+
+test('browser-safe internal diagnostics cannot pull in backend or cloud runtimes', async () => {
+  const browserSource = await readFile(
+    join(repositoryRoot, 'dist/internal-diagnostics.js'),
+    'utf8',
+  );
+  for (const forbidden of [
+    'process.',
+    'node:',
+    'internal-diagnostics-backend',
+    '@aws-sdk',
+    '@google-cloud',
+    '@azure/',
+  ]) {
+    assert.doesNotMatch(browserSource, new RegExp(forbidden.replace('.', '\\.')));
+  }
+
+  const backendSource = await readFile(
+    join(repositoryRoot, 'dist/internal-diagnostics-backend.js'),
+    'utf8',
+  );
+  assert.match(backendSource, /process\.stderr/);
+  assert.doesNotMatch(backendSource, /@aws-sdk|@google-cloud|@azure\//);
 });
 
 test('the staged Node tarball contains canonical contract artifacts', async () => {

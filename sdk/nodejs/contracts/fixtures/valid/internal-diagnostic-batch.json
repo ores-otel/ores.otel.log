@@ -1,0 +1,20 @@
+{
+  "schema": "ores.otel.log/internal-diagnostic-batch/v1",
+  "createdAt": "2026-08-29T18:00:01.000Z",
+  "records": [
+    {
+      "schema": "ores.otel.log/internal-diagnostic/v1",
+      "timestamp": "2026-08-29T18:00:00.000Z",
+      "service": "orders-api",
+      "severity": "error",
+      "component": "outage_spool",
+      "operation": "upload_put",
+      "outcome": "failed",
+      "retryable": true,
+      "attempt": 1,
+      "dropped": 0,
+      "suppressed": 0,
+      "suppressionSaturated": false
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "schema": "ores.otel.log/internal-diagnostic-upload-grant/v1",
+  "provider": "azure_blob",
+  "method": "PUT",
+  "uploadUrl": "https://diagnostics.blob.core.windows.net/outage/object.json?sv=2026-01-01&se=2026-08-29T18%3A10%3A00.000Z&sp=cw&sr=b&spr=https&sig=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "expiresAt": "2026-08-29T18:05:00.000Z",
+  "maxBytes": 65536,
+  "contentType": "application/vnd.ores.internal-diagnostics+json",
+  "headers": {
+    "content-type": "application/vnd.ores.internal-diagnostics+json",
+    "x-ms-blob-type": "BlockBlob"
+  }
+}

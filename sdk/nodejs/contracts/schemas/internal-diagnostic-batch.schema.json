@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/internal-diagnostic-batch.schema.json",
+  "title": "ores.otel.log/internal-diagnostic-batch/v1",
+  "description": "Bounded outage-spool batch containing only closed internal diagnostics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "createdAt", "records"],
+  "properties": {
+    "schema": {
+      "const": "ores.otel.log/internal-diagnostic-batch/v1"
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 24,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "records": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/internal-diagnostic.schema.json"
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "ores.otel.log/internal-diagnostic/v1",
+  "timestamp": "2026-08-29T18:00:00.000Z",
+  "service": "orders-api",
+  "severity": "error",
+  "component": "otel_bridge",
+  "operation": "exporter_write",
+  "outcome": "failed",
+  "retryable": true,
+  "attempt": 1,
+  "dropped": 0,
+  "suppressed": 2,
+  "suppressionSaturated": false
+}

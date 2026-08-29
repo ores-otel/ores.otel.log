@@ -9,7 +9,16 @@ const targetRoot = join(repositoryRoot, 'sdk', 'nodejs');
 const readJson = async (path) => JSON.parse(await readFile(path, 'utf8'));
 const rootPackage = await readJson(join(repositoryRoot, 'package.json'));
 const { scripts: _scripts, devDependencies: _devDependencies, ...releasePackage } = rootPackage;
-releasePackage.files = ['dist', 'src', 'contracts', 'formal', '.cli-flags.toml', 'README.md', 'LICENSE'];
+releasePackage.files = [
+  'dist',
+  'src',
+  'contracts',
+  'formal',
+  'docs/internal-diagnostics.md',
+  '.cli-flags.toml',
+  'README.md',
+  'LICENSE',
+];
 releasePackage.repository = {
   ...rootPackage.repository,
   directory: 'sdk/nodejs',
@@ -19,7 +28,16 @@ await access(join(repositoryRoot, 'dist', 'cli', 'main.js'));
 await mkdir(targetRoot, { recursive: true });
 await writeFile(join(targetRoot, 'package.json'), `${JSON.stringify(releasePackage, null, 2)}\n`);
 
-for (const generated of ['dist', 'src', 'contracts', 'formal', 'README.md', 'LICENSE', '.cli-flags.toml']) {
+for (const generated of [
+  'dist',
+  'src',
+  'contracts',
+  'formal',
+  'docs',
+  'README.md',
+  'LICENSE',
+  '.cli-flags.toml',
+]) {
   await rm(join(targetRoot, generated), { recursive: true, force: true });
 }
 
@@ -30,6 +48,11 @@ for (const directory of ['dist', 'src', 'contracts', 'formal']) {
     errorOnExist: false,
   });
 }
+await mkdir(join(targetRoot, 'docs'), { recursive: true });
+await copyFile(
+  join(repositoryRoot, 'docs', 'internal-diagnostics.md'),
+  join(targetRoot, 'docs', 'internal-diagnostics.md'),
+);
 for (const file of ['README.md', 'LICENSE', '.cli-flags.toml']) {
   await copyFile(join(repositoryRoot, file), join(targetRoot, file));
 }
