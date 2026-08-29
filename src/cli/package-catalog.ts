@@ -27,6 +27,7 @@ export type ReleaseTargetName = (typeof RELEASE_TARGET_NAMES)[number];
 export const ZED_TARGET_NAMES = [
   'repository',
   'contracts',
+  'k8s-sidecar',
   'nodejs',
   'python',
   'golang',

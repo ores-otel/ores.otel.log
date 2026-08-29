@@ -20,6 +20,7 @@ const checkoutCommit = '3d3c42e5aac5ba805825da76410c181273ba90b1';
 const expectedTargets = {
   repository: { dir: '.', adapter: 'none' },
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
+  'k8s-sidecar': { dir: 'sidecar', name: 'otel-k8s-sidecar', adapter: 'none' },
   nodejs: {
     dir: 'sdk/nodejs',
     name: 'next-loggers-nodejs',

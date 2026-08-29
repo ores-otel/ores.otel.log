@@ -13,6 +13,20 @@ npm install @oresoftware/next-loggers
 
 The package intentionally does not ship a CommonJS build. It works from `.mjs` files and ESM TypeScript projects.
 
+## Kubernetes OTLP sidecar
+
+The `oresoftware/otel-k8s-sidecar` Zed target packages a hardened, opt-in
+OpenTelemetry Collector sidecar for application-owned OTLP logs, metrics, and
+traces. It listens on pod-local loopback, applies bounded memory, queue, retry,
+batching, resource enrichment, and high-risk attribute deletion, then forwards
+to one explicitly configured OTLP/gRPC gateway. It does not scrape Kubernetes
+CRI/stdout logs; cluster-level log collection remains the node agent's job.
+
+The target includes a machine-readable, exact-head adoption catalog for 12
+GitHub repositories with existing Kubernetes workloads, plus a deterministic
+strategic-merge patch renderer. See [`sidecar/README.md`](sidecar/README.md) for
+the threat model, Zed install flow, rollout gates, and candidate matrix.
+
 ## Polyglot SDKs
 
 The repository also contains native logger libraries for services that feed
