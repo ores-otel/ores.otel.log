@@ -1,0 +1,13 @@
+{
+  "schema": "ores.otel.log/internal-diagnostic-upload-grant/v1",
+  "provider": "gcp_cloud_storage",
+  "method": "PUT",
+  "uploadUrl": "https://storage.googleapis.com/diagnostics/outage/object.json?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=temporary%2F20260829%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260829T180000Z&X-Goog-Expires=600&X-Goog-SignedHeaders=content-type%3Bhost&X-Goog-Signature=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "expiresAt": "2026-08-29T18:05:00.000Z",
+  "maxBytes": 65536,
+  "contentType": "application/vnd.ores.internal-diagnostics+json",
+  "headers": {
+    "content-type": "application/vnd.ores.internal-diagnostics+json",
+    "x-ms-blob-type": "BlockBlob"
+  }
+}

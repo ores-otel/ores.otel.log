@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/ores-otel/ores.otel.log/main/contracts/schemas/internal-diagnostic-upload-grant.schema.json",
+  "title": "ores.otel.log/internal-diagnostic-upload-grant/v1",
+  "description": "Short-lived, object-specific write grant for a bounded internal-diagnostic outage batch. The upload URL is temporary credential material and must never be logged or serialized into diagnostics.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "provider",
+    "method",
+    "uploadUrl",
+    "expiresAt",
+    "maxBytes",
+    "contentType",
+    "headers"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores.otel.log/internal-diagnostic-upload-grant/v1"
+    },
+    "provider": {
+      "enum": ["aws_s3", "gcp_cloud_storage", "azure_blob"]
+    },
+    "method": {
+      "const": "PUT"
+    },
+    "uploadUrl": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 32,
+      "maxLength": 8192,
+      "writeOnly": true
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time",
+      "maxLength": 24,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3}Z$"
+    },
+    "maxBytes": {
+      "type": "integer",
+      "minimum": 256,
+      "maximum": 65536
+    },
+    "contentType": {
+      "const": "application/vnd.ores.internal-diagnostics+json"
+    },
+    "headers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content-type"],
+      "properties": {
+        "content-type": {
+          "const": "application/vnd.ores.internal-diagnostics+json"
+        },
+        "x-ms-blob-type": {
+          "const": "BlockBlob"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "enum": ["aws_s3", "gcp_cloud_storage"]
+          }
+        },
+        "required": ["provider"]
+      },
+      "then": {
+        "properties": {
+          "headers": {
+            "maxProperties": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "const": "azure_blob"
+          }
+        },
+        "required": ["provider"]
+      },
+      "then": {
+        "properties": {
+          "headers": {
+            "required": ["content-type", "x-ms-blob-type"],
+            "minProperties": 2
+          }
+        }
+      }
+    }
+  ]
+}

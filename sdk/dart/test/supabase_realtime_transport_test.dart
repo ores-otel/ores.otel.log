@@ -35,8 +35,7 @@ void main() {
       );
       final joinPayload = join['payload']! as Map<String, Object?>;
       final config = joinPayload['config']! as Map<String, Object?>;
-      final broadcastConfig =
-          config['broadcast']! as Map<String, Object?>;
+      final broadcastConfig = config['broadcast']! as Map<String, Object?>;
       expect(join['topic'], 'realtime:session-logs:user-123');
       expect(config['private'], isTrue);
       expect(broadcastConfig['ack'], isTrue);
@@ -45,8 +44,8 @@ void main() {
       final broadcast = socket.sent.singleWhere(
         (message) => message['event'] == 'broadcast',
       );
-      final envelope = ((broadcast['payload']! as Map<String, Object?>)
-          ['payload']!) as Map<String, Object?>;
+      final envelope = ((broadcast['payload']!
+          as Map<String, Object?>)['payload']!) as Map<String, Object?>;
       expect(envelope['schema'], supabaseRealtimeBatchSchema);
       expect(envelope['sentAt'], '2026-08-23T12:00:00.000Z');
       final records = envelope['records']! as List<Object?>;
@@ -165,8 +164,7 @@ LogRecord _record(String id) => LogRecord(
     );
 
 class _FakeSocket implements SupabaseRealtimeSocket {
-  final StreamController<Object?> _messages =
-      StreamController<Object?>();
+  final StreamController<Object?> _messages = StreamController<Object?>();
   final List<Map<String, Object?>> sent = <Map<String, Object?>>[];
   bool _closed = false;
 

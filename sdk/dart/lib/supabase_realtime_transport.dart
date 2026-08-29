@@ -8,8 +8,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'next_loggers.dart';
 
-const String supabaseRealtimeBatchSchema =
-    'next-loggers/realtime-batch/v1';
+const String supabaseRealtimeBatchSchema = 'next-loggers/realtime-batch/v1';
 
 typedef SupabaseAccessTokenProvider = FutureOr<String?> Function();
 typedef SupabaseRealtimeSocketFactory = SupabaseRealtimeSocket Function(
@@ -117,10 +116,6 @@ class SupabaseRealtimeTransport implements LogTransport {
         assert(!retryBase.isNegative),
         assert(!retryMax.isNegative),
         assert(fallbackAfterFailures >= 0),
-        _publishableKey = _assertClientCredential(
-          publishableKey,
-          'a publishable key',
-        ),
         _topic = 'realtime:${_assertTopic(channel)}',
         _socketFactory = socketFactory ?? _WebSocketChannelSocket.new,
         _clock = clock ?? DateTime.now,
@@ -151,14 +146,12 @@ class SupabaseRealtimeTransport implements LogTransport {
   final void Function(SupabaseRealtimeDrop drop)? onDrop;
   final void Function(Object error, SupabaseRealtimeSnapshot snapshot)? onError;
 
-  final String _publishableKey;
   final String _topic;
   final SupabaseRealtimeSocketFactory _socketFactory;
   final DateTime Function() _clock;
   final Random _random;
   final ListQueue<_QueuedRecord> _queue = ListQueue<_QueuedRecord>();
-  final Map<String, _PendingReply> _pendingReplies =
-      <String, _PendingReply>{};
+  final Map<String, _PendingReply> _pendingReplies = <String, _PendingReply>{};
 
   SupabaseRealtimeSocket? _socket;
   StreamSubscription<Object?>? _subscription;
@@ -223,7 +216,8 @@ class SupabaseRealtimeTransport implements LogTransport {
     return task;
   }
 
-  Future<void> flushOnExit([Iterable<LogRecord> records = const <LogRecord>[]]) async {
+  Future<void> flushOnExit(
+      [Iterable<LogRecord> records = const <LogRecord>[]]) async {
     for (final record in records) {
       _enqueue(record);
     }
@@ -444,6 +438,8 @@ class SupabaseRealtimeTransport implements LogTransport {
     _socket = socket;
     _joined = false;
     _joinRef = '';
+    await _subscription?.cancel();
+    _subscription = null;
     _subscription = socket.messages.listen(
       _handleMessage,
       onError: (Object error, StackTrace stackTrace) {
@@ -686,7 +682,8 @@ class SupabaseRealtimeTransport implements LogTransport {
       unawaited(() async {
         await _disconnect(StateError('Supabase Realtime reconnecting'));
         await flush();
-      }().catchError((Object _) {}));
+      }()
+          .catchError((Object _) {}));
     });
   }
 
@@ -752,7 +749,9 @@ class _PhoenixMessage {
 
 String _assertTopic(String value) {
   final topic = value.trim().replaceFirst(RegExp(r'^realtime:'), '');
-  if (topic.isEmpty || topic.length > 180 || RegExp(r'[\x00-\x1f\x7f]').hasMatch(topic)) {
+  if (topic.isEmpty ||
+      topic.length > 180 ||
+      RegExp(r'[\x00-\x1f\x7f]').hasMatch(topic)) {
     throw ArgumentError.value(
       value,
       'channel',
@@ -795,8 +794,7 @@ Uri _realtimeEndpoint(Uri input, String publishableKey) {
       'apikey': publishableKey,
       'vsn': '1.0.0',
     },
-    fragment: '',
-  );
+  ).removeFragment();
 }
 
 String _assertClientCredential(String value, String label) {

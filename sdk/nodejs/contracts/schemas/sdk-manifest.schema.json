@@ -127,6 +127,9 @@
         },
         "batchSchema": {
           "const": "contracts/schemas/transport-batch.schema.json"
+        },
+        "realtimeBatchVersion": {
+          "const": "next-loggers/realtime-batch/v1"
         }
       }
     },
@@ -418,6 +421,18 @@
             "durableBatchSchema": {
               "const": "next-loggers/batch/v1"
             },
+            "realtimeBatchSchema": {
+              "const": "next-loggers/realtime-batch/v1"
+            },
+            "privateChannelsByDefault": {
+              "const": true
+            },
+            "realtimeAcknowledgements": {
+              "const": true
+            },
+            "durableFallbackSupported": {
+              "const": true
+            },
             "allowsDistributedSecrets": {
               "const": false
             },
@@ -464,6 +479,12 @@
           "type": "boolean"
         },
         "testsNoMonkeyPatching": {
+          "type": "boolean"
+        },
+        "testsRealtimeAcknowledgements": {
+          "type": "boolean"
+        },
+        "testsDurableFallback": {
           "type": "boolean"
         }
       }

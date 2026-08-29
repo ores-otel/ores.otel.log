@@ -1,0 +1,12 @@
+{
+  "schema": "ores.otel.log/internal-diagnostic-upload-grant/v1",
+  "provider": "aws_s3",
+  "method": "PUT",
+  "uploadUrl": "https://diagnostics.s3.us-east-1.amazonaws.com/outage/object.json?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=temporary%2F20260829%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260829T180000Z&X-Amz-Expires=600&X-Amz-SignedHeaders=content-type%3Bhost&X-Amz-Signature=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "expiresAt": "2026-08-29T18:05:00.000Z",
+  "maxBytes": 65536,
+  "contentType": "application/vnd.ores.internal-diagnostics+json",
+  "headers": {
+    "content-type": "application/vnd.ores.internal-diagnostics+json"
+  }
+}

@@ -133,6 +133,14 @@
       "types": "./dist/observability.d.ts",
       "default": "./dist/observability.js"
     },
+    "./internal-diagnostics": {
+      "types": "./dist/internal-diagnostics.d.ts",
+      "default": "./dist/internal-diagnostics.js"
+    },
+    "./internal-diagnostics/backend": {
+      "types": "./dist/internal-diagnostics-backend.d.ts",
+      "default": "./dist/internal-diagnostics-backend.js"
+    },
     "./prometheus": {
       "types": "./dist/prometheus.d.ts",
       "default": "./dist/prometheus.js"

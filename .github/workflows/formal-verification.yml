@@ -5,15 +5,18 @@ on:
     paths:
       - 'formal/**'
       - 'contracts/schemas/shutdown-transition-vectors.schema.json'
+      - 'contracts/schemas/internal-diagnostic*.schema.json'
       - 'scripts/check-formal-model.mjs'
       - 'scripts/stage-nodejs-release.mjs'
       - 'src/server-lifecycle.ts'
+      - 'src/internal-diagnostics.ts'
       - 'src/supabase-ingest.ts'
       - 'sdk/dart/**'
       - 'sdk/gleam/**'
       - 'sdk/go/**'
       - 'sdk/rust/**'
       - 'tests/formal-model.test.mjs'
+      - 'tests/internal-diagnostics.test.mjs'
       - 'tests/supabase-ingest.test.mjs'
       - 'package.json'
       - '.github/workflows/formal-verification.yml'
@@ -22,15 +25,18 @@ on:
     paths:
       - 'formal/**'
       - 'contracts/schemas/shutdown-transition-vectors.schema.json'
+      - 'contracts/schemas/internal-diagnostic*.schema.json'
       - 'scripts/check-formal-model.mjs'
       - 'scripts/stage-nodejs-release.mjs'
       - 'src/server-lifecycle.ts'
+      - 'src/internal-diagnostics.ts'
       - 'src/supabase-ingest.ts'
       - 'sdk/dart/**'
       - 'sdk/gleam/**'
       - 'sdk/go/**'
       - 'sdk/rust/**'
       - 'tests/formal-model.test.mjs'
+      - 'tests/internal-diagnostics.test.mjs'
       - 'tests/supabase-ingest.test.mjs'
       - 'package.json'
       - '.github/workflows/formal-verification.yml'
@@ -133,3 +139,7 @@ jobs:
         run: >-
           java -XX:+UseParallelGC -jar /tmp/tla2tools-1.7.4.jar
           -config formal/LogDelivery.cfg formal/LogDelivery.tla
+      - name: Check internal diagnostic control plane
+        run: >-
+          java -XX:+UseParallelGC -jar /tmp/tla2tools-1.7.4.jar
+          -config formal/InternalDiagnostics.cfg formal/InternalDiagnostics.tla

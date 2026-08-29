@@ -59,6 +59,14 @@ Supabase sender; the logger never registers a global telemetry provider or
 patches a runtime. The common OTEL bridge shape is documented in
 [`docs/otel.md`](docs/otel.md).
 
+Node backends can report failures inside the observability path through an
+independent, payload-free control plane backed by AWS CloudWatch Logs, Google
+Cloud Logging, Azure Monitor, and direct structured stderr. Browser and edge
+runtimes can use a one-shot, short-lived signed object upload as an outage
+spool without receiving native logging credentials. See the security model,
+provider bindings, and deployment requirements in
+[`docs/internal-diagnostics.md`](docs/internal-diagnostics.md).
+
 Run every native conformance suite with:
 
 ```sh
@@ -634,6 +642,9 @@ models under [`formal/`](formal/README.md):
   as queued, in flight, acknowledged, or explicitly dropped;
 - queue capacity and retry limits remain invariant when producers refill a
   queue while a failed batch is in flight;
+- the non-reentrant internal-diagnostic reporter conserves delivered, failed,
+  suppressed, closed-rejected, and in-flight reports and never reopens after
+  close;
 - a completed close is drained, flushed, and terminal; TLC also checks eventual
   completion under the model's fairness assumptions.
 
