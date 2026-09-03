@@ -12,9 +12,9 @@ import {
   getSessionId,
   getTenantId,
   runWithCapturedExecutionLogContext,
+  runWithExecutionLoggedInUser,
   runWithExecutionLogContext,
   toLoggerLogContext,
-  updateExecutionLogContext,
 } from '../dist/execution-context.js';
 import {
   getLogContext as getWorkerdLogContext,
@@ -52,14 +52,53 @@ test('request identity getters remain isolated across concurrent async chains', 
   assert.equal(getLoggedInUserId(), undefined);
 });
 
+test('immutable child scopes isolate sibling enrichment and restore their parent', async () => {
+  await runWithExecutionLogContext(
+    { requestId: 'request-parent', tenantId: 'tenant-parent' },
+    async () => {
+      const observed = await Promise.all(
+        ['alpha', 'beta', 'gamma'].map((id, index) =>
+          runWithExecutionLoggedInUser({ id: `user-${id}` }, () =>
+            runWithExecutionLogContext({ sessionId: `session-${id}` }, async () => {
+              await new Promise((resolve) => setTimeout(resolve, (3 - index) * 5));
+              return {
+                requestId: getRequestId(),
+                userId: getLoggedInUserId(),
+                tenantId: getTenantId(),
+                sessionId: getSessionId(),
+              };
+            }),
+          ),
+        ),
+      );
+
+      for (const [index, id] of ['alpha', 'beta', 'gamma'].entries()) {
+        assert.deepEqual(observed[index], {
+          requestId: 'request-parent',
+          userId: `user-${id}`,
+          tenantId: 'tenant-parent',
+          sessionId: `session-${id}`,
+        });
+      }
+
+      assert.equal(getRequestId(), 'request-parent');
+      assert.equal(getTenantId(), 'tenant-parent');
+      assert.equal(getLoggedInUserId(), undefined);
+      assert.equal(getSessionId(), undefined);
+    },
+  );
+
+  assert.equal(getRequestId(), undefined);
+});
+
 test('captured contexts explicitly cross detached task and queue boundaries', async () => {
   let snapshot;
   await runWithExecutionLogContext(
     { requestId: 'request-parent', loggedInUserId: 'user-parent' },
-    async () => {
-      assert.equal(updateExecutionLogContext({ tenantId: 'tenant-parent' }), true);
-      snapshot = captureExecutionLogContext();
-    },
+    () =>
+      runWithExecutionLogContext({ tenantId: 'tenant-parent' }, () => {
+        snapshot = captureExecutionLogContext();
+      }),
   );
 
   assert.equal(getRequestId(), undefined);
@@ -69,6 +108,26 @@ test('captured contexts explicitly cross detached task and queue boundaries', as
     assert.equal(getLoggedInUserId(), 'user-parent');
     assert.equal(getTenantId(), 'tenant-parent');
   });
+});
+
+test('read snapshots cannot mutate the active request context', () => {
+  runWithExecutionLogContext(
+    {
+      requestId: 'request-stable',
+      loggedInUserId: 'user-stable',
+      fields: { stable: true },
+    },
+    () => {
+      const snapshot = getExecutionLogContext();
+      snapshot.requestId = 'request-mutated';
+      snapshot.loggedInUser.id = 'user-mutated';
+      snapshot.fields.stable = false;
+
+      assert.equal(getRequestId(), 'request-stable');
+      assert.equal(getLoggedInUserId(), 'user-stable');
+      assert.equal(getExecutionLogContext().fields.stable, true);
+    },
+  );
 });
 
 test('request identity projects into stable structured logger fields', () => {
