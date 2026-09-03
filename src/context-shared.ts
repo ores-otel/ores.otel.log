@@ -27,8 +27,8 @@ function isThenable(value: unknown): value is Promise<unknown> {
 }
 
 /**
- * Single-frame fallback for runtimes with no async context tracking (browsers,
- * and workerd without the nodejs_als/nodejs_compat flag).
+ * Single-frame fallback for sequential runtimes. It intentionally advertises
+ * `isAsyncContextTracked() === false`; never use it for overlapping requests.
  */
 export class SingleFrameLogContextStorage implements LogContextStorage {
   private current: LogContext | undefined;
@@ -54,6 +54,21 @@ export class SingleFrameLogContextStorage implements LogContextStorage {
     }
     this.current = previous;
     return result;
+  }
+}
+
+/**
+ * Fail-closed storage for concurrent server isolates without a real async
+ * context primitive. Explicit context parameters still work; ambient getters
+ * deliberately return `undefined` rather than risk cross-request data bleed.
+ */
+export class ExplicitOnlyLogContextStorage implements LogContextStorage {
+  getStore(): LogContext | undefined {
+    return undefined;
+  }
+
+  run<R>(_store: LogContext, callback: () => R): R {
+    return callback();
   }
 }
 
