@@ -1,9 +1,9 @@
+use oresoftware_next_loggers_request_context::RequestContext;
 use oresoftware_next_loggers_request_context::{
     current_request_id, run_with_classified_request_boundary, run_with_request_boundary,
     with_request_context, RequestBoundary, RequestBoundaryCause, RequestFailureKind, RequestScope,
     RequestTransport,
 };
-use oresoftware_next_loggers_request_context::RequestContext;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -54,39 +54,36 @@ fn boundary(slot: usize) -> RequestBoundary {
 #[tokio::test(flavor = "current_thread")]
 async fn interleaved_protocol_failures_keep_their_own_request_context() {
     let reports = Arc::new(Mutex::new(Vec::new()));
-    let mut futures = Vec::new();
+    let mut tasks = tokio::task::JoinSet::new();
     for slot in 0..50usize {
         let reports = Arc::clone(&reports);
-        futures.push(run_with_request_boundary(
-            request(slot),
-            boundary(slot),
-            async move {
-                for _ in 0..(slot % 4) {
-                    tokio::task::yield_now().await;
-                }
-                assert_eq!(
-                    current_request_id().as_deref(),
-                    Some(format!("request-{slot}").as_str())
-                );
-                Err::<usize, String>(format!("failure-{slot}"))
-            },
-            move |failure| {
-                assert_eq!(
-                    current_request_id().as_deref(),
-                    Some(format!("request-{slot}").as_str())
-                );
-                reports
-                    .lock()
-                    .expect("report lock")
-                    .push((failure.context.request_id.clone(), failure.boundary.transport));
-            },
-        ));
+        tasks.spawn(async move {
+            let result = run_with_request_boundary(
+                request(slot),
+                boundary(slot),
+                async move {
+                    for _ in 0..(slot % 4) {
+                        tokio::task::yield_now().await;
+                    }
+                    assert_eq!(current_request_id(), Some(format!("request-{slot}")));
+                    Err::<usize, String>(format!("failure-{slot}"))
+                },
+                move |failure| {
+                    assert_eq!(current_request_id(), Some(format!("request-{slot}")));
+                    reports
+                        .lock()
+                        .expect("report lock")
+                        .push((failure.context.request_id.clone(), failure.boundary.transport));
+                },
+            )
+            .await;
+            (slot, result)
+        });
     }
 
-    let results = futures::future::join_all(futures).await;
-    assert_eq!(current_request_id(), None);
-    assert_eq!(reports.lock().expect("report lock").len(), 50);
-    for (slot, result) in results.into_iter().enumerate() {
+    let mut completed = 0usize;
+    while let Some(joined) = tasks.join_next().await {
+        let (slot, result) = joined.expect("request boundary task");
         let failure = result.expect_err("operation should fail");
         assert_eq!(failure.kind, RequestFailureKind::Exception);
         assert_eq!(failure.context.request_id, format!("request-{slot}"));
@@ -94,7 +91,12 @@ async fn interleaved_protocol_failures_keep_their_own_request_context() {
             RequestBoundaryCause::Error(error) => assert_eq!(error, format!("failure-{slot}")),
             other => panic!("unexpected cause: {other:?}"),
         }
+        completed += 1;
     }
+
+    assert_eq!(completed, 50);
+    assert_eq!(current_request_id(), None);
+    assert_eq!(reports.lock().expect("report lock").len(), 50);
 }
 
 #[tokio::test(flavor = "current_thread")]
