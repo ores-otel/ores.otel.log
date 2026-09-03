@@ -46,15 +46,19 @@ export interface ExecutionLogContext extends LogContext, RequestIdentityContext 
 }
 
 export interface ExecutionContextApi {
+  /**
+   * Runs a callback in a new immutable child snapshot. Nested calls inherit
+   * omitted parent fields and override only the supplied values.
+   */
   runWithExecutionLogContext<T>(context: ExecutionLogContext, callback: () => T): T;
+  /** Adds authenticated-user metadata through the same immutable child scope. */
+  runWithExecutionLoggedInUser<T>(user: LogUser, callback: () => T): T;
   getExecutionLogContext(): ExecutionLogContext | undefined;
   captureExecutionLogContext(): ExecutionLogContext | undefined;
   runWithCapturedExecutionLogContext<T>(
     snapshot: ExecutionLogContext | undefined,
     callback: () => T,
   ): T;
-  updateExecutionLogContext(patch: ExecutionLogContext): boolean;
-  setExecutionLoggedInUser(user: LogUser): boolean;
   getRequestId(): string | undefined;
   getLoggedInUserId(): string | undefined;
   getTenantId(): string | undefined;
@@ -275,42 +279,30 @@ export function createExecutionContextApi(contextApi: LogContextApi): ExecutionC
     return current ? toLoggerLogContext(current) : undefined;
   };
 
+  const runWithExecutionLogContext = <T>(
+    patch: ExecutionLogContext,
+    callback: () => T,
+  ): T => {
+    const merged = mergeExecutionLogContexts(getRaw() ?? {}, patch);
+    return contextApi.runWithLogContext(toStoredContext(merged), callback);
+  };
+
   return {
-    runWithExecutionLogContext: (patch, callback) => {
-      const merged = mergeExecutionLogContexts(getRaw() ?? {}, patch);
-      return contextApi.runWithLogContext(toStoredContext(merged), callback);
-    },
+    runWithExecutionLogContext,
+    runWithExecutionLoggedInUser: (user, callback) =>
+      runWithExecutionLogContext(
+        {
+          loggedInUser: { ...user },
+          ...(normalizedString(user.id) ? { loggedInUserId: String(user.id) } : {}),
+        },
+        callback,
+      ),
     getExecutionLogContext,
     captureExecutionLogContext: getExecutionLogContext,
     runWithCapturedExecutionLogContext: (snapshot, callback) =>
       snapshot === undefined
         ? callback()
         : contextApi.runWithCapturedLogContext(toStoredContext(snapshot), callback),
-    updateExecutionLogContext: (patch) => {
-      const current = getRaw();
-      if (!current) return false;
-      const merged = toStoredContext(mergeExecutionLogContexts(current, patch));
-      for (const key of Object.keys(current)) {
-        delete (current as Record<string, unknown>)[key];
-      }
-      Object.assign(current, merged);
-      return true;
-    },
-    setExecutionLoggedInUser: (user) => {
-      const current = getRaw();
-      if (!current) return false;
-      const merged = toStoredContext(
-        mergeExecutionLogContexts(current, {
-          loggedInUser: { ...user },
-          ...(normalizedString(user.id) ? { loggedInUserId: String(user.id) } : {}),
-        }),
-      );
-      for (const key of Object.keys(current)) {
-        delete (current as Record<string, unknown>)[key];
-      }
-      Object.assign(current, merged);
-      return true;
-    },
     getRequestId: () => normalizedString(getRaw()?.requestId),
     getLoggedInUserId: () => loggedInUserIdFromContext(getRaw()),
     getTenantId: () => normalizedString(getRaw()?.tenantId),
