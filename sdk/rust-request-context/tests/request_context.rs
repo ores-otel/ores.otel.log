@@ -54,10 +54,8 @@ async fn concurrent_futures_do_not_observe_sibling_request_context() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn captured_context_crosses_detached_boundaries_only_when_reentered() {
-    let captured = with_request_context(request("capture"), async {
-        capture_request_context()
-    })
-    .await;
+    let captured =
+        with_request_context(request("capture"), async { capture_request_context() }).await;
     assert_eq!(current_request_id(), None);
 
     with_captured_request_context(captured.clone(), async {
@@ -104,5 +102,8 @@ fn projection_uses_stable_fields_and_one_log_context_shape() {
             .and_then(|value| value.as_str()),
         Some("user-fields")
     );
-    assert_eq!(RequestContext::from_log_context(&log_context), Some(request));
+    assert_eq!(
+        RequestContext::from_log_context(&log_context),
+        Some(request)
+    );
 }

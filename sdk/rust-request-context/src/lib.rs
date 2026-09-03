@@ -59,11 +59,7 @@ impl RequestContext {
         put_string(&mut fields, "user.id", self.logged_in_user_id.as_ref());
         put_string(&mut fields, "tenant.id", self.tenant_id.as_ref());
         put_string(&mut fields, "session.id", self.session_id.as_ref());
-        put_string(
-            &mut fields,
-            "correlation.id",
-            self.correlation_id.as_ref(),
-        );
+        put_string(&mut fields, "correlation.id", self.correlation_id.as_ref());
         put_string(
             &mut fields,
             "request.parent_id",
