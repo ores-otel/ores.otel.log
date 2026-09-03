@@ -211,6 +211,7 @@
     "test:all": "npm run test:contracts && npm test && npm run test:runtimes && npm run test:polyglot",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
     "release:check": "npm run test:contracts && npm run test:sidecar && npm run build && node --test tests/zpkg.test.mjs && npm pack ./sdk/nodejs --dry-run --json --ignore-scripts",
+    "prepare": "npm run build",
     "prepack": "npm run test:contracts && npm test",
     "lint:ores": "if [ -f .ores-lint/lint.sh ]; then sh .ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
     "prepublishOnly": "npm run lint:ores",
