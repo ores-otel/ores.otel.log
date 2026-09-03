@@ -276,7 +276,7 @@ fn observed_at_unix_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-fn panic_payload_message(payload: &(dyn Any + Send + 'static)) -> &str {
+fn panic_payload_message<'a>(payload: &'a (dyn Any + Send + 'static)) -> &'a str {
     if let Some(message) = payload.downcast_ref::<&'static str>() {
         message
     } else if let Some(message) = payload.downcast_ref::<String>() {
@@ -337,12 +337,13 @@ where
 {
     let explicit_context = request_context.clone();
     with_request_context(request_context, async move {
+        let invalid_boundary = boundary.clone();
         let boundary = match boundary.validated() {
             Ok(boundary) => boundary,
             Err(error) => {
                 let failure = RequestBoundaryFailure {
                     kind: RequestFailureKind::Exception,
-                    boundary: RequestBoundary::http("invalid-boundary", None),
+                    boundary: invalid_boundary,
                     context: current_request_context().unwrap_or(explicit_context),
                     cause: RequestBoundaryCause::InvalidBoundary(error),
                     observed_at_unix_ms: observed_at_unix_ms(),
