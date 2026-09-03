@@ -30,11 +30,26 @@ test('every context variant exposes the same API', () => {
   }
 });
 
-test('every context variant merges patches identically', () => {
+test('context variants merge an available ambient frame and otherwise fail closed', () => {
   for (const [name, mod] of VARIANTS) {
     mod.runWithLogContext({ traceId: 't1', tags: ['a'], fields: { x: 1 } }, () => {
+      const initial = mod.getLogContext();
+      if (initial === undefined) {
+        assert.equal(
+          mod.updateLogContext({ tags: ['a', 'b'], fields: { y: 2 } }),
+          false,
+          `${name} must reject mutation when no isolated ambient frame exists`,
+        );
+        assert.equal(
+          mod.setContextLoggedInUser({ id: 'u1' }),
+          false,
+          `${name} must reject user mutation when no isolated ambient frame exists`,
+        );
+        return;
+      }
+
       assert.equal(mod.updateLogContext({ tags: ['a', 'b'], fields: { y: 2 } }), true, name);
-      mod.setContextLoggedInUser({ id: 'u1' });
+      assert.equal(mod.setContextLoggedInUser({ id: 'u1' }), true, name);
 
       const ctx = mod.getLogContext();
       assert.deepEqual(ctx.tags, ['a', 'b'], `${name} should dedupe tags`);
