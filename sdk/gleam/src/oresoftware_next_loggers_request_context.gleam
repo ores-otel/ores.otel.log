@@ -169,7 +169,8 @@ pub fn current_request_id() -> Option(String) {
     Some(context) ->
       case context.routine_id {
         Some(value) -> Some(value)
-        None -> find_identity_tag(context.tags, "ores.request_id=")
+        None ->
+          find_identity_tag(list.reverse(context.tags), "ores.request_id=")
       }
     None -> None
   }
@@ -195,7 +196,7 @@ pub fn current_correlation_id() -> Option(String) {
 
 fn current_identity(prefix: String) -> Option(String) {
   case ambient.current_context() {
-    Some(context) -> find_identity_tag(context.tags, prefix)
+    Some(context) -> find_identity_tag(list.reverse(context.tags), prefix)
     None -> None
   }
 }
