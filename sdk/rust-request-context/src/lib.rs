@@ -1,8 +1,11 @@
-//! Typed request correlation over the canonical `next-loggers` execution
-//! context. This crate never creates a second thread-local or Tokio task-local.
+//! Typed request correlation over the canonical `next-loggers` poll-safe
+//! execution context. This crate never creates a second thread-local or Tokio
+//! task-local.
 
-use next_loggers::{json, JsonObject, Value};
-use next_loggers_context as ambient;
+use next_loggers::{
+    capture_log_context, current_log_context, json, with_log_context, with_log_context_async,
+    JsonObject, LogContext, Value,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 #[cfg(feature = "tokio")]
@@ -46,18 +49,14 @@ pub struct RequestContext {
 
 impl RequestContext {
     /// Project this request into the one canonical logger context carrier.
-    pub fn to_log_context(&self) -> ambient::LogContext {
+    pub fn to_log_context(&self) -> LogContext {
         let mut fields: JsonObject = Default::default();
         fields.insert(
             "request.context.schema".into(),
             Value::String(REQUEST_CONTEXT_SCHEMA.into()),
         );
         put_string(&mut fields, "request.id", Some(&self.request_id));
-        put_string(
-            &mut fields,
-            "user.id",
-            self.logged_in_user_id.as_ref(),
-        );
+        put_string(&mut fields, "user.id", self.logged_in_user_id.as_ref());
         put_string(&mut fields, "tenant.id", self.tenant_id.as_ref());
         put_string(&mut fields, "session.id", self.session_id.as_ref());
         put_string(
@@ -85,43 +84,36 @@ impl RequestContext {
             logged_in_user.insert("id".into(), Value::String(user_id.to_string()));
         }
 
-        let baggage = self
-            .baggage
-            .iter()
-            .map(|(key, value)| (key.clone(), Value::String(value.clone())))
-            .collect();
         let trace_ids = self.trace_id.iter().cloned().collect();
-
-        ambient::LogContext {
+        LogContext {
             logged_in_user,
             fields,
             trace_id: self.trace_id.clone(),
             trace_ids,
             span_id: self.span_id.clone(),
-            baggage,
+            baggage: self.baggage.clone(),
             routine_id: normalized(Some(&self.request_id)).map(str::to_string),
             tags: vec!["ores-request-context".into()],
             ..Default::default()
         }
+        .normalized()
     }
 
     /// Reconstruct a defensive request snapshot from the canonical carrier.
-    pub fn from_log_context(context: &ambient::LogContext) -> Option<Self> {
+    pub fn from_log_context(context: &LogContext) -> Option<Self> {
         let request_id = field_string(&context.fields, "request.id")?;
         let logged_in_user_id = context
             .logged_in_user
             .get("id")
             .and_then(Value::as_str)
-            .or_else(|| context.logged_in_user.get("ddUserId").and_then(Value::as_str))
+            .or_else(|| {
+                context
+                    .logged_in_user
+                    .get("ddUserId")
+                    .and_then(Value::as_str)
+            })
             .or_else(|| field_str(&context.fields, "user.id"))
             .map(str::to_string);
-        let baggage = context
-            .baggage
-            .iter()
-            .filter_map(|(key, value)| {
-                value.as_str().map(|value| (key.clone(), value.to_string()))
-            })
-            .collect();
 
         Some(Self {
             request_id,
@@ -137,7 +129,7 @@ impl RequestContext {
             locale: field_string(&context.fields, "request.locale"),
             started_at_unix_ms: field_u64(&context.fields, "request.started_at_unix_ms"),
             deadline_unix_ms: field_u64(&context.fields, "request.deadline_unix_ms"),
-            baggage,
+            baggage: context.baggage.clone(),
         })
     }
 }
@@ -153,7 +145,10 @@ fn put_string(fields: &mut JsonObject, key: &str, value: Option<&String>) {
 }
 
 fn field_str<'a>(fields: &'a JsonObject, key: &str) -> Option<&'a str> {
-    fields.get(key).and_then(Value::as_str).and_then(|value| normalized(Some(value)))
+    fields
+        .get(key)
+        .and_then(Value::as_str)
+        .and_then(|value| normalized(Some(value)))
 }
 
 fn field_string(fields: &JsonObject, key: &str) -> Option<String> {
@@ -164,63 +159,68 @@ fn field_u64(fields: &JsonObject, key: &str) -> Option<u64> {
     fields.get(key).and_then(Value::as_u64)
 }
 
-/// Return the current request snapshot from the canonical task/thread context.
+/// Return the current request snapshot from the canonical poll-local logger
+/// context. An empty/default logger frame is treated as no request.
 pub fn current_request_context() -> Option<RequestContext> {
-    ambient::current_context().and_then(|context| RequestContext::from_log_context(&context))
+    RequestContext::from_log_context(&current_log_context())
 }
 
-/// Capture a snapshot for explicit transfer to a queue, actor, or detached task.
+/// Capture a request snapshot for explicit transfer to a queue or detached task.
 pub fn capture_request_context() -> Option<RequestContext> {
     current_request_context()
 }
 
 pub fn current_request_id() -> Option<String> {
-    ambient::current_context().and_then(|context| field_string(&context.fields, "request.id"))
+    field_string(&current_log_context().fields, "request.id")
 }
 
 pub fn current_logged_in_user_id() -> Option<String> {
-    ambient::current_context().and_then(|context| {
-        context
-            .logged_in_user
-            .get("id")
-            .and_then(Value::as_str)
-            .or_else(|| context.logged_in_user.get("ddUserId").and_then(Value::as_str))
-            .or_else(|| field_str(&context.fields, "user.id"))
-            .map(str::to_string)
-    })
+    let context = current_log_context();
+    context
+        .logged_in_user
+        .get("id")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            context
+                .logged_in_user
+                .get("ddUserId")
+                .and_then(Value::as_str)
+        })
+        .or_else(|| field_str(&context.fields, "user.id"))
+        .map(str::to_string)
 }
 
 pub fn current_tenant_id() -> Option<String> {
-    ambient::current_context().and_then(|context| field_string(&context.fields, "tenant.id"))
+    field_string(&current_log_context().fields, "tenant.id")
 }
 
 pub fn current_session_id() -> Option<String> {
-    ambient::current_context().and_then(|context| field_string(&context.fields, "session.id"))
+    field_string(&current_log_context().fields, "session.id")
 }
 
 pub fn current_correlation_id() -> Option<String> {
-    ambient::current_context().and_then(|context| field_string(&context.fields, "correlation.id"))
+    field_string(&current_log_context().fields, "correlation.id")
 }
 
-/// Scope synchronous/thread-bound work through the existing RAII stack.
+/// Scope synchronous/thread-bound work through the existing logger RAII stack.
 pub fn with_thread_request_context<T>(
     request_context: RequestContext,
     callback: impl FnOnce() -> T,
 ) -> T {
-    ambient::with_thread_context(request_context.to_log_context(), callback)
+    with_log_context(request_context.to_log_context(), callback)
 }
 
-/// Scope an async future through the existing Tokio task-local carrier.
-#[cfg(feature = "tokio")]
+/// Scope an async future through the logger's poll-safe `ContextFuture`. The
+/// snapshot is installed only while this future is being polled, so interleaved
+/// Tokio tasks cannot observe one another's request data.
 pub async fn with_request_context<F>(request_context: RequestContext, future: F) -> F::Output
 where
     F: Future,
 {
-    ambient::with_task_context(request_context.to_log_context(), future).await
+    with_log_context_async(request_context.to_log_context(), future).await
 }
 
 /// Re-enter an explicitly captured request snapshot.
-#[cfg(feature = "tokio")]
 pub async fn with_captured_request_context<F>(
     request_context: Option<RequestContext>,
     future: F,
@@ -234,13 +234,14 @@ where
     }
 }
 
-/// Tokio tasks do not inherit task-local values. This helper snapshots and
-/// re-enters the one canonical next-loggers context in the spawned task.
+/// Tokio tasks do not implicitly inherit a logical request. This helper
+/// captures the complete canonical logger frame and re-enters it in the child.
 #[cfg(feature = "tokio")]
 pub fn spawn_with_current_request_context<F>(future: F) -> tokio::task::JoinHandle<F::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    ambient::spawn_with_current_context(future)
+    let captured = capture_log_context();
+    tokio::spawn(with_log_context_async(captured, future))
 }
