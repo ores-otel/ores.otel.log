@@ -13,6 +13,8 @@ import {
 export interface LogContextStorage {
   getStore(): LogContext | undefined;
   run<R>(store: LogContext, callback: () => R): R;
+  /** Temporarily clears the active frame when the runtime supports it. */
+  exit?<R>(callback: () => R): R;
 }
 
 /** Constructor shape shared by node:async_hooks and workerd's global AsyncLocalStorage. */
@@ -43,6 +45,16 @@ export class SingleFrameLogContextStorage implements LogContextStorage {
       this.current = previous;
     }
   }
+
+  exit<R>(callback: () => R): R {
+    const previous = this.current;
+    this.current = undefined;
+    try {
+      return callback();
+    } finally {
+      this.current = previous;
+    }
+  }
 }
 
 /**
@@ -56,6 +68,10 @@ export class ExplicitOnlyLogContextStorage implements LogContextStorage {
   }
 
   run<R>(_store: LogContext, callback: () => R): R {
+    return callback();
+  }
+
+  exit<R>(callback: () => R): R {
     return callback();
   }
 }
@@ -153,6 +169,15 @@ export function createLogContextApi(
       nonEmptyString(context?.loggedInUser?.ddUserId)
     );
   };
+  const runWithoutLogContext = <T>(callback: () => T): T => {
+    if (typeof logContextStorage.exit === 'function') {
+      return logContextStorage.exit(callback);
+    }
+    // A compatible runtime may expose run/getStore without exit. An empty
+    // child frame still prevents the caller's request identity from leaking
+    // into a callback whose captured snapshot was explicitly absent.
+    return logContextStorage.run({}, callback);
+  };
 
   return {
     logContextStorage,
@@ -184,7 +209,7 @@ export function createLogContextApi(
     },
     runWithCapturedLogContext: (snapshot, callback) =>
       snapshot === undefined
-        ? callback()
+        ? runWithoutLogContext(callback)
         : logContextStorage.run(cloneLogContext(snapshot), callback),
     updateLogContext: (patch) => {
       const current = logContextStorage.getStore();
