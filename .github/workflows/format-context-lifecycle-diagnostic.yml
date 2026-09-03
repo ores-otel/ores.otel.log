@@ -68,6 +68,17 @@ jobs:
             sdk/dart/test/context_shutdown.dart
           (cd sdk/gleam && gleam format src test)
 
+      - name: Report deterministic source repair diff
+        run: |
+          set -euo pipefail
+          git diff -- \
+            sdk/go \
+            sdk/rust-context \
+            sdk/rust-request-context \
+            sdk/dart \
+            sdk/gleam
+          git diff --stat
+
       - name: Validate Node request-context isolation
         run: |
           set -euo pipefail
