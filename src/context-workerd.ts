@@ -5,8 +5,25 @@ import {
   getGlobalAsyncLocalStorage,
   type LogContextStorage,
 } from './context-shared.js';
+import { createRequestBoundaryApi } from './request-boundary.js';
 
 export type { LogContext, LogContextProvider, LogContextStorage };
+export {
+  httpRequestBoundary,
+  requestFailureKinds,
+  tcpConnectionBoundary,
+  tcpMessageBoundary,
+  webSocketMessageBoundary,
+  webSocketSessionBoundary,
+} from './request-boundary.js';
+export type {
+  RequestBoundary,
+  RequestBoundaryApi,
+  RequestBoundaryFailure,
+  RequestBoundaryOptions,
+  RequestBoundaryResult,
+  RequestFailureKind,
+} from './request-boundary.js';
 
 /**
  * Workerd build. Real async isolation is available with `nodejs_als` or
@@ -19,6 +36,7 @@ export const logContextStorage: LogContextStorage = GlobalAsyncLocalStorage
   ? new GlobalAsyncLocalStorage()
   : new ExplicitOnlyLogContextStorage();
 const api = createLogContextApi(logContextStorage, Boolean(GlobalAsyncLocalStorage));
+const requestBoundaryApi = createRequestBoundaryApi(api);
 
 export const isAsyncContextTracked = api.isAsyncContextTracked;
 export const runWithLogContext = api.runWithLogContext;
@@ -35,3 +53,8 @@ export const updateLogContext = api.updateLogContext;
 export const setContextLoggedInUser = api.setContextLoggedInUser;
 export const logContextProvider = api.logContextProvider;
 export const installLogContextProvider = api.installLogContextProvider;
+/**
+ * Without native ALS, the returned failure still carries the explicit request
+ * snapshot while ambient lookups remain disabled to prevent cross-request bleed.
+ */
+export const runWithRequestBoundary = requestBoundaryApi.runWithRequestBoundary;
