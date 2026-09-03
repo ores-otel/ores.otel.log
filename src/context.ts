@@ -19,6 +19,15 @@ export const runWithLogContext = api.runWithLogContext;
 /** Runs callback with a patch merged over the active frame. */
 export const runWithMergedLogContext = api.runWithMergedLogContext;
 export const getLogContext = api.getLogContext;
+/** O(1) canonical request ID lookup from fields['request.id']. */
+export const currentLogRequestId = api.currentLogRequestId;
+/** O(1) trace ID lookup from the active logging scope. */
+export const currentLogTraceId = api.currentLogTraceId;
+/** O(1) canonical authenticated user ID lookup. */
+export const currentLogUserId = api.currentLogUserId;
+export const currentLogLoggedInUserId = api.currentLogLoggedInUserId;
+/** O(1) canonical tenant ID lookup from fields['tenant.id']. */
+export const currentLogTenantId = api.currentLogTenantId;
 /** Captures a defensive frame for queues, callbacks, and detached tasks. */
 export const captureLogContext = api.captureLogContext;
 /** Re-enters a previously captured frame. */
