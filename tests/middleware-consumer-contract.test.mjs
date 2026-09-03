@@ -8,7 +8,10 @@ test("git consumers build the canonical Node package from pinned source", async 
   const packageJson = JSON.parse(
     await readFile(new URL("package.json", root), "utf8"),
   );
-  assert.equal(packageJson.scripts.prepare, "npm run build");
+  assert.equal(
+    packageJson.scripts.prepare,
+    "tsc -p tsconfig.build.json && npm run postbuild",
+  );
   assert.equal(packageJson.name, "@oresoftware/next-loggers");
   assert.equal(packageJson.exports["./context"].default, "./dist/context.js");
 });

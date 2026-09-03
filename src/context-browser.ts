@@ -9,9 +9,10 @@ export type { LogContext, LogContextProvider, LogContextStorage };
 
 /**
  * Browser build of `@oresoftware/next-loggers/context`.
- * The fallback is safe for sequential work but cannot isolate overlapping
- * async flows. Check `isAsyncContextTracked()` before relying on request-local
- * isolation, or install an application-owned context provider.
+ * The fallback supports synchronous enrichment only. It deliberately restores
+ * the frame before an async continuation can run so overlapping operations
+ * cannot observe each other's request or user identity. Use an explicit child
+ * logger or application-owned provider after `await`.
  */
 export const logContextStorage: LogContextStorage = new SingleFrameLogContextStorage();
 const api = createLogContextApi(logContextStorage, false);
@@ -20,6 +21,11 @@ export const isAsyncContextTracked = api.isAsyncContextTracked;
 export const runWithLogContext = api.runWithLogContext;
 export const runWithMergedLogContext = api.runWithMergedLogContext;
 export const getLogContext = api.getLogContext;
+export const currentLogRequestId = api.currentLogRequestId;
+export const currentLogTraceId = api.currentLogTraceId;
+export const currentLogUserId = api.currentLogUserId;
+export const currentLogLoggedInUserId = api.currentLogLoggedInUserId;
+export const currentLogTenantId = api.currentLogTenantId;
 export const captureLogContext = api.captureLogContext;
 export const runWithCapturedLogContext = api.runWithCapturedLogContext;
 export const updateLogContext = api.updateLogContext;
