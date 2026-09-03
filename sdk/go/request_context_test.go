@@ -38,8 +38,12 @@ func TestRequestContextGettersUseCanonicalLogContext(t *testing.T) {
 	if !ok {
 		t.Fatal("expected request context")
 	}
-	if !reflect.DeepEqual(captured, value) {
-		t.Fatalf("captured context mismatch:\nwant %#v\n got %#v", value, captured)
+	// Capture normalizes the source-compatible UserID alias because the single
+	// canonical log-context value cannot know which input spelling was used.
+	expected := value
+	expected.UserID = value.LoggedInUserID
+	if !reflect.DeepEqual(captured, expected) {
+		t.Fatalf("captured context mismatch:\nwant %#v\n got %#v", expected, captured)
 	}
 
 	logContext, ok := LogContextFrom(ctx)
