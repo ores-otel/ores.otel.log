@@ -101,19 +101,22 @@ jobs:
           git diff --check
           git diff --stat
 
-      - name: Upload validated source files
+      - name: Upload validated source snapshot
         uses: actions/upload-artifact@v4
         with:
           name: context-lifecycle-repair
           if-no-files-found: error
           retention-days: 1
           path: |
+            Cargo.lock
+            Cargo.toml
             sdk/go/context_test.go
             sdk/go/request_context.go
             sdk/go/request_context_test.go
             sdk/rust-context/src/lib.rs
             sdk/rust-context/tests/context.rs
             sdk/rust-context/tests/tokio_context.rs
+            sdk/rust-request-context/Cargo.toml
             sdk/rust-request-context/src/lib.rs
             sdk/rust-request-context/tests/request_context.rs
             sdk/dart/lib/next_loggers.dart
@@ -121,3 +124,6 @@ jobs:
             sdk/dart/test/context_shutdown.dart
             sdk/gleam/src/oresoftware_next_loggers_request_context.gleam
             sdk/gleam/test/request_context_test.gleam
+
+      - name: Require committed generated and formatted sources
+        run: git diff --exit-code
