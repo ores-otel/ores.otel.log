@@ -10,9 +10,9 @@ export type { LogContext, LogContextProvider, LogContextStorage };
 
 /**
  * Workerd build. Real async isolation is available with `nodejs_als` or
- * `nodejs_compat`. Without it, ambient storage fails closed: callers must pass
- * or capture context explicitly, so overlapping requests can never share a
- * mutable global frame.
+ * `nodejs_compat`. Without either flag, ambient context is unavailable and
+ * fails closed: callers must retain an explicit request logger or pass an
+ * immutable context snapshot, so overlapping requests cannot share identity.
  */
 const GlobalAsyncLocalStorage = getGlobalAsyncLocalStorage();
 export const logContextStorage: LogContextStorage = GlobalAsyncLocalStorage
@@ -24,6 +24,11 @@ export const isAsyncContextTracked = api.isAsyncContextTracked;
 export const runWithLogContext = api.runWithLogContext;
 export const runWithMergedLogContext = api.runWithMergedLogContext;
 export const getLogContext = api.getLogContext;
+export const currentLogRequestId = api.currentLogRequestId;
+export const currentLogTraceId = api.currentLogTraceId;
+export const currentLogUserId = api.currentLogUserId;
+export const currentLogLoggedInUserId = api.currentLogLoggedInUserId;
+export const currentLogTenantId = api.currentLogTenantId;
 export const captureLogContext = api.captureLogContext;
 export const runWithCapturedLogContext = api.runWithCapturedLogContext;
 export const updateLogContext = api.updateLogContext;

@@ -18,17 +18,14 @@ export interface LogContextStorage {
 /** Constructor shape shared by node:async_hooks and workerd's global AsyncLocalStorage. */
 export type AsyncLocalStorageConstructor = new () => LogContextStorage;
 
-function isThenable(value: unknown): value is Promise<unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    typeof (value as { then?: unknown }).then === 'function'
-  );
-}
-
 /**
- * Single-frame fallback for sequential runtimes. It intentionally advertises
- * `isAsyncContextTracked() === false`; never use it for overlapping requests.
+ * Synchronous-only fallback for runtimes with no async context tracking.
+ *
+ * The frame is restored as soon as the callback returns, even if it returns a
+ * Promise. Keeping one process/global frame installed until Promise settlement
+ * would let overlapping async operations observe each other's user or request
+ * identifiers. Callers in these runtimes must use explicit child loggers or an
+ * application-owned context provider after the first async boundary.
  */
 export class SingleFrameLogContextStorage implements LogContextStorage {
   private current: LogContext | undefined;
@@ -40,25 +37,16 @@ export class SingleFrameLogContextStorage implements LogContextStorage {
   run<R>(store: LogContext, callback: () => R): R {
     const previous = this.current;
     this.current = store;
-    let result: R;
     try {
-      result = callback();
-    } catch (error) {
+      return callback();
+    } finally {
       this.current = previous;
-      throw error;
     }
-    if (isThenable(result)) {
-      return (result as Promise<unknown>).finally(() => {
-        this.current = previous;
-      }) as R;
-    }
-    this.current = previous;
-    return result;
   }
 }
 
 /**
- * Fail-closed storage for concurrent server isolates without a real async
+ * Fail-closed storage for concurrent server isolates without a native async
  * context primitive. Explicit context parameters still work; ambient getters
  * deliberately return `undefined` rather than risk cross-request data bleed.
  */
@@ -124,12 +112,25 @@ export function mergeLogContext(current: LogContext, patch: LogContext): void {
   }
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function contextField(context: LogContext | undefined, key: string): string | undefined {
+  return nonEmptyString(context?.fields?.[key]);
+}
+
 export interface LogContextApi {
   logContextStorage: LogContextStorage;
   isAsyncContextTracked(): boolean;
   runWithLogContext<T>(context: LogContext, callback: () => T): T;
   runWithMergedLogContext<T>(patch: LogContext, callback: () => T): T;
   getLogContext(): LogContext | undefined;
+  currentLogRequestId(): string | undefined;
+  currentLogTraceId(): string | undefined;
+  currentLogUserId(): string | undefined;
+  currentLogLoggedInUserId(): string | undefined;
+  currentLogTenantId(): string | undefined;
   /** Copies the current frame so it can be re-entered in detached work. */
   captureLogContext(): LogContext | undefined;
   runWithCapturedLogContext<T>(snapshot: LogContext | undefined, callback: () => T): T;
@@ -144,6 +145,14 @@ export function createLogContextApi(
   asyncTracked: boolean,
 ): LogContextApi {
   const logContextProvider: LogContextProvider = () => logContextStorage.getStore();
+  const currentLogUserId = (): string | undefined => {
+    const context = logContextStorage.getStore();
+    return (
+      nonEmptyString(context?.loggedInUser?.id) ??
+      contextField(context, 'user.id') ??
+      nonEmptyString(context?.loggedInUser?.ddUserId)
+    );
+  };
 
   return {
     logContextStorage,
@@ -159,6 +168,16 @@ export function createLogContextApi(
       return logContextStorage.run(next, callback);
     },
     getLogContext: () => logContextStorage.getStore(),
+    currentLogRequestId: () =>
+      contextField(logContextStorage.getStore(), 'request.id'),
+    currentLogTraceId: () => {
+      const context = logContextStorage.getStore();
+      return nonEmptyString(context?.traceId) ?? contextField(context, 'trace.id');
+    },
+    currentLogUserId,
+    currentLogLoggedInUserId: currentLogUserId,
+    currentLogTenantId: () =>
+      contextField(logContextStorage.getStore(), 'tenant.id'),
     captureLogContext: () => {
       const current = logContextStorage.getStore();
       return current === undefined ? undefined : cloneLogContext(current);
