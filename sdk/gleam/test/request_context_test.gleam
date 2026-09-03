@@ -59,7 +59,7 @@ pub fn nested_context_uses_one_ambient_carrier_test() {
   request_context.with_context(example("request-parent"), fn() {
     request_context.with_context(
       request_context.new("request-child")
-      |> request_context.with_session_id("session-child"),
+        |> request_context.with_session_id("session-child"),
       fn() {
         request_context.current_request_id()
         |> should.equal(Some("request-child"))
