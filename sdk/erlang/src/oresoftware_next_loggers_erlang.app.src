@@ -1,7 +1,7 @@
 {application, oresoftware_next_loggers_erlang,
  [{description, "Erlang implementation of the next-loggers/v1 structured logging contract"},
   {vsn, "0.1.0"},
-  {modules, [next_loggers]},
+  {modules, [next_loggers, next_loggers_request_context]},
   {registered, []},
   {applications, [kernel, stdlib]},
   {env, []},
