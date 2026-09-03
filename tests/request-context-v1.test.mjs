@@ -110,6 +110,32 @@ test('captured contexts explicitly cross detached task and queue boundaries', as
   });
 });
 
+test('captured absence clears an invoking request and restores it afterward', async () => {
+  const noContext = captureExecutionLogContext();
+  assert.equal(noContext, undefined);
+
+  await runWithExecutionLogContext(
+    { requestId: 'request-invoker', loggedInUserId: 'user-invoker' },
+    async () => {
+      assert.equal(getRequestId(), 'request-invoker');
+      assert.equal(getLoggedInUserId(), 'user-invoker');
+
+      await runWithCapturedExecutionLogContext(noContext, async () => {
+        await turn();
+        assert.equal(getRequestId(), undefined);
+        assert.equal(getLoggedInUserId(), undefined);
+        assert.equal(getExecutionLogContext(), undefined);
+      });
+
+      assert.equal(getRequestId(), 'request-invoker');
+      assert.equal(getLoggedInUserId(), 'user-invoker');
+    },
+  );
+
+  assert.equal(getRequestId(), undefined);
+  assert.equal(getLoggedInUserId(), undefined);
+});
+
 test('read snapshots cannot mutate the active request context', () => {
   runWithExecutionLogContext(
     {
