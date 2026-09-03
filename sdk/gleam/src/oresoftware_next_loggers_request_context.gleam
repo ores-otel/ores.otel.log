@@ -87,11 +87,7 @@ pub fn to_log_context(context: RequestContext) -> ambient.LogContext {
   let fields =
     add_string_field(fields, "correlation.id", context.correlation_id)
   let fields =
-    add_string_field(
-      fields,
-      "request.parent_id",
-      context.parent_request_id,
-    )
+    add_string_field(fields, "request.parent_id", context.parent_request_id)
   let fields = add_string_field(fields, "operation.name", context.operation)
   let fields = add_string_field(fields, "service.name", context.service_name)
   let fields = add_string_field(fields, "request.locale", context.locale)
@@ -102,11 +98,7 @@ pub fn to_log_context(context: RequestContext) -> ambient.LogContext {
       context.started_at_unix_ms,
     )
   let fields =
-    add_int_field(
-      fields,
-      "request.deadline_unix_ms",
-      context.deadline_unix_ms,
-    )
+    add_int_field(fields, "request.deadline_unix_ms", context.deadline_unix_ms)
   let logged_in_user = case context.logged_in_user_id {
     Some(value) -> Some([#("id", json.string(value))])
     None -> None
@@ -177,9 +169,7 @@ pub fn current_request_id() -> Option(String) {
 }
 
 pub fn current_logged_in_user_id() -> Option(String) {
-  current_identity(
-    "ores.logged_in_user_id=",
-  )
+  current_identity("ores.logged_in_user_id=")
 }
 
 pub fn current_tenant_id() -> Option(String) {
@@ -207,18 +197,10 @@ fn identity_tags(context: RequestContext) -> List(String) {
     "ores.request_id=" <> context.request_id,
   ]
   let tags =
-    add_identity_tag(
-      tags,
-      "ores.logged_in_user_id=",
-      context.logged_in_user_id,
-    )
+    add_identity_tag(tags, "ores.logged_in_user_id=", context.logged_in_user_id)
   let tags = add_identity_tag(tags, "ores.tenant_id=", context.tenant_id)
   let tags = add_identity_tag(tags, "ores.session_id=", context.session_id)
-  add_identity_tag(
-    tags,
-    "ores.correlation_id=",
-    context.correlation_id,
-  )
+  add_identity_tag(tags, "ores.correlation_id=", context.correlation_id)
 }
 
 fn add_identity_tag(
