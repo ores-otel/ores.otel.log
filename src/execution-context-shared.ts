@@ -300,9 +300,10 @@ export function createExecutionContextApi(contextApi: LogContextApi): ExecutionC
     getExecutionLogContext,
     captureExecutionLogContext: getExecutionLogContext,
     runWithCapturedExecutionLogContext: (snapshot, callback) =>
-      snapshot === undefined
-        ? callback()
-        : contextApi.runWithCapturedLogContext(toStoredContext(snapshot), callback),
+      contextApi.runWithCapturedLogContext(
+        snapshot === undefined ? undefined : toStoredContext(snapshot),
+        callback,
+      ),
     getRequestId: () => normalizedString(getRaw()?.requestId),
     getLoggedInUserId: () => loggedInUserIdFromContext(getRaw()),
     getTenantId: () => normalizedString(getRaw()?.tenantId),
