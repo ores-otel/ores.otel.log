@@ -15,12 +15,11 @@ export {
 
 const api = createExecutionContextApi(baseContext);
 export const runWithExecutionLogContext = api.runWithExecutionLogContext;
+export const runWithExecutionLoggedInUser = api.runWithExecutionLoggedInUser;
 export const getExecutionLogContext = api.getExecutionLogContext;
 export const captureExecutionLogContext = api.captureExecutionLogContext;
 export const runWithCapturedExecutionLogContext =
   api.runWithCapturedExecutionLogContext;
-export const updateExecutionLogContext = api.updateExecutionLogContext;
-export const setExecutionLoggedInUser = api.setExecutionLoggedInUser;
 export const getRequestId = api.getRequestId;
 export const getLoggedInUserId = api.getLoggedInUserId;
 export const getTenantId = api.getTenantId;
