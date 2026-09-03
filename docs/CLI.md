@@ -1,6 +1,6 @@
 # next-loggers CLI and flags-2-env contract
 
-The `next-loggers` executable exposes runtime diagnostics, package-resolution checks, log formatting, and a release-package catalog. Every option has an equivalent `NEXT_LOGGER_*` environment variable declared in the repository-root [`.cli-flags.toml`](../.cli-flags.toml).
+The `next-loggers` executable exposes runtime diagnostics, missing-send scanning, package-resolution checks, log formatting, and a release-package catalog. Every option has an equivalent `NEXT_LOGGER_*` environment variable declared in the repository-root [`.cli-flags.toml`](../.cli-flags.toml).
 
 The TypeScript CLI remains dependency-free at runtime: [`src/cli/spec.ts`](../src/cli/spec.ts) is the executable parser specification, while `.cli-flags.toml` is the portable flags-2-env contract used for generated help, shell completion, documentation, and cross-language tooling. CI checks the two in both directions, including command descriptions and flag descriptions, and also audits the TOML with a pinned canonical `flags-2-env` CLI build.
 
@@ -13,9 +13,48 @@ The TypeScript CLI remains dependency-free at runtime: [`src/cli/spec.ts`](../sr
 | `resolve` | Resolve the package export map for Node, Bun, Deno, browsers, edge-light, and workerd conditions. |
 | `pretty` | Render or filter `next-loggers/v1` NDJSON from standard input. |
 | `packages` | List every independently publishable Zed/native package, render its immutable tag, and optionally detect release-metadata drift. |
+| `lint` | Report next-loggers event chains that are built as bare expressions but never terminated with the language's send operation. |
 | `flags` | Print the command/flag/environment contract or compare `.cli-flags.toml` with the compiled specification. |
 
 Run `next-loggers --help` or `next-loggers <command> --help` for the complete generated option table.
+
+## Missing-send diagnostics
+
+`next-loggers lint [paths...]` scans supported source files for a conservative, transport-neutral failure mode: a next-loggers event is built as a bare expression and then dropped before its terminal send operation. Every finding uses stable diagnostic code `NL100`.
+
+```sh
+# Scan one or more source trees. The current directory is the default.
+next-loggers lint src services
+
+# Include an application-specific logger variable or property path.
+next-loggers lint --logger-name audit --logger-name request.log src
+
+# Scan supported files even when they do not import next-loggers, and emit one
+# machine-readable receipt.
+next-loggers lint --all --json .
+```
+
+The dependency-free scanner recognizes JavaScript and TypeScript (`.js`, `.mjs`, `.cjs`, `.jsx`, `.ts`, `.mts`, `.cts`, `.tsx`), Go (`.go`), Rust (`.rs`), Python (`.py`), and Gleam (`.gleam`). It understands the language-specific terminal forms used by the shipped SDKs, including `send()`/`sendWithStore()`, Go `Send()`/`SendWithStore()`, Rust/Python `send_with_store()`, and Gleam pipeline sends.
+
+By default, a file must contain a recognizable next-loggers import/use marker. `--all` disables that gate. Repeatable `--logger-name` values both disable the gate and add variable or property paths to the common `log`, `logger`, and `ddlog` names. JavaScript/TypeScript factory aliases and imported logger aliases are discovered without evaluating source code.
+
+The rule intentionally reports only dropped bare expression statements. Assigned, returned, awaited, argument-position, or otherwise nested events are not reported because this scanner does not attempt cross-statement data-flow analysis. Comments and string bodies are blanked while preserving offsets; Python triple-quoted strings and Rust raw strings are included in that lexical protection. Hidden directories, dependency trees, generated build trees, and symbolic links are skipped during directory walks.
+
+Exit status is `0` when no findings exist, `1` when at least one `NL100` finding exists, and `2` for invalid CLI input or an unreadable requested path. JSON mode emits exactly one `next-loggers/lint/v1` object containing `passed`, `filesChecked`, and `findings`.
+
+The command-specific environment equivalents are:
+
+| Option | Environment variable | Type |
+| --- | --- | --- |
+| `--logger-name` | `NEXT_LOGGER_CLI_LINT_LOGGER_NAMES` | repeatable JSON array |
+| `--all` | `NEXT_LOGGER_CLI_LINT_ALL` | boolean |
+| `--json` | `NEXT_LOGGER_CLI_JSON` | boolean |
+
+```sh
+NEXT_LOGGER_CLI_LINT_LOGGER_NAMES='["audit","request.log"]' \
+NEXT_LOGGER_CLI_JSON=true \
+next-loggers lint src
+```
 
 ## Release-package catalog
 
