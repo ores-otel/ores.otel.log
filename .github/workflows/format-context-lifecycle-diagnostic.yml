@@ -27,16 +27,26 @@ jobs:
         with:
           sdk: stable
 
+      - name: Install Gleam and Erlang
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: '28'
+          gleam-version: '1.17.0'
+
       - name: Apply deterministic source repairs
         run: |
           set -euo pipefail
           python3 tools/build_context_lifecycle_repair.py
-          gofmt -w sdk/go/context_test.go
+          gofmt -w \
+            sdk/go/context_test.go \
+            sdk/go/request_context.go \
+            sdk/go/request_context_test.go
           cargo fmt --manifest-path sdk/rust-context/Cargo.toml
           dart format \
             sdk/dart/lib/next_loggers.dart \
             sdk/dart/lib/shutdown.dart \
             sdk/dart/test/context_shutdown.dart
+          (cd sdk/gleam && gleam format src test)
 
       - name: Validate repaired runtimes
         run: |
@@ -50,6 +60,11 @@ jobs:
             dart analyze
             dart run test/context_shutdown.dart
           )
+          (
+            cd sdk/gleam
+            gleam format --check src test
+            gleam test
+          )
           git diff --check
           git diff --stat
 
@@ -61,9 +76,13 @@ jobs:
           retention-days: 1
           path: |
             sdk/go/context_test.go
+            sdk/go/request_context.go
+            sdk/go/request_context_test.go
             sdk/rust-context/src/lib.rs
             sdk/rust-context/tests/context.rs
             sdk/rust-context/tests/tokio_context.rs
             sdk/dart/lib/next_loggers.dart
             sdk/dart/lib/shutdown.dart
             sdk/dart/test/context_shutdown.dart
+            sdk/gleam/src/oresoftware_next_loggers_request_context.gleam
+            sdk/gleam/test/request_context_test.gleam
