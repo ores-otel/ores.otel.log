@@ -2,10 +2,16 @@ defmodule ORESoftware.NextLoggers do
   @moduledoc """
   Compatibility facade for the direct-record Elixir API. Context is process
   local and OTEL is an explicit tagged transport, never a global provider.
+
+  Middleware that spans the remainder of a Plug/Phoenix pipeline may install a
+  process-local context with `put_context/1` and restore its exact prior value
+  with `restore_context/1`. Prefer `with_context/2` whenever callback scoping is
+  possible.
   """
 
   @schema "next-loggers/v1"
   @context_key {__MODULE__, :context}
+  @missing_context {__MODULE__, :missing_context}
 
   def schema, do: @schema
 
@@ -30,17 +36,44 @@ defmodule ORESoftware.NextLoggers do
 
   def current_context, do: Process.get(@context_key, %{})
 
-  def with_context(context, callback) when is_map(context) and is_function(callback, 0) do
-    previous = Process.get(@context_key, :__missing__)
+  @doc """
+  Installs a process-local logging context and returns an opaque restore token.
+
+  This lower-level primitive exists for middleware APIs such as `Plug.call/2`
+  that cannot wrap the rest of the request pipeline in a callback. Callers must
+  restore the token in an `after` or before-send cleanup path.
+  """
+  def put_context(context) when is_map(context) do
+    previous = Process.get(@context_key, @missing_context)
     Process.put(@context_key, context)
+    previous
+  end
+
+  @doc "Clears the process-local logging context and returns a restore token."
+  def clear_context do
+    previous = Process.get(@context_key, @missing_context)
+    Process.delete(@context_key)
+    previous
+  end
+
+  @doc "Restores a token returned by `put_context/1` or `clear_context/0`."
+  def restore_context(@missing_context) do
+    Process.delete(@context_key)
+    :ok
+  end
+
+  def restore_context(context) when is_map(context) do
+    Process.put(@context_key, context)
+    :ok
+  end
+
+  def with_context(context, callback) when is_map(context) and is_function(callback, 0) do
+    previous = put_context(context)
 
     try do
       callback.()
     after
-      case previous do
-        :__missing__ -> Process.delete(@context_key)
-        value -> Process.put(@context_key, value)
-      end
+      restore_context(previous)
     end
   end
 
