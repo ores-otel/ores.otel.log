@@ -201,6 +201,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && npm run postbuild && npm run stage:nodejs",
     "postbuild": "node -e \"require('node:fs').chmodSync('dist/cli/main.js', 0o755)\"",
+    "prepare": "tsc -p tsconfig.build.json && npm run postbuild",
     "typecheck": "tsc -p tsconfig.json --noEmit && npm run build && tsc -p tests/tsconfig.json",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:contracts": "node scripts/validate-contracts.mjs && node scripts/test-observability-contracts.mjs",

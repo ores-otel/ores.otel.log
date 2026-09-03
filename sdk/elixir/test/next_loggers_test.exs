@@ -44,6 +44,23 @@ defmodule ORESoftware.NextLoggersTest do
     assert NextLoggers.current_context() == %{}
   end
 
+  test "persistent middleware context restores the exact prior process value" do
+    outer = %{trace_id: "outer", fields: %{"request.id" => "request-outer"}}
+    inner = %{trace_id: "inner", fields: %{"request.id" => "request-inner"}}
+
+    missing = NextLoggers.put_context(outer)
+    assert NextLoggers.current_context() == outer
+
+    previous = NextLoggers.put_context(inner)
+    assert NextLoggers.current_context() == inner
+
+    assert :ok == NextLoggers.restore_context(previous)
+    assert NextLoggers.current_context() == outer
+
+    assert :ok == NextLoggers.restore_context(missing)
+    assert NextLoggers.current_context() == %{}
+  end
+
   test "concurrent tasks keep process-local trace context isolated" do
     logger = NextLoggers.new("app", transports: [])
 
