@@ -212,7 +212,7 @@ test('record shape is consistent across every runtime logger', async () => {
   }
 });
 
-test('browser fallback restores frames around sync, async, and throwing callbacks', async () => {
+test('browser fallback restores frames around synchronous, fail-closed async, and throwing callbacks', async () => {
   const browserContext = await import('../dist/context-browser.js');
 
   const syncResult = browserContext.runWithLogContext({ traceId: 'sync' }, () => {
@@ -222,12 +222,19 @@ test('browser fallback restores frames around sync, async, and throwing callback
   assert.equal(syncResult, 'done');
   assert.equal(browserContext.getLogContext(), undefined);
 
-  await browserContext.runWithLogContext({ traceId: 'async' }, async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+  const asynchronous = browserContext.runWithLogContext({ traceId: 'async' }, async () => {
     assert.equal(browserContext.getLogContext().traceId, 'async');
-    assert.equal(browserContext.updateLogContext({ fields: { late: true } }), true);
-    assert.equal(browserContext.getLogContext().fields.late, true);
+    assert.equal(browserContext.updateLogContext({ fields: { beforeAwait: true } }), true);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.equal(browserContext.getLogContext(), undefined);
+    assert.equal(browserContext.updateLogContext({ fields: { late: true } }), false);
   });
+  assert.equal(
+    browserContext.getLogContext(),
+    undefined,
+    'the single global frame must be restored immediately when the callback returns a Promise',
+  );
+  await asynchronous;
   assert.equal(browserContext.getLogContext(), undefined);
 
   assert.throws(() =>
