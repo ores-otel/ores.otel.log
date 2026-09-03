@@ -1,15 +1,5 @@
 /**
  * `next-loggers lint` — dependency-free, polyglot missing-send diagnostics.
- *
- * A chainable next-loggers event reaches transports only after its terminal
- * send call. This scanner reports bare expression statements that construct
- * an event and then drop it. Assigned, returned, awaited, or argument-position
- * events remain out of scope because another call site may complete them.
- *
- * The scanner intentionally remains conservative. It first requires a
- * next-loggers import/use marker unless `--all` or `--logger-name` is supplied,
- * blanks comments and string bodies while preserving source offsets, groups
- * multi-line chains into one statement, and emits the stable diagnostic NL100.
  */
 
 import type { CommandContext, CommandResult } from '../context.js';
@@ -63,6 +53,10 @@ const SKIP_DIRECTORIES = new Set([
   'deps',
 ]);
 
+function assertNever(value: never): never {
+  throw new Error(`unsupported next-loggers lint language: ${String(value)}`);
+}
+
 function blankRange(characters: string[], start: number, end: number): void {
   for (let index = start; index < end && index < characters.length; index += 1) {
     if (characters[index] !== '\n' && characters[index] !== '\r') {
@@ -86,7 +80,7 @@ function quotedEnd(source: string, start: number, delimiter: string): number {
   return source.length;
 }
 
-function rustRawString(source: string, start: number): { delimiter: string; end: number } | undefined {
+function rustRawStringEnd(source: string, start: number): number | undefined {
   const match = /^r(#{0,16})"/.exec(source.slice(start));
   if (!match) {
     return undefined;
@@ -95,16 +89,14 @@ function rustRawString(source: string, start: number): { delimiter: string; end:
   const openingLength = 2 + hashes.length;
   const closing = `"${hashes}`;
   const closeAt = source.indexOf(closing, start + openingLength);
-  return {
-    delimiter: source.slice(start, start + openingLength),
-    end: closeAt === -1 ? source.length : closeAt + closing.length,
-  };
+  return closeAt === -1 ? source.length : closeAt + closing.length;
 }
 
 /**
  * Blanks comments and optionally string bodies while preserving code-unit
- * offsets, line breaks, and therefore diagnostics. Keeping strings is useful
- * while discovering import aliases; blanking them is required for call scans.
+ * offsets, line breaks, and therefore diagnostic positions. Keeping strings
+ * is useful while discovering JavaScript imports and Go module paths; blanking
+ * them is required while scanning for event calls.
  */
 function blankLexical(source: string, language: Language, strings: boolean): string {
   const characters = source.split('');
@@ -129,12 +121,12 @@ function blankLexical(source: string, language: Language, strings: boolean): str
     }
 
     if (language === 'rust') {
-      const raw = rustRawString(source, index);
-      if (raw) {
+      const rawEnd = rustRawStringEnd(source, index);
+      if (rawEnd !== undefined) {
         if (strings) {
-          blankRange(characters, index, raw.end);
+          blankRange(characters, index, rawEnd);
         }
-        index = raw.end;
+        index = rawEnd;
         continue;
       }
     }
@@ -173,25 +165,36 @@ export function blankNonCode(source: string, language: Language): string {
   return blankLexical(source, language, true);
 }
 
-function referencesNextLoggers(commentFreeSource: string, language: Language): boolean {
+function referencesNextLoggers(
+  commentFreeSource: string,
+  code: string,
+  language: Language,
+): boolean {
   switch (language) {
     case 'javascript':
     case 'typescript':
-      return /(?:from\s*|import\s*\(|require\s*\()\s*['"][^'"]*(?:@oresoftware\/next-loggers|next-loggers)[^'"]*['"]/.test(
+      return /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*)['"][^'"]*(?:@oresoftware\/next-loggers|next-loggers)[^'"]*['"]/.test(
         commentFreeSource,
       );
-    case 'go':
-      return /['"][^'"]*(?:next-loggers|ores\.otel\.log)\/sdk\/go['"]/.test(commentFreeSource);
+    case 'go': {
+      const modulePath = `[^'"]*(?:next-loggers|ores\\.otel\\.log)\/sdk\/go`;
+      return (
+        new RegExp(`\\bimport\\s+(?:[A-Za-z_][\\w]*\\s+)?['"]${modulePath}['"]`).test(
+          commentFreeSource,
+        ) ||
+        new RegExp(`\\bimport\\s*\\([\\s\\S]*?['"]${modulePath}['"][\\s\\S]*?\\)`).test(
+          commentFreeSource,
+        )
+      );
+    }
     case 'rust':
-      return /\b(?:use|extern\s+crate)\s+[^;\n]*(?:next_loggers|oresoftware_next_loggers)/.test(
-        commentFreeSource,
-      );
+      return /\b(?:use|extern\s+crate)\s+[^;\n]*(?:next_loggers|oresoftware_next_loggers)/.test(code);
     case 'python':
-      return /\b(?:from|import)\s+(?:next_loggers|oresoftware_next_loggers)\b/.test(
-        commentFreeSource,
-      );
+      return /\b(?:from|import)\s+(?:next_loggers|oresoftware_next_loggers)\b/.test(code);
     case 'gleam':
-      return /\bimport\s+[^\s]*(?:next_loggers|oresoftware_next_loggers)/.test(commentFreeSource);
+      return /\bimport\s+[^\s]*(?:next_loggers|oresoftware_next_loggers)/.test(code);
+    default:
+      return assertNever(language);
   }
 }
 
@@ -224,9 +227,24 @@ function discoverLoggerNames(
         const parts = entry.trim().split(/\s+as\s+/);
         const imported = parts[0]?.trim();
         const local = (parts[1] ?? parts[0])?.trim();
-        if (imported && local && factories.has(imported)) {
+        if (!imported || !local) {
+          continue;
+        }
+        if (factories.has(imported)) {
           factories.add(local);
         }
+        if (imported === 'logger' || imported === 'log') {
+          names.add(local);
+        }
+      }
+    }
+
+    for (const match of commentFreeSource.matchAll(
+      /import\s+([A-Za-z_$][\w$]*)\s+from\s*['"][^'"]*next-loggers[^'"]*['"]/g,
+    )) {
+      const local = match[1];
+      if (local) {
+        names.add(local);
       }
     }
   }
@@ -252,7 +270,7 @@ function discoverLoggerNames(
   }
 
   if (language === 'gleam') {
-    for (const match of commentFreeSource.matchAll(
+    for (const match of code.matchAll(
       /import\s+[\w/]*next_loggers\S*\s+as\s+([a-z_][\w]*)/g,
     )) {
       const name = match[1];
@@ -290,6 +308,8 @@ function sendPattern(language: Language): RegExp {
     case 'rust':
     case 'python':
       return /\.(?:send|send_with_store|sendWithStore)\s*\(/;
+    default:
+      return assertNever(language);
   }
 }
 
@@ -348,14 +368,14 @@ export function checkSource(
   const file = options.file ?? '<source>';
   const extra = options.loggerNames ?? [];
   const commentFreeSource = blankLexical(source, language, false);
+  const code = blankNonCode(source, language);
 
   if ((options.requireImport ?? true) && extra.length === 0) {
-    if (!referencesNextLoggers(commentFreeSource, language)) {
+    if (!referencesNextLoggers(commentFreeSource, code, language)) {
       return [];
     }
   }
 
-  const code = blankNonCode(source, language);
   const names = discoverLoggerNames(code, commentFreeSource, language, extra);
   const level = levelPattern(names, language);
   const send = sendPattern(language);
@@ -372,7 +392,7 @@ export function checkSource(
     }
 
     // Reject a match whose logger began on a continuation from the prior line.
-    if (/[,([=+&|:?]$|\|>$|->$|=>$|\.$/.test(previousLine(code, lineStart))) {
+    if (/(?:[,([=+&|:?]|\|>|->|=>|\.)$/.test(previousLine(code, lineStart))) {
       continue;
     }
 
