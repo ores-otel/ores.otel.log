@@ -16,21 +16,21 @@ const RequestContextSchema = "ores.request-context.v1"
 // UserID remains as a source-compatible alias for older middleware callers.
 // New code should use LoggedInUserID.
 type RequestContext struct {
-	RequestID        string            `json:"requestId"`
-	LoggedInUserID   string            `json:"loggedInUserId,omitempty"`
-	UserID           string            `json:"userId,omitempty"`
-	TenantID         string            `json:"tenantId,omitempty"`
-	SessionID        string            `json:"sessionId,omitempty"`
-	CorrelationID    string            `json:"correlationId,omitempty"`
-	ParentRequestID  string            `json:"parentRequestId,omitempty"`
-	TraceID          string            `json:"traceId,omitempty"`
-	SpanID           string            `json:"spanId,omitempty"`
-	Operation        string            `json:"operation,omitempty"`
-	ServiceName      string            `json:"serviceName,omitempty"`
-	Locale           string            `json:"locale,omitempty"`
-	StartedAtUnixMS  int64             `json:"startedAtUnixMs,omitempty"`
-	DeadlineUnixMS   int64             `json:"deadlineUnixMs,omitempty"`
-	Baggage          map[string]string `json:"baggage,omitempty"`
+	RequestID       string            `json:"requestId"`
+	LoggedInUserID  string            `json:"loggedInUserId,omitempty"`
+	UserID          string            `json:"userId,omitempty"`
+	TenantID        string            `json:"tenantId,omitempty"`
+	SessionID       string            `json:"sessionId,omitempty"`
+	CorrelationID   string            `json:"correlationId,omitempty"`
+	ParentRequestID string            `json:"parentRequestId,omitempty"`
+	TraceID         string            `json:"traceId,omitempty"`
+	SpanID          string            `json:"spanId,omitempty"`
+	Operation       string            `json:"operation,omitempty"`
+	ServiceName     string            `json:"serviceName,omitempty"`
+	Locale          string            `json:"locale,omitempty"`
+	StartedAtUnixMS int64             `json:"startedAtUnixMs,omitempty"`
+	DeadlineUnixMS  int64             `json:"deadlineUnixMs,omitempty"`
+	Baggage         map[string]string `json:"baggage,omitempty"`
 }
 
 // EffectiveLoggedInUserID normalizes the preferred field and its legacy alias.
@@ -58,7 +58,7 @@ func requestContextFields(value RequestContext) map[string]any {
 		fields["request.started_at_unix_ms"] = value.StartedAtUnixMS
 	}
 	if value.DeadlineUnixMS > 0 {
-		fields["request.deadline_unix_ms"] = value.DeadlineUnixMS
+		fields["request.deadline_at_unix_ms"] = value.DeadlineUnixMS
 	}
 	return fields
 }
@@ -123,7 +123,7 @@ func RequestContextFrom(ctx context.Context) (RequestContext, bool) {
 		ServiceName:     stringField(logContext.Fields, "service.name"),
 		Locale:          stringField(logContext.Fields, "request.locale"),
 		StartedAtUnixMS: int64Field(logContext.Fields, "request.started_at_unix_ms"),
-		DeadlineUnixMS:  int64Field(logContext.Fields, "request.deadline_unix_ms"),
+		DeadlineUnixMS:  int64Field(logContext.Fields, "request.deadline_at_unix_ms"),
 		Baggage:         cloneStringMap(logContext.Baggage),
 	}
 	return value, requestID != ""
