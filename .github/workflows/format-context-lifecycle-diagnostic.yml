@@ -8,7 +8,7 @@ permissions:
 jobs:
   format:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
 
@@ -18,25 +18,38 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install Go
         uses: actions/setup-go@v5
         with:
           go-version-file: sdk/go/go.mod
 
-      - name: Install Rust formatter
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Rust formatter and WASM target
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+          targets: wasm32-unknown-unknown
 
       - name: Install Dart
         uses: dart-lang/setup-dart@v1
         with:
           sdk: stable
 
-      - name: Install Gleam and Erlang
+      - name: Install Gleam, Elixir, and Erlang
         uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
         with:
           otp-version: '28'
+          elixir-version: '1.19.0'
           gleam-version: '1.17.0'
 
       - name: Apply deterministic source repairs
@@ -48,6 +61,7 @@ jobs:
             sdk/go/request_context.go \
             sdk/go/request_context_test.go
           cargo fmt --manifest-path sdk/rust-context/Cargo.toml
+          cargo fmt --manifest-path sdk/rust-request-context/Cargo.toml
           dart format \
             sdk/dart/lib/next_loggers.dart \
             sdk/dart/lib/shutdown.dart \
@@ -61,12 +75,18 @@ jobs:
           npm run typecheck
           npm test
 
-      - name: Validate repaired native runtimes
+      - name: Validate complete polyglot SDK matrix
+        run: |
+          set -euo pipefail
+          npm run test:polyglot
+
+      - name: Validate focused repaired runtimes
         run: |
           set -euo pipefail
           (cd sdk/go && go test ./...)
           cargo test --manifest-path sdk/rust-context/Cargo.toml
           cargo test --manifest-path sdk/rust-context/Cargo.toml --features tokio
+          cargo test --manifest-path sdk/rust-request-context/Cargo.toml
           (
             cd sdk/dart
             dart pub get
@@ -94,6 +114,8 @@ jobs:
             sdk/rust-context/src/lib.rs
             sdk/rust-context/tests/context.rs
             sdk/rust-context/tests/tokio_context.rs
+            sdk/rust-request-context/src/lib.rs
+            sdk/rust-request-context/tests/request_context.rs
             sdk/dart/lib/next_loggers.dart
             sdk/dart/lib/shutdown.dart
             sdk/dart/test/context_shutdown.dart
