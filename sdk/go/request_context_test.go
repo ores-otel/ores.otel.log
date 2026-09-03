@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -37,7 +38,7 @@ func TestRequestContextGettersUseCanonicalLogContext(t *testing.T) {
 	if !ok {
 		t.Fatal("expected request context")
 	}
-	if captured != value {
+	if !reflect.DeepEqual(captured, value) {
 		t.Fatalf("captured context mismatch:\nwant %#v\n got %#v", value, captured)
 	}
 
@@ -83,8 +84,8 @@ func TestRequestContextConcurrentGoroutinesRequireExplicitContext(t *testing.T) 
 			requestID := fmt.Sprintf("request-%d", index)
 			userID := fmt.Sprintf("user-%d", index)
 			ctx := WithRequestContext(context.Background(), RequestContext{
-				RequestID:       requestID,
-				LoggedInUserID:  userID,
+				RequestID:      requestID,
+				LoggedInUserID: userID,
 			})
 			gotRequestID, _ := RequestIDFrom(ctx)
 			gotUserID, _ := LoggedInUserIDFrom(ctx)
