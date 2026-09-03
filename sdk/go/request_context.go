@@ -58,7 +58,7 @@ func requestContextFields(value RequestContext) map[string]any {
 		fields["request.started_at_unix_ms"] = value.StartedAtUnixMS
 	}
 	if value.DeadlineUnixMS > 0 {
-		fields["request.deadline_at_unix_ms"] = value.DeadlineUnixMS
+		fields["request.deadline_unix_ms"] = value.DeadlineUnixMS
 	}
 	return fields
 }
@@ -123,7 +123,7 @@ func RequestContextFrom(ctx context.Context) (RequestContext, bool) {
 		ServiceName:     stringField(logContext.Fields, "service.name"),
 		Locale:          stringField(logContext.Fields, "request.locale"),
 		StartedAtUnixMS: int64Field(logContext.Fields, "request.started_at_unix_ms"),
-		DeadlineUnixMS:  int64Field(logContext.Fields, "request.deadline_at_unix_ms"),
+		DeadlineUnixMS:  int64Field(logContext.Fields, "request.deadline_unix_ms"),
 		Baggage:         cloneStringMap(logContext.Baggage),
 	}
 	return value, requestID != ""
