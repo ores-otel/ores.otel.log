@@ -133,6 +133,16 @@ export function mergeExecutionLogContexts(
   for (const tag of current.tags ?? []) appendUnique(tags, tag);
   for (const tag of patch.tags ?? []) appendUnique(tags, tag);
 
+  const requestId = scalarFromPatch(current, patch, 'requestId');
+  const tenantId = scalarFromPatch(current, patch, 'tenantId');
+  const sessionId = scalarFromPatch(current, patch, 'sessionId');
+  const correlationId = scalarFromPatch(current, patch, 'correlationId');
+  const parentRequestId = scalarFromPatch(current, patch, 'parentRequestId');
+  const operation = scalarFromPatch(current, patch, 'operation');
+  const serviceName = scalarFromPatch(current, patch, 'serviceName');
+  const startedAtUnixMs = scalarFromPatch(current, patch, 'startedAtUnixMs');
+  const deadlineUnixMs = scalarFromPatch(current, patch, 'deadlineUnixMs');
+  const locale = scalarFromPatch(current, patch, 'locale');
   const traceId = patch.traceId ?? current.traceId ?? traces[0];
   const spanId = hasOwn(patch, 'spanId') ? patch.spanId : current.spanId;
   const traceFlags = hasOwn(patch, 'traceFlags')
@@ -157,17 +167,17 @@ export function mergeExecutionLogContexts(
   return snapshotExecutionLogContext({
     ...current,
     ...patch,
-    requestId: scalarFromPatch(current, patch, 'requestId'),
+    ...(requestId === undefined ? {} : { requestId }),
     ...(loggedInUserId === undefined ? {} : { loggedInUserId }),
-    tenantId: scalarFromPatch(current, patch, 'tenantId'),
-    sessionId: scalarFromPatch(current, patch, 'sessionId'),
-    correlationId: scalarFromPatch(current, patch, 'correlationId'),
-    parentRequestId: scalarFromPatch(current, patch, 'parentRequestId'),
-    operation: scalarFromPatch(current, patch, 'operation'),
-    serviceName: scalarFromPatch(current, patch, 'serviceName'),
-    startedAtUnixMs: scalarFromPatch(current, patch, 'startedAtUnixMs'),
-    deadlineUnixMs: scalarFromPatch(current, patch, 'deadlineUnixMs'),
-    locale: scalarFromPatch(current, patch, 'locale'),
+    ...(tenantId === undefined ? {} : { tenantId }),
+    ...(sessionId === undefined ? {} : { sessionId }),
+    ...(correlationId === undefined ? {} : { correlationId }),
+    ...(parentRequestId === undefined ? {} : { parentRequestId }),
+    ...(operation === undefined ? {} : { operation }),
+    ...(serviceName === undefined ? {} : { serviceName }),
+    ...(startedAtUnixMs === undefined ? {} : { startedAtUnixMs }),
+    ...(deadlineUnixMs === undefined ? {} : { deadlineUnixMs }),
+    ...(locale === undefined ? {} : { locale }),
     loggedInUser,
     users: [...(current.users ?? []), ...(patch.users ?? [])],
     fields: { ...(current.fields ?? {}), ...(patch.fields ?? {}) },
