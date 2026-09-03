@@ -1,0 +1,12 @@
+{application, oresoftware_next_loggers_erlang,
+ [{description, "Erlang implementation of the next-loggers/v1 structured logging contract"},
+  {vsn, "0.1.0"},
+  {modules, [next_loggers]},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {licenses, ["MIT"]},
+  {links, [
+    {"GitHub", "https://github.com/ores-otel/ores.otel.log"},
+    {"Changelog", "https://github.com/ores-otel/ores.otel.log/blob/main/sdk/erlang/CHANGELOG.md"}
+  ]}]}.
