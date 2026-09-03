@@ -2,7 +2,6 @@ package nextloggers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -204,7 +203,7 @@ func TestInvalidBoundaryFailsWithoutRunningOperation(t *testing.T) {
 	if ran {
 		t.Fatal("invalid boundary executed the operation")
 	}
-	if result.Failure == nil || !errors.Is(result.Failure.Err, result.Failure.Err) {
+	if result.Failure == nil || result.Failure.Err == nil {
 		t.Fatalf("expected validation failure, got %#v", result.Failure)
 	}
 	if result.Failure.Context.RequestID != "request-100" {
