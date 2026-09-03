@@ -97,6 +97,18 @@ export function buildSuites({ rootDir = defaultRoot, fileExists = existsSync } =
       cwd: path.join(rootDir, 'sdk', 'rust-context'),
     },
     {
+      name: 'Rust request context format',
+      command: 'cargo',
+      args: ['fmt', '--', '--check'],
+      cwd: path.join(rootDir, 'sdk', 'rust-request-context'),
+    },
+    {
+      name: 'Rust request context',
+      command: 'cargo',
+      args: ['test'],
+      cwd: path.join(rootDir, 'sdk', 'rust-request-context'),
+    },
+    {
       name: 'Rust OpenTelemetry companion',
       command: 'cargo',
       args: ['test'],

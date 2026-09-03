@@ -161,6 +161,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oresoftware-next-loggers-request-context"
+version = "0.1.0"
+dependencies = [
+ "oresoftware-next-loggers",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "oresoftware-next-loggers-wasm"
 version = "0.1.0"
 

@@ -35,7 +35,7 @@ const tenantId = currentLogTenantId();
 const traceId = currentLogTraceId();
 ```
 
-These helpers perform one native context-store lookup followed by ordinary object-field access. They return `undefined` outside an active scope.
+These helpers perform one native context-store lookup followed by ordinary object-field access. They return `undefined` outside an active scope or when the selected runtime intentionally disables unsafe ambient context.
 
 ## Runtime behavior
 
@@ -49,18 +49,13 @@ Framework middleware must invoke downstream work inside `runWithLogContext` and 
 
 With the `nodejs_als` or `nodejs_compat` compatibility flag, the workerd build uses the runtime's native `AsyncLocalStorage` and provides concurrent isolation.
 
-Without native ALS, the fallback is intentionally synchronous-only. It restores the frame immediately when the callback returns, even when the callback returns a Promise. Code before the first async boundary can read the ambient context; code after `await` sees `undefined`. This is fail-closed behavior: an absent ID is safer than another request's ID.
-
-Use one of these approaches for unflagged Workers:
-
-1. enable native `nodejs_als`/`nodejs_compat`;
-2. keep a request child logger in an explicit closure or request object;
-3. install an application-owned provider with genuine async isolation;
-4. pass an immutable context snapshot explicitly.
+Without native ALS, the Workerd build is explicit-only. Ambient getters return `undefined` even during the synchronous portion of `runWithLogContext`; this prevents concurrent isolates from sharing a mutable global frame. Retain a request child logger in the request object or closure, pass an immutable request-context snapshot explicitly, install an application-owned provider with genuine isolation, or enable native `nodejs_als`/`nodejs_compat`.
 
 ### Browser
 
-Browsers do not provide a request-scoped async-local primitive. The browser context build therefore has the same synchronous-only, fail-closed behavior. A browser application should normally attach user/session identifiers explicitly to a logger child or use framework-owned scoping rather than treating ambient context as authoritative.
+Browsers do not provide a request-scoped async-local primitive. The browser context build supports synchronous enrichment only: it restores the frame immediately when the callback returns, even when the callback returns a Promise. Code before the first async boundary can read the context; code after `await` sees `undefined`.
+
+A browser application should normally attach user/session identifiers explicitly to a logger child or use framework-owned scoping rather than treating ambient context as authoritative.
 
 ## Security rules
 
@@ -77,4 +72,4 @@ Every supported server runtime should prove that:
 - context disappears after success, error, cancellation, timeout, and disconnect;
 - detached tasks receive an explicit captured snapshot or intentionally start a new operation;
 - logger/exporter failure cannot alter the request response;
-- degraded runtimes return no ambient identity after an async boundary rather than leaking another operation's identity.
+- degraded runtimes expose no unsafe ambient identity rather than leaking another operation's identity.

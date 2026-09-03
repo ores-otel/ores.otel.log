@@ -15,12 +15,15 @@ const API = [
   'logContextStorage',
   'isAsyncContextTracked',
   'runWithLogContext',
+  'runWithMergedLogContext',
   'getLogContext',
   'currentLogRequestId',
   'currentLogTraceId',
   'currentLogUserId',
   'currentLogLoggedInUserId',
   'currentLogTenantId',
+  'captureLogContext',
+  'runWithCapturedLogContext',
   'updateLogContext',
   'setContextLoggedInUser',
   'logContextProvider',
@@ -51,8 +54,11 @@ test('every context variant exposes the same API', () => {
   }
 });
 
-test('every context variant provides canonical request identity accessors', () => {
-  for (const [name, mod] of VARIANTS) {
+test('tracked and synchronous variants provide canonical request identity accessors', () => {
+  for (const [name, mod] of [
+    ['node', nodeContext],
+    ['browser', browserContext],
+  ]) {
     mod.runWithLogContext(identityContext(name), () => {
       assert.equal(mod.currentLogRequestId(), `request-${name}`);
       assert.equal(mod.currentLogTraceId(), `trace-${name}`);
@@ -79,19 +85,34 @@ test('every context variant provides canonical request identity accessors', () =
   }
 });
 
-test('every context variant merges patches identically', () => {
+test('context variants merge an available frame and otherwise fail closed', () => {
   for (const [name, mod] of VARIANTS) {
     mod.runWithLogContext({ traceId: 't1', tags: ['a'], fields: { x: 1 } }, () => {
+      const initial = mod.getLogContext();
+      if (initial === undefined) {
+        assert.equal(
+          mod.updateLogContext({ tags: ['a', 'b'], fields: { y: 2 } }),
+          false,
+          `${name} must reject mutation without an isolated ambient frame`,
+        );
+        assert.equal(
+          mod.setContextLoggedInUser({ id: 'u1' }),
+          false,
+          `${name} must reject user mutation without an isolated ambient frame`,
+        );
+        assert.equal(mod.captureLogContext(), undefined);
+        return;
+      }
+
       assert.equal(mod.updateLogContext({ tags: ['a', 'b'], fields: { y: 2 } }), true, name);
-      mod.setContextLoggedInUser({ id: 'u1' });
+      assert.equal(mod.setContextLoggedInUser({ id: 'u1' }), true, name);
 
-      const ctx = mod.getLogContext();
-      assert.deepEqual(ctx.tags, ['a', 'b'], `${name} should dedupe tags`);
-      assert.deepEqual(ctx.fields, { x: 1, y: 2 }, `${name} should merge fields`);
-      assert.equal(ctx.traceId, 't1', name);
-      assert.equal(ctx.loggedInUser.id, 'u1', name);
+      const context = mod.getLogContext();
+      assert.deepEqual(context.tags, ['a', 'b'], `${name} should dedupe tags`);
+      assert.deepEqual(context.fields, { x: 1, y: 2 }, `${name} should merge fields`);
+      assert.equal(context.traceId, 't1', name);
+      assert.equal(context.loggedInUser.id, 'u1', name);
 
-      // A later traceId promotes both ids into traceIds, oldest first.
       assert.equal(mod.updateLogContext({ traceId: 't2' }), true, name);
       assert.deepEqual(mod.getLogContext().traceIds, ['t1', 't2'], name);
     });
@@ -103,8 +124,6 @@ test('every context variant merges patches identically', () => {
 test('async-context tracking is advertised honestly per runtime', () => {
   assert.equal(nodeContext.isAsyncContextTracked(), true, 'node has AsyncLocalStorage');
   assert.equal(browserContext.isAsyncContextTracked(), false, 'browsers have no ALS');
-  // Under Node, globalThis.AsyncLocalStorage is absent, so the workerd build
-  // takes the same fail-closed path an unflagged Worker would.
   assert.equal(
     workerdContext.isAsyncContextTracked(),
     typeof globalThis.AsyncLocalStorage === 'function',
@@ -131,11 +150,12 @@ test('node context isolates concurrent async flows', async () => {
   }
 });
 
-test('single-frame fallback restores after sync work and fails closed after await', async () => {
+test('browser fallback supports synchronous lookup and fails closed after await', async () => {
   assert.equal(browserContext.getLogContext(), undefined);
 
-  browserContext.runWithLogContext({ traceId: 'sync' }, () => {
-    assert.equal(browserContext.getLogContext().traceId, 'sync');
+  browserContext.runWithLogContext(identityContext('sync'), () => {
+    assert.equal(browserContext.currentLogRequestId(), 'request-sync');
+    assert.equal(browserContext.currentLogUserId(), 'user-sync');
   });
   assert.equal(browserContext.getLogContext(), undefined);
 
@@ -165,39 +185,51 @@ test('single-frame fallback restores after sync work and fails closed after awai
   assert.equal(browserContext.getLogContext(), undefined, 'a throw must not strand the frame');
 });
 
-test('browser and unflagged workerd never leak identity between overlapping promises', async () => {
-  for (const [name, mod] of [
-    ['browser', browserContext],
-    ['unflagged-workerd', workerdContext],
-  ]) {
-    assert.equal(mod.isAsyncContextTracked(), false, `${name} should be untracked in this test`);
-    const seen = [];
+test('overlapping browser promises never observe a sibling identity', async () => {
+  const seen = [];
+  const flow = (id, delay) =>
+    browserContext.runWithLogContext(identityContext(id), async () => {
+      assert.equal(browserContext.currentLogRequestId(), `request-${id}`);
+      await sleep(delay);
+      seen.push([
+        id,
+        browserContext.currentLogRequestId(),
+        browserContext.currentLogUserId(),
+      ]);
+    });
 
-    const flow = (id, delay) =>
-      mod.runWithLogContext(identityContext(id), async () => {
-        assert.equal(mod.currentLogRequestId(), `request-${id}`);
-        await sleep(delay);
-        seen.push([id, mod.currentLogRequestId(), mod.currentLogUserId()]);
-      });
+  await Promise.all([flow('a', 20), flow('b', 2)]);
+  for (const [id, requestId, userId] of seen) {
+    assert.equal(requestId, undefined, `browser/${id} must not observe a sibling request ID`);
+    assert.equal(userId, undefined, `browser/${id} must not observe a sibling user ID`);
+  }
+});
 
-    await Promise.all([flow('a', 20), flow('b', 2)]);
-    for (const [id, requestId, userId] of seen) {
-      assert.equal(
-        requestId,
-        undefined,
-        `${name}/${id} must not observe a sibling request ID`,
-      );
-      assert.equal(
-        userId,
-        undefined,
-        `${name}/${id} must not observe a sibling user ID`,
-      );
-    }
+test('unflagged workerd is explicit-only before and after async boundaries', async () => {
+  assert.equal(workerdContext.isAsyncContextTracked(), false);
+  const seen = [];
+  const flow = (id, delay) =>
+    workerdContext.runWithLogContext(identityContext(id), async () => {
+      assert.equal(workerdContext.getLogContext(), undefined);
+      assert.equal(workerdContext.currentLogRequestId(), undefined);
+      assert.equal(workerdContext.currentLogUserId(), undefined);
+      assert.equal(workerdContext.currentLogTenantId(), undefined);
+      await sleep(delay);
+      seen.push([
+        id,
+        workerdContext.currentLogRequestId(),
+        workerdContext.currentLogUserId(),
+      ]);
+    });
+
+  await Promise.all([flow('a', 20), flow('b', 2)]);
+  for (const [id, requestId, userId] of seen) {
+    assert.equal(requestId, undefined, `workerd/${id} must not expose ambient request ID`);
+    assert.equal(userId, undefined, `workerd/${id} must not expose ambient user ID`);
   }
 });
 
 test('the workerd build prefers a global AsyncLocalStorage when the flag is on', async () => {
-  // Simulate a Worker started with compatibility_flags = ["nodejs_als"].
   const { AsyncLocalStorage } = await import('node:async_hooks');
   globalThis.AsyncLocalStorage = AsyncLocalStorage;
   try {

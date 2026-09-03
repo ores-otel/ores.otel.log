@@ -6,8 +6,8 @@ import {
   enrichEventFromExecutionContext,
   getExecutionLogContext,
   installExecutionLogContextProvider,
+  runWithExecutionLoggedInUser,
   runWithExecutionLogContext,
-  setExecutionLoggedInUser,
 } from '../dist/execution-context.js';
 
 test('AsyncLocalStorage execution context isolates requests and enriches records', async () => {
@@ -31,12 +31,13 @@ test('AsyncLocalStorage execution context isolates requests and enriches records
             context: [{ requestId: id }],
             meta: [{ source: 'test' }],
           },
-          async () => {
-            assert.equal(setExecutionLoggedInUser({ role: 'member' }), true);
-            await new Promise((resolve) => setImmediate(resolve));
-            assert.equal(getExecutionLogContext().loggedInUser.id, `user-${id}`);
-            await enrichEventFromExecutionContext(logger.info(`request-${id}`)).send();
-          },
+          () =>
+            runWithExecutionLoggedInUser({ role: 'member' }, async () => {
+              await new Promise((resolve) => setImmediate(resolve));
+              assert.equal(getExecutionLogContext().loggedInUser.id, `user-${id}`);
+              assert.equal(getExecutionLogContext().loggedInUser.role, 'member');
+              await enrichEventFromExecutionContext(logger.info(`request-${id}`)).send();
+            }),
         ),
       ),
     );

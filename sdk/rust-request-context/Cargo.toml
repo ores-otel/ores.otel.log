@@ -1,0 +1,20 @@
+[package]
+name = "oresoftware-next-loggers-request-context"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "Typed ORES request context over the canonical next-loggers poll-safe carrier"
+license = "MIT"
+repository = "https://github.com/ores-otel/ores.otel.log"
+
+[features]
+default = ["tokio"]
+tokio = ["dep:tokio"]
+
+[dependencies]
+next-loggers = { package = "oresoftware-next-loggers", path = "../rust" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "~1.47.5", optional = true, features = ["rt"] }
+
+[dev-dependencies]
+tokio = { version = "~1.47.5", features = ["macros", "rt", "sync", "time"] }

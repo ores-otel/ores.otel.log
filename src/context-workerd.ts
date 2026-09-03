@@ -1,8 +1,8 @@
 import type { LogContext, LogContextProvider } from './base-logger.js';
 import {
   createLogContextApi,
+  ExplicitOnlyLogContextStorage,
   getGlobalAsyncLocalStorage,
-  SingleFrameLogContextStorage,
   type LogContextStorage,
 } from './context-shared.js';
 
@@ -10,13 +10,14 @@ export type { LogContext, LogContextProvider, LogContextStorage };
 
 /**
  * Workerd build. Real async isolation is available with `nodejs_als` or
- * `nodejs_compat`. Without either flag the synchronous fallback restores its
- * frame before async continuation, preventing cross-request identity leakage.
+ * `nodejs_compat`. Without either flag, ambient context is unavailable and
+ * fails closed: callers must retain an explicit request logger or pass an
+ * immutable context snapshot, so overlapping requests cannot share identity.
  */
 const GlobalAsyncLocalStorage = getGlobalAsyncLocalStorage();
 export const logContextStorage: LogContextStorage = GlobalAsyncLocalStorage
   ? new GlobalAsyncLocalStorage()
-  : new SingleFrameLogContextStorage();
+  : new ExplicitOnlyLogContextStorage();
 const api = createLogContextApi(logContextStorage, Boolean(GlobalAsyncLocalStorage));
 
 export const isAsyncContextTracked = api.isAsyncContextTracked;
