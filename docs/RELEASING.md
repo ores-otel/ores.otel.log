@@ -19,7 +19,16 @@
 | Erlang | Hex `oresoftware_next_loggers_erlang` | `sdk/erlang/vX.Y.Z` | `hex` |
 | Elixir | Hex `oresoftware_next_loggers_elixir` | `sdk/elixir/vX.Y.Z` | `hex` |
 
-The root `vX.Y.Z` Zed release also publishes target-only packages that do not have an independent native-registry route. This includes `oresoftware/otel-k8s-sidecar`; its version remains locked to the root package family.
+The root `vX.Y.Z` Zed release also publishes target-only packages that do not
+have an independent native-registry route. This includes
+`oresoftware/otel-k8s-sidecar` and `oresoftware/otel-cloud-run-sidecar`; their
+versions remain locked to the root package family.
+
+The same verified root tag builds and publishes three SBOM/provenance-enabled
+GHCR images: `otel-k8s-sidecar`, `otel-cloud-run-sidecar`, and
+`otel-cloud-run-supervisor`. Deployment manifests must pin the resulting image
+digest; a mutable version or `sha-*` tag is discovery metadata, not deployment
+authority.
 
 The Go tag prefix is part of the Go module protocol for a module rooted in `sdk/go`; do not shorten it to `vX.Y.Z`.
 

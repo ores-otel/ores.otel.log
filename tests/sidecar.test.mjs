@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
+import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -12,6 +14,16 @@ const schema = JSON.parse(await read('sidecar/adoption-candidates.schema.json'))
 const config = await read('sidecar/k8s/base/collector.yaml');
 const kustomization = await read('sidecar/k8s/base/kustomization.yaml');
 const documentation = await read('sidecar/README.md');
+const kubernetesDockerfile = await read('sidecar/k8s/Dockerfile');
+const kubernetesEntrypoint = await read('sidecar/k8s/entrypoint.sh');
+const cloudRunConfig = await read('sidecar/cloud-run/collector.yaml');
+const cloudRunDocumentation = await read('sidecar/cloud-run/README.md');
+const cloudRunNativeDockerfile = await read('sidecar/cloud-run/native/Dockerfile');
+const cloudRunNativeEntrypoint = await read('sidecar/cloud-run/native/entrypoint.sh');
+const cloudRunSupervisorDockerfile = await read('sidecar/cloud-run/same-container/Dockerfile');
+const cloudRunSupervisorEntrypoint = await read('sidecar/cloud-run/same-container/entrypoint.sh');
+const cloudRunNativeService = await read('sidecar/cloud-run/service.native.yaml');
+const cloudRunSupervisorService = await read('sidecar/cloud-run/service.same-container.yaml');
 
 const expectedRepositories = [
   '3FA-app/3fa-backend.rs',
@@ -21,11 +33,16 @@ const expectedRepositories = [
   'athlet-o/athleto-app-rs',
   'athlet-o/athleto-backend.rs',
   'benefactor-cc/backend.rs',
+  'akrion-sim/akrion-backend.rs',
+  'canonical-cloud/canonical-web-server.rs',
   'daedalus-fab/daedalus-api-server.rs',
   'daedalus-fab/daedalus-web-server.rs',
   'daedalus-fab/fabrication-server.rs',
   'quaestor-ledger/quaestor-ledger-server.rs',
+  'sagitta-stack/dart-server',
   'scintilla-run/gleam-lambda-runner',
+  'shared-auth/shared-auth-server.rs',
+  'sonus-auris/sonus-auris-api-server.rs',
 ].sort();
 
 const credentialPattern = new RegExp([
@@ -41,13 +58,13 @@ function render(...args) {
   });
 }
 
-test('catalog is bounded to 12 unique exact-head Kubernetes candidates', () => {
-  assert.equal(catalog.schemaVersion, '1.0.0');
-  assert.equal(catalog.policy.minimumCandidates, 7);
-  assert.equal(catalog.policy.maximumCandidates, 15);
+test('catalog is bounded to 17 unique exact-head Kubernetes candidates', () => {
+  assert.equal(catalog.schemaVersion, '1.1.0');
+  assert.equal(catalog.policy.minimumCandidates, 12);
+  assert.equal(catalog.policy.maximumCandidates, 20);
   assert.equal(catalog.policy.sidecarVersion, '0.1.0');
   assert.equal(catalog.policy.productionMutation, false);
-  assert.equal(catalog.candidates.length, 12);
+  assert.equal(catalog.candidates.length, 17);
   assert.deepEqual(
     catalog.candidates.map(candidate => candidate.repository).sort(),
     expectedRepositories,
@@ -62,6 +79,14 @@ test('catalog is bounded to 12 unique exact-head Kubernetes candidates', () => {
     assert.equal(candidate.workload.apiVersion, 'apps/v1');
     assert.ok(['Deployment', 'StatefulSet'].includes(candidate.workload.kind));
     assert.ok(candidate.workload.manifests.length >= 1);
+    assert.equal(
+      Boolean(candidate.workload.deploymentRepository),
+      Boolean(candidate.workload.deploymentRef),
+      `${candidate.repository} must pair deployment repository and ref`,
+    );
+    if (candidate.workload.deploymentRef) {
+      assert.match(candidate.workload.deploymentRef, /^[0-9a-f]{40}$/u);
+    }
     assert.ok(candidate.current.endpoint.includes('dd-otel-collector'));
     assert.ok(['grpc', 'http/protobuf'].includes(candidate.current.protocol));
     assert.equal(candidate.adoption.requiresLiveCanary, true);
@@ -74,25 +99,32 @@ test('catalog is bounded to 12 unique exact-head Kubernetes candidates', () => {
   }
 });
 
-test('catalog pins one official multi-architecture collector release', () => {
+test('catalog pins the current audited multi-architecture collector release', () => {
   const image = catalog.policy.collectorImage;
   assert.equal(image.repository, 'otel/opentelemetry-collector-contrib');
-  assert.equal(image.tag, '0.159.0');
+  assert.equal(image.tag, '0.160.0');
   assert.equal(
     image.digest,
-    'sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc',
+    'sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6',
   );
-  assert.equal(image.releaseUrl.endsWith('/v0.159.0'), true);
-  assert.match(image.publishedAt, /^2026-08-18T/u);
+  assert.equal(image.releaseUrl.endsWith('/v0.160.0'), true);
+  assert.match(image.publishedAt, /^2026-09-02T/u);
 });
 
-test('catalog schema preserves the 7-15 cohort boundary and fails closed', () => {
+test('catalog schema preserves the expanded 12-20 cohort boundary and fails closed', () => {
   assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema');
-  assert.equal(schema.properties.candidates.minItems, 7);
-  assert.equal(schema.properties.candidates.maxItems, 15);
+  assert.equal(schema.properties.candidates.minItems, 12);
+  assert.equal(schema.properties.candidates.maxItems, 20);
   assert.equal(schema.additionalProperties, false);
   assert.equal(schema.properties.candidates.items.additionalProperties, false);
   assert.equal(schema.properties.policy.properties.productionMutation.const, false);
+  assert.deepEqual(
+    schema.properties.candidates.items.properties.workload.dependentRequired,
+    {
+      deploymentRepository: ['deploymentRef'],
+      deploymentRef: ['deploymentRepository'],
+    },
+  );
 });
 
 test('collector binds OTLP locally and health separately', () => {
@@ -122,6 +154,9 @@ test('collector bounds memory, queues, retries, and signal-specific redaction', 
   const metricsPipeline = config.match(/    metrics:\n([\s\S]*?)    traces:/u)?.[1] ?? '';
   assert.doesNotMatch(metricsPipeline, /attributes\/security/u);
   assert.match(metricsPipeline, /resource\/pod/u);
+  assert.match(metricsPipeline, /resource\/ores/u);
+  assert.match(config, /ores\.telemetry\.source: https:\/\/github\.com\/ores-otel/u);
+  assert.match(config, /service\.name: ores-otel-sidecar/u);
 });
 
 test('Kustomize base creates one stable, labeled ConfigMap', () => {
@@ -129,6 +164,156 @@ test('Kustomize base creates one stable, labeled ConfigMap', () => {
   assert.match(kustomization, /name: ores-otel-sidecar-v1/u);
   assert.match(kustomization, /config\.yaml=collector\.yaml/u);
   assert.match(kustomization, /disableNameSuffixHash: true/u);
+});
+
+test('every sidecar image pins its bases and separates entrypoint from command', () => {
+  const dockerfiles = [
+    ['kubernetes', kubernetesDockerfile],
+    ['cloud-run-native', cloudRunNativeDockerfile],
+    ['cloud-run-same-container', cloudRunSupervisorDockerfile],
+  ];
+  for (const [name, dockerfile] of dockerfiles) {
+    assert.match(
+      dockerfile,
+      /otel\/opentelemetry-collector-contrib:0\.160\.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6/u,
+      `${name} must pin the collector index`,
+    );
+    assert.match(
+      dockerfile,
+      /busybox:1\.37\.0-musl@sha256:fc6dddc4c44b1bfe37f41cae8e67d1693828e8f42a91862816d7953e2c9d3f23/u,
+      `${name} must pin the runtime index`,
+    );
+    assert.match(dockerfile, /^USER 10001:10001$/mu, `${name} must run without root`);
+    assert.match(
+      dockerfile,
+      /^ENTRYPOINT \["\/usr\/local\/bin\/entrypoint\.sh"\]$/mu,
+      `${name} must enter through entrypoint.sh`,
+    );
+    assert.match(dockerfile, /^CMD \[[^\n]+\]$/mu, `${name} must declare a separate CMD`);
+    assert.match(dockerfile, /https:\/\/github\.com\/ores-otel\/ores\.otel\.log/u);
+  }
+  assert.match(kubernetesEntrypoint, /^exec "\$collector_binary" "\$@"$/mu);
+  assert.match(cloudRunNativeEntrypoint, /^exec "\$collector_binary" "\$@"$/mu);
+  assert.match(cloudRunSupervisorEntrypoint, /^trap on_signal HUP INT TERM$/mu);
+  assert.match(cloudRunSupervisorEntrypoint, /kill -TERM "\$app_pid"/u);
+  assert.match(cloudRunSupervisorEntrypoint, /kill -TERM "\$collector_pid"/u);
+  assert.match(cloudRunSupervisorEntrypoint, /\[ "\$status" -ne 0 \] \|\| status=70/u);
+});
+
+test('Cloud Run collector is loopback-only, Ores-attributed, authenticated, and TLS-first', () => {
+  assert.match(cloudRunConfig, /grpc:\n\s+endpoint: 127\.0\.0\.1:4317/u);
+  assert.match(cloudRunConfig, /http:\n\s+endpoint: 127\.0\.0\.1:4318/u);
+  assert.doesNotMatch(cloudRunConfig, /endpoint: 0\.0\.0\.0:431[78]/u);
+  assert.match(cloudRunConfig, /resourcedetection\/gcp/u);
+  assert.match(cloudRunConfig, /ores\.telemetry\.source: https:\/\/github\.com\/ores-otel/u);
+  assert.match(cloudRunConfig, /authorization: Bearer \$\{env:ORES_OTEL_UPSTREAM_BEARER_TOKEN\}/u);
+  assert.match(cloudRunConfig, /insecure: \$\{env:ORES_OTEL_UPSTREAM_INSECURE\}/u);
+  assert.match(cloudRunConfig, /service\.name: ores-otel-sidecar/u);
+  for (const field of [
+    'http.request.header.authorization',
+    'http.request.header.cookie',
+    'http.response.header.set-cookie',
+    'db.statement',
+    'url.query',
+    'enduser.id',
+  ]) {
+    assert.ok(cloudRunConfig.includes(field), `Cloud Run config must redact ${field}`);
+  }
+});
+
+test('Cloud Run templates distinguish native sidecar and same-container process models', () => {
+  assert.match(
+    cloudRunNativeService,
+    /run\.googleapis\.com\/container-dependencies: '\{"app":\["ores-otel-sidecar"\]\}'/u,
+  );
+  assert.match(cloudRunNativeService, /name: ores-otel-sidecar/u);
+  assert.match(cloudRunNativeService, /path: \/\n\s+port: 13133/u);
+  assert.match(cloudRunNativeService, /name: OTEL_EXPORTER_OTLP_ENDPOINT\n\s+value: http:\/\/127\.0\.0\.1:4318/u);
+  assert.match(cloudRunNativeService, /secretKeyRef:\n\s+name: ores-otel-upstream-token\n\s+key: latest/u);
+  assert.equal((cloudRunSupervisorService.match(/^\s+- name: app$/gmu) ?? []).length, 1);
+  assert.doesNotMatch(cloudRunSupervisorService, /container-dependencies/u);
+  assert.match(cloudRunSupervisorService, /SUPERVISED_APP_IMAGE_AT_DIGEST/u);
+  for (const template of [cloudRunNativeService, cloudRunSupervisorService]) {
+    assert.match(template, /run\.googleapis\.com\/cpu-throttling: "false"/u);
+    assert.doesNotMatch(template, /gh[pousr]_[A-Za-z0-9]{20,}/u);
+  }
+});
+
+test('Cloud Run entrypoints fail closed when the authenticated upstream is incomplete', () => {
+  const result = spawnSync('/bin/sh', [
+    fileURLToPath(new URL('../sidecar/cloud-run/native/entrypoint.sh', import.meta.url)),
+    '--config=/etc/ores-otel/config.yaml',
+  ], {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ORES_OTEL_COLLECTOR_BINARY: '/usr/bin/true',
+      ORES_OTEL_UPSTREAM_ENDPOINT: 'collector.example.test:4317',
+      ORES_OTEL_UPSTREAM_INSECURE: 'false',
+    },
+  });
+  assert.equal(result.status, 78);
+  assert.match(result.stderr, /upstream_bearer_token_missing/u);
+  assert.equal(credentialPattern.test(result.stderr), false);
+});
+
+test('same-container supervisor waits for collector, passes OTLP env, and returns app status', async () => {
+  const fixture = await mkdtemp(join(tmpdir(), 'ores-otel-supervisor-'));
+  const collector = join(fixture, 'collector.sh');
+  const application = join(fixture, 'application.sh');
+  const wget = join(fixture, 'wget');
+  const configPath = join(fixture, 'collector.yaml');
+  const evidencePath = join(fixture, 'application.env');
+  await writeFile(collector, '#!/bin/sh\ntrap "exit 0" TERM INT HUP\nwhile :; do sleep 1; done\n');
+  await writeFile(application, [
+    '#!/bin/sh',
+    'printf "%s\\n%s\\n" "$OTEL_EXPORTER_OTLP_ENDPOINT" "$OTEL_EXPORTER_OTLP_PROTOCOL" > "$TEST_EVIDENCE_PATH"',
+    'exit 7',
+    '',
+  ].join('\n'));
+  await writeFile(wget, '#!/bin/sh\nexit 0\n');
+  await writeFile(configPath, 'service: {}\n');
+  await Promise.all([collector, application, wget].map(path => chmod(path, 0o755)));
+
+  const child = spawn('/bin/sh', [
+    fileURLToPath(new URL('../sidecar/cloud-run/same-container/entrypoint.sh', import.meta.url)),
+    application,
+  ], {
+    cwd: repositoryRoot,
+    env: {
+      ...process.env,
+      PATH: `${fixture}:${process.env.PATH ?? ''}`,
+      ORES_OTEL_COLLECTOR_BINARY: collector,
+      ORES_OTEL_COLLECTOR_CONFIG: configPath,
+      ORES_OTEL_HEALTH_URL: 'http://127.0.0.1:13133/',
+      ORES_OTEL_READY_ATTEMPTS: '2',
+      ORES_OTEL_SHUTDOWN_ATTEMPTS: '1',
+      ORES_OTEL_UPSTREAM_ENDPOINT: 'collector.example.test:4317',
+      ORES_OTEL_UPSTREAM_BEARER_TOKEN: 'test-only-placeholder',
+      ORES_OTEL_UPSTREAM_INSECURE: 'false',
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://127.0.0.1:4318',
+      OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+      TEST_EVIDENCE_PATH: evidencePath,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', chunk => { stderr += chunk; });
+  const status = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', resolve);
+  });
+  assert.equal(status, 7, stderr);
+  assert.equal(
+    await readFile(evidencePath, 'utf8'),
+    'http://127.0.0.1:4318\nhttp/protobuf\n',
+  );
+  assert.match(stderr, /collector_starting/u);
+  assert.match(stderr, /application_starting/u);
+  assert.match(stderr, /application_exited/u);
+  assert.equal(credentialPattern.test(stderr), false);
 });
 
 test('renderer creates one hardened strategic-merge patch per candidate', () => {
@@ -204,8 +389,23 @@ test('documentation keeps Zed, rollout, and source/runtime boundaries explicit',
     'not a replacement for node-level CRI log collection',
     'live synthetic-signal canary',
     'Source-only or rendered-manifest checks are not deployment proof',
+    'zed add oresoftware/otel-cloud-run-sidecar@=0.1.0',
+    'There is deliberately no stdout named pipe',
+    'claritas-viz/data-viz-server.rs',
   ]) {
     assert.ok(documentation.includes(fragment), `sidecar documentation is missing: ${fragment}`);
   }
   assert.equal(credentialPattern.test(documentation), false);
+  for (const fragment of [
+    'native/Dockerfile',
+    'same-container/Dockerfile',
+    'ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]',
+    'CMD ["/usr/local/bin/app-server", "serve"]',
+    'zed add oresoftware/next-loggers-rust@=0.1.0',
+    'Do not pipe application stdout through the collector',
+    'within eight seconds',
+  ]) {
+    assert.ok(cloudRunDocumentation.includes(fragment), `Cloud Run documentation is missing: ${fragment}`);
+  }
+  assert.equal(credentialPattern.test(cloudRunDocumentation), false);
 });

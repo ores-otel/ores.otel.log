@@ -21,6 +21,11 @@ const expectedTargets = {
   repository: { dir: '.', adapter: 'none' },
   contracts: { dir: 'contracts', name: 'next-loggers-contracts', adapter: 'none' },
   'k8s-sidecar': { dir: 'sidecar', name: 'otel-k8s-sidecar', adapter: 'none' },
+  'cloud-run-sidecar': {
+    dir: 'sidecar/cloud-run',
+    name: 'otel-cloud-run-sidecar',
+    adapter: 'none',
+  },
   nodejs: {
     dir: 'sdk/nodejs',
     name: 'next-loggers-nodejs',

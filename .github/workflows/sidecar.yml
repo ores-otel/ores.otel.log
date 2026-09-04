@@ -1,4 +1,4 @@
-name: Kubernetes OTLP sidecar
+name: Kubernetes and Cloud Run OTLP sidecars
 
 on:
   push:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   contract:
-    name: catalog, patches, and collector config
+    name: catalog, images, patches, and collector configs
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -36,5 +36,27 @@ jobs:
           --env POD_NAMESPACE=validation
           --env NODE_NAME=validation
           --volume "$PWD/sidecar/k8s/base/collector.yaml:/etc/ores-otel/config.yaml:ro"
-          otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc
+          otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
           validate --config=/etc/ores-otel/config.yaml
+      - name: Validate Cloud Run collector configuration
+        run: >-
+          docker run --rm
+          --env ORES_OTEL_UPSTREAM_ENDPOINT=collector.example.test:4317
+          --env ORES_OTEL_UPSTREAM_BEARER_TOKEN=ci-placeholder
+          --env ORES_OTEL_UPSTREAM_INSECURE=false
+          --volume "$PWD/sidecar/cloud-run/collector.yaml:/etc/ores-otel/config.yaml:ro"
+          otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+          validate --config=/etc/ores-otel/config.yaml
+      - name: Check every sidecar entrypoint
+        run: >-
+          shellcheck
+          sidecar/k8s/entrypoint.sh
+          sidecar/cloud-run/native/entrypoint.sh
+          sidecar/cloud-run/same-container/entrypoint.sh
+          sidecar/cloud-run/same-container/app-required.sh
+      - name: Build Kubernetes sidecar image
+        run: docker build --file sidecar/k8s/Dockerfile --tag ores-otel/k8s-sidecar:test sidecar
+      - name: Build native Cloud Run sidecar image
+        run: docker build --file sidecar/cloud-run/native/Dockerfile --tag ores-otel/cloud-run-sidecar:test sidecar/cloud-run
+      - name: Build same-container Cloud Run supervisor image
+        run: docker build --file sidecar/cloud-run/same-container/Dockerfile --tag ores-otel/cloud-run-supervisor:test sidecar/cloud-run

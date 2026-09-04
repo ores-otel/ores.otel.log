@@ -15,20 +15,11 @@ processors:
     check_interval: 1s
     limit_mib: 96
     spike_limit_mib: 24
-  resource/pod:
-    attributes:
-      - key: k8s.pod.name
-        value: ${env:POD_NAME}
-        action: insert
-      - key: k8s.namespace.name
-        value: ${env:POD_NAMESPACE}
-        action: insert
-      - key: k8s.node.name
-        value: ${env:NODE_NAME}
-        action: insert
-      - key: github.repository
-        value: ${env:ORES_OTEL_GITHUB_REPOSITORY}
-        action: insert
+  resourcedetection/gcp:
+    detectors:
+      - gcp
+    override: false
+    timeout: 2s
   resource/ores:
     attributes:
       - key: service.namespace
@@ -38,7 +29,7 @@ processors:
         value: https://github.com/ores-otel
         action: upsert
       - key: ores.telemetry.transport
-        value: kubernetes-sidecar
+        value: cloud-run-sidecar
         action: upsert
   attributes/security:
     actions:
@@ -62,8 +53,10 @@ processors:
 exporters:
   otlp_grpc/upstream:
     endpoint: ${env:ORES_OTEL_UPSTREAM_ENDPOINT}
+    headers:
+      authorization: Bearer ${env:ORES_OTEL_UPSTREAM_BEARER_TOKEN}
     tls:
-      insecure: true
+      insecure: ${env:ORES_OTEL_UPSTREAM_INSECURE}
     sending_queue:
       enabled: true
       num_consumers: 2
@@ -91,7 +84,7 @@ service:
         - otlp
       processors:
         - memory_limiter
-        - resource/pod
+        - resourcedetection/gcp
         - resource/ores
         - attributes/security
         - batch
@@ -102,7 +95,7 @@ service:
         - otlp
       processors:
         - memory_limiter
-        - resource/pod
+        - resourcedetection/gcp
         - resource/ores
         - batch
       exporters:
@@ -112,7 +105,7 @@ service:
         - otlp
       processors:
         - memory_limiter
-        - resource/pod
+        - resourcedetection/gcp
         - resource/ores
         - attributes/security
         - batch

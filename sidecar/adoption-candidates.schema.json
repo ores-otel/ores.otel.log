@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ores-otel/ores.otel.log/sidecar/adoption-candidates.schema.json",
-  "title": "Ores OTEL Kubernetes sidecar adoption catalog",
+  "title": "Ores OTEL Kubernetes and Cloud Run sidecar adoption catalog",
   "type": "object",
   "additionalProperties": false,
   "required": ["$schema", "schemaVersion", "observedAt", "policy", "candidates"],
   "properties": {
     "$schema": { "const": "./adoption-candidates.schema.json" },
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "1.1.0" },
     "observedAt": { "type": "string", "format": "date-time" },
     "policy": {
       "type": "object",
@@ -22,8 +22,8 @@
         "productionMutation"
       ],
       "properties": {
-        "minimumCandidates": { "const": 7 },
-        "maximumCandidates": { "const": 15 },
+        "minimumCandidates": { "const": 12 },
+        "maximumCandidates": { "const": 20 },
         "sidecarPackage": { "const": "oresoftware/otel-k8s-sidecar" },
         "sidecarVersion": { "const": "0.1.0" },
         "collectorImage": {
@@ -47,8 +47,8 @@
     },
     "candidates": {
       "type": "array",
-      "minItems": 7,
-      "maxItems": 15,
+      "minItems": 12,
+      "maxItems": 20,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -77,12 +77,21 @@
               "kind": { "enum": ["Deployment", "StatefulSet"] },
               "name": { "$ref": "#/$defs/kubernetesName" },
               "container": { "$ref": "#/$defs/kubernetesName" },
+              "deploymentRepository": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+              },
+              "deploymentRef": { "pattern": "^[0-9a-f]{40}$" },
               "manifests": {
                 "type": "array",
                 "minItems": 1,
                 "uniqueItems": true,
                 "items": { "type": "string", "minLength": 1 }
               }
+            },
+            "dependentRequired": {
+              "deploymentRepository": ["deploymentRef"],
+              "deploymentRef": ["deploymentRepository"]
             }
           },
           "current": {
@@ -92,7 +101,9 @@
             "properties": {
               "endpoint": { "type": "string", "pattern": "^http://[^/]+:(4317|4318)$" },
               "protocol": { "enum": ["grpc", "http/protobuf"] },
-              "protocolSource": { "enum": ["explicit", "inferred-from-port"] }
+              "protocolSource": {
+                "enum": ["explicit", "inferred-from-port", "application-default"]
+              }
             }
           },
           "adoption": {
@@ -101,7 +112,7 @@
             "required": ["localEndpoint", "rolloutWave", "requiresLiveCanary"],
             "properties": {
               "localEndpoint": { "enum": ["http://127.0.0.1:4317", "http://127.0.0.1:4318"] },
-              "rolloutWave": { "type": "integer", "minimum": 1, "maximum": 4 },
+              "rolloutWave": { "type": "integer", "minimum": 1, "maximum": 5 },
               "requiresLiveCanary": { "const": true }
             }
           },
