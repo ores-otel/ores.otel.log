@@ -153,6 +153,10 @@
       "types": "./dist/supabase-realtime-batch.d.ts",
       "default": "./dist/supabase-realtime-batch.js"
     },
+    "./supabase-realtime": {
+      "types": "./dist/supabase-realtime.d.ts",
+      "default": "./dist/supabase-realtime.js"
+    },
     "./supabase-websocket-ingest": {
       "types": "./dist/supabase-websocket-ingest.d.ts",
       "default": "./dist/supabase-websocket-ingest.js"
