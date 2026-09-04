@@ -11,6 +11,8 @@
 | Python | PyPI `oresoftware-next-loggers` | `sdk/python/vX.Y.Z` | `pypi` |
 | Go | `github.com/ores-otel/ores.otel.log/sdk/go` | `sdk/go/vX.Y.Z` | `go-modules` |
 | Rust | crates.io `oresoftware-next-loggers` | `sdk/rust/vX.Y.Z` | `crates-io` |
+| Rust context | crates.io `oresoftware-next-loggers-context` | `sdk/rust-context/vX.Y.Z` | `crates-io` |
+| Rust OTEL | crates.io `oresoftware-next-loggers-otel` | `sdk/rust-otel/vX.Y.Z` | `crates-io` |
 | Rust / WASM | crates.io `oresoftware-next-loggers-wasm` | `sdk/wasm/vX.Y.Z` | `crates-io` |
 | Java | Maven Central `io.github.oresoftware:next-loggers` | `sdk/java/vX.Y.Z` | `maven-central` |
 | Dart / Flutter | pub.dev `oresoftware_next_loggers` | `sdk/dart/vX.Y.Z` | `pub.dev` |

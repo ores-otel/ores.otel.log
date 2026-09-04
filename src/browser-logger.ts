@@ -43,21 +43,58 @@ export interface BrowserLoggerOptions extends LoggerOptions {
 
 const registeredBrowserLoggers = new Set<BrowserLogger>();
 let unloadHandlersInstalled = false;
+let exitDrainInFlight = false;
 
+/**
+ * A single teardown fires several of these events in sequence -- pagehide,
+ * then visibilitychange, then unload -- so without a guard one navigation
+ * would send the same buffer three times. The guard is released on the next
+ * task rather than never, because a tab restored from bfcache goes on living
+ * and its next teardown must flush again.
+ */
 const flushBrowserLoggers = (): void => {
-  for (const logger of registeredBrowserLoggers) {
-    void logger.flushOnExit({ timeoutMillis: logger.shutdownTimeoutMillis });
+  if (exitDrainInFlight) {
+    return;
+  }
+  exitDrainInFlight = true;
+  try {
+    for (const logger of registeredBrowserLoggers) {
+      void logger.flushOnExit({ timeoutMillis: logger.shutdownTimeoutMillis });
+    }
+  } finally {
+    setTimeout(() => {
+      exitDrainInFlight = false;
+    }, 0);
   }
 };
+
+const onVisibilityChange = (): void => {
+  // 'hidden' is the last reliable moment on mobile Safari, which routinely
+  // discards a tab without ever firing pagehide.
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    flushBrowserLoggers();
+  }
+};
+
+/**
+ * 'beforeunload' and 'unload' are deliberately absent: both disqualify a page
+ * from the back/forward cache, and neither fires reliably on mobile. pagehide,
+ * visibilitychange and freeze cover every teardown they would have caught.
+ */
+const UNLOAD_EVENTS: ReadonlyArray<[string, () => void]> = [
+  ['pagehide', flushBrowserLoggers],
+  ['visibilitychange', onVisibilityChange],
+  ['freeze', flushBrowserLoggers],
+];
 
 function installUnloadHandlers(): void {
   if (unloadHandlersInstalled || typeof globalThis.addEventListener !== 'function') {
     return;
   }
   unloadHandlersInstalled = true;
-  globalThis.addEventListener('pagehide', flushBrowserLoggers);
-  globalThis.addEventListener('beforeunload', flushBrowserLoggers);
-  globalThis.addEventListener('unload', flushBrowserLoggers);
+  for (const [event, handler] of UNLOAD_EVENTS) {
+    globalThis.addEventListener(event, handler);
+  }
 }
 
 function removeUnloadHandlers(): void {
@@ -65,9 +102,9 @@ function removeUnloadHandlers(): void {
     return;
   }
   unloadHandlersInstalled = false;
-  globalThis.removeEventListener('pagehide', flushBrowserLoggers);
-  globalThis.removeEventListener('beforeunload', flushBrowserLoggers);
-  globalThis.removeEventListener('unload', flushBrowserLoggers);
+  for (const [event, handler] of UNLOAD_EVENTS) {
+    globalThis.removeEventListener(event, handler);
+  }
 }
 
 function registerBrowserLogger(logger: BrowserLogger): void {

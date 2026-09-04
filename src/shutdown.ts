@@ -49,6 +49,15 @@ export interface ShutdownResult {
 export interface ShutdownCoordinatorOptions {
   /** Maximum drain time before forced termination. Defaults to 30 seconds. */
   readonly gracePeriodMillis?: number;
+  /**
+   * Ceiling on the flush itself, defaulting to 5 seconds.
+   *
+   * The grace period bounds the drain, not the flush that follows it. Without
+   * a separate deadline a wedged exporter -- an unreachable collector, a
+   * socket in a black hole -- hangs shutdown indefinitely, after the drain
+   * timer has already been cleared. Set 0 to wait indefinitely.
+   */
+  readonly flushTimeoutMillis?: number;
   /** Stop accepting new work and wait for in-flight work to finish. */
   readonly drain: (context: ShutdownActionContext) => void | Promise<void>;
   /** Drop remaining work/connections. Must be idempotent. */
@@ -239,6 +248,38 @@ export class ShutdownCoordinator {
     );
   }
 
+  /** Races the caller's flush against its deadline; the loser is abandoned. */
+  async #flushBounded(context: ShutdownActionContext): Promise<void> {
+    const flush = this.#options.flush;
+    if (!flush) {
+      return;
+    }
+    const timeoutMillis = this.#options.flushTimeoutMillis ?? 5_000;
+    if (timeoutMillis <= 0) {
+      await flush(context);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        Promise.resolve(flush(context)),
+        new Promise<never>((_resolve, reject) => {
+          // Deliberately not unref'd: during shutdown the flush is often the
+          // only pending work, and an unref'd deadline would never fire in the
+          // one situation it exists for.
+          timer = setTimeout(
+            () => reject(new Error(`shutdown flush exceeded ${timeoutMillis}ms`)),
+            timeoutMillis,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  }
+
   async #finish(
     trigger: ShutdownTrigger,
     interactive: boolean,
@@ -265,7 +306,7 @@ export class ShutdownCoordinator {
 
     const context = this.#context(trigger, interactive);
     try {
-      await this.#options.flush?.(context);
+      await this.#flushBounded(context);
     } catch (error) {
       this.#errors.push(error);
     }

@@ -153,6 +153,14 @@
       "import": "./dist/server-lifecycle.js",
       "default": "./dist/server-lifecycle.js"
     },
+    "./shutdown": {
+      "types": "./dist/shutdown.d.ts",
+      "default": "./dist/shutdown.js"
+    },
+    "./node-shutdown": {
+      "types": "./dist/node-shutdown.d.ts",
+      "default": "./dist/node-shutdown.js"
+    },
     "./execution-context": {
       "browser": {
         "types": "./dist/execution-context-browser.d.ts",

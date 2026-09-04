@@ -10,7 +10,17 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple
+
+from .shutdown import (
+    DEFAULT_TIMEOUT,
+    ProcessHooks,
+    ShutdownError,
+    call_transport_hook,
+    deadline_from,
+    install_process_hooks,
+    raise_if_failed,
+)
 
 SCHEMA = "next-loggers/v1"
 
@@ -464,38 +474,67 @@ class Logger:
                 transport.write(record)
         return record
 
-    def flush(self, send_unsent: bool = False) -> None:
-        if send_unsent:
-            for event in list(self._unsent):
-                event.send()
-        for transport in self.transports:
-            flush = getattr(transport, "flush", None)
-            if callable(flush):
-                flush()
-
-    def flush_on_exit(self) -> None:
+    def _send_unsent(self) -> Tuple[List[LogRecord], List[BaseException]]:
         recovered: List[LogRecord] = []
+        errors: List[BaseException] = []
         for event in list(self._unsent):
-            record = event.send()
+            try:
+                record = event.send()
+            except Exception as error:
+                errors.append(error)
+                continue
             if record is not None:
                 recovered.append(record)
-        for transport in self.transports:
-            flush_on_exit = getattr(transport, "flush_on_exit", None)
-            if callable(flush_on_exit):
-                flush_on_exit(tuple(recovered))
-        self.flush()
+        return recovered, errors
 
-    def close(self) -> None:
+    def _drain(
+        self,
+        hook_name: str,
+        deadline: Optional[float],
+        args: Sequence[Any] = (),
+    ) -> List[BaseException]:
+        errors: List[BaseException] = []
+        for transport in list(self.transports):
+            error = call_transport_hook(transport, hook_name, deadline, args)
+            if error is not None:
+                errors.append(error)
+        return errors
+
+    def _flush(self, send_unsent: bool, deadline: Optional[float]) -> None:
+        errors: List[BaseException] = []
+        if send_unsent:
+            errors.extend(self._send_unsent()[1])
+        errors.extend(self._drain("flush", deadline))
+        raise_if_failed("flush", errors)
+
+    def _flush_on_exit(self, deadline: Optional[float]) -> None:
+        recovered, errors = self._send_unsent()
+        errors.extend(self._drain("flush_on_exit", deadline, (tuple(recovered),)))
+        errors.extend(self._drain("flush", deadline))
+        raise_if_failed("flush_on_exit", errors)
+
+    def flush(self, send_unsent: bool = False, timeout: Optional[float] = None) -> None:
+        self._flush(send_unsent, deadline_from(timeout))
+
+    def flush_on_exit(self, timeout: Optional[float] = None) -> None:
+        self._flush_on_exit(deadline_from(timeout))
+
+    def close(self, timeout: Optional[float] = None) -> None:
+        # The flag is claimed in the same critical section that reads it so a
+        # racing close returns immediately instead of double-draining, and the
+        # drain itself runs outside the lock so logging threads are not blocked.
         with self._lock:
             if self._closed:
                 return
-        self.flush_on_exit()
-        for transport in self.transports:
-            close = getattr(transport, "close", None)
-            if callable(close):
-                close()
-        with self._lock:
             self._closed = True
+        deadline = deadline_from(timeout)
+        errors: List[BaseException] = []
+        try:
+            self._flush_on_exit(deadline)
+        except ShutdownError as error:
+            errors.extend(error.errors)
+        errors.extend(self._drain("close", deadline))
+        raise_if_failed("close", errors)
 
     def __enter__(self) -> "Logger":
         return self
@@ -509,6 +548,7 @@ def create_logger(**options: Any) -> Logger:
 
 
 __all__ = [
+    "DEFAULT_TIMEOUT",
     "LEVELS",
     "OTEL_SEVERITY_NUMBERS",
     "SCHEMA",
@@ -519,7 +559,10 @@ __all__ = [
     "MemoryTransport",
     "OpenTelemetryTransport",
     "OtelTransport",
+    "ProcessHooks",
+    "ShutdownError",
     "SupabaseTransport",
     "Transport",
     "create_logger",
+    "install_process_hooks",
 ]

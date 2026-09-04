@@ -113,7 +113,7 @@ test('flushOnExit sends unfinished chains and drains the shared promise registry
   assert.equal(getPendingLogCount(), 0);
 });
 
-test('browser beforeunload flushes unfinished events', async () => {
+test('browser pagehide and freeze flush unfinished events exactly once', async () => {
   await browserLogger.close();
   const eventTarget = new EventTarget();
   const originalAddEventListener = globalThis.addEventListener;
@@ -128,9 +128,26 @@ test('browser beforeunload flushes unfinished events', async () => {
       transports: { write: async (record) => records.push(record) },
     });
     logger.warn('flush me on browser shutdown');
-    eventTarget.dispatchEvent(new Event('beforeunload'));
+    // pagehide replaces beforeunload: it fires in every case beforeunload does,
+    // and unlike beforeunload it does not disqualify the page from bfcache.
+    eventTarget.dispatchEvent(new Event('pagehide'));
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(records.length, 1);
+
+    // One teardown fires several of these in sequence; the buffer goes out
+    // once, not once per event.
+    eventTarget.dispatchEvent(new Event('pagehide'));
+    eventTarget.dispatchEvent(new Event('freeze'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(records.length, 1, 'a single teardown must not re-send the buffer');
+
+    // A tab restored from bfcache goes on living, so its next teardown must
+    // flush again.
+    logger.warn('after bfcache restore');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    eventTarget.dispatchEvent(new Event('pagehide'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(records.length, 2, 'a later teardown must flush again');
     await logger.close();
   } finally {
     if (originalAddEventListener) {

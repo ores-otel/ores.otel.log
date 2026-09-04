@@ -2,6 +2,7 @@
 package nextloggers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -103,6 +104,27 @@ type ExitFlusher interface {
 type Closer interface {
 	Close() error
 }
+
+// ContextFlusher, ContextExitFlusher, and ContextCloser are the deadline-aware
+// forms of Flusher, ExitFlusher, and Closer. A transport that implements one
+// receives the caller's context directly; every other transport is instead run
+// on a worker goroutine that the caller abandons once its context is done, so a
+// wedged destination can never outlive the shutdown budget.
+type ContextFlusher interface {
+	FlushContext(context.Context) error
+}
+
+type ContextExitFlusher interface {
+	FlushOnExitContext(context.Context, []LogRecord) error
+}
+
+type ContextCloser interface {
+	CloseContext(context.Context) error
+}
+
+// DefaultFlushDeadline bounds Close for callers that have no deadline of their
+// own. It matches the flushDeadlineMillis published in the Go SDK manifest.
+const DefaultFlushDeadline = 5 * time.Second
 
 type MemoryTransport struct {
 	mu          sync.Mutex
@@ -242,9 +264,11 @@ type Logger struct {
 	Clock         func() string
 	RuntimeFields func() map[string]any
 
-	mu     sync.Mutex
-	unsent map[*Event]struct{}
-	closed bool
+	mu        sync.Mutex
+	unsent    map[*Event]struct{}
+	closed    bool
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func NewLogger(options Options) *Logger {
@@ -636,38 +660,103 @@ func (logger *Logger) emit(event *Event, store bool) error {
 	return errors.Join(failures...)
 }
 
+// runBounded keeps a transport that ignores cancellation from wedging exit.
+// The worker goroutine is abandoned rather than waited on, so the result
+// channel is buffered and can never block the transport after a timeout.
+func runBounded(ctx context.Context, work func() error) error {
+	if ctx.Done() == nil {
+		// Nothing can expire, so the extra goroutine would buy no safety.
+		return work()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	go func() { done <- work() }()
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func flushTransport(ctx context.Context, transport Transport) error {
+	if flusher, ok := transport.(ContextFlusher); ok {
+		return flusher.FlushContext(ctx)
+	}
+	if flusher, ok := transport.(Flusher); ok {
+		return runBounded(ctx, flusher.Flush)
+	}
+	return nil
+}
+
+func flushTransportOnExit(ctx context.Context, transport Transport, records []LogRecord) error {
+	if flusher, ok := transport.(ContextExitFlusher); ok {
+		return flusher.FlushOnExitContext(ctx, records)
+	}
+	if flusher, ok := transport.(ExitFlusher); ok {
+		return runBounded(ctx, func() error { return flusher.FlushOnExit(records) })
+	}
+	return nil
+}
+
+func closeTransport(ctx context.Context, transport Transport) error {
+	if closer, ok := transport.(ContextCloser); ok {
+		return closer.CloseContext(ctx)
+	}
+	if closer, ok := transport.(Closer); ok {
+		return runBounded(ctx, closer.Close)
+	}
+	return nil
+}
+
+func (logger *Logger) pendingEvents() []*Event {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	events := make([]*Event, 0, len(logger.unsent))
+	for event := range logger.unsent {
+		events = append(events, event)
+	}
+	return events
+}
+
 func (logger *Logger) Flush(sendUnsent bool) error {
+	return logger.FlushContext(context.Background(), sendUnsent)
+}
+
+// FlushContext propagates the caller's deadline into every transport and keeps
+// draining after a failure, because one broken destination must not silence the
+// others during shutdown.
+func (logger *Logger) FlushContext(ctx context.Context, sendUnsent bool) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var failures []error
 	if sendUnsent {
-		logger.mu.Lock()
-		events := make([]*Event, 0, len(logger.unsent))
-		for event := range logger.unsent {
-			events = append(events, event)
-		}
-		logger.mu.Unlock()
-		for _, event := range events {
+		for _, event := range logger.pendingEvents() {
 			if err := event.Send(); err != nil {
 				failures = append(failures, err)
 			}
 		}
 	}
 	for _, transport := range logger.Transports {
-		if flusher, ok := transport.(Flusher); ok {
-			if err := flusher.Flush(); err != nil {
-				failures = append(failures, err)
-			}
+		if err := flushTransport(ctx, transport); err != nil {
+			failures = append(failures, err)
 		}
 	}
 	return errors.Join(failures...)
 }
 
 func (logger *Logger) FlushOnExit() error {
-	logger.mu.Lock()
-	events := make([]*Event, 0, len(logger.unsent))
-	for event := range logger.unsent {
-		events = append(events, event)
+	return logger.FlushOnExitContext(context.Background())
+}
+
+func (logger *Logger) FlushOnExitContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	logger.mu.Unlock()
+	events := logger.pendingEvents()
 	recovered := make([]LogRecord, 0, len(events))
 	var failures []error
 	for _, event := range events {
@@ -677,38 +766,55 @@ func (logger *Logger) FlushOnExit() error {
 		recovered = append(recovered, event.ToRecord())
 	}
 	for _, transport := range logger.Transports {
-		if flusher, ok := transport.(ExitFlusher); ok {
-			if err := flusher.FlushOnExit(recovered); err != nil {
-				failures = append(failures, err)
-			}
+		if err := flushTransportOnExit(ctx, transport, recovered); err != nil {
+			failures = append(failures, err)
 		}
 	}
-	if err := logger.Flush(false); err != nil {
+	if err := logger.FlushContext(ctx, false); err != nil {
 		failures = append(failures, err)
 	}
 	return errors.Join(failures...)
 }
 
+// Close is bounded by DefaultFlushDeadline so an application that exits without
+// a deadline of its own still cannot hang on a wedged transport.
 func (logger *Logger) Close() error {
-	logger.mu.Lock()
-	if logger.closed {
+	ctx, cancel := context.WithTimeout(context.Background(), DefaultFlushDeadline)
+	defer cancel()
+	return logger.CloseContext(ctx)
+}
+
+// CloseContext runs the close exactly once. Repeat callers -- a signal handler
+// racing an ordinary defer, for instance -- observe the first outcome instead
+// of re-flushing an already drained transport.
+func (logger *Logger) CloseContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	logger.closeOnce.Do(func() {
+		// Marking closed first makes the check and the act one step, so a
+		// concurrent newEvent cannot slip a record past the final flush.
+		logger.mu.Lock()
+		logger.closed = true
 		logger.mu.Unlock()
-		return nil
-	}
-	logger.mu.Unlock()
-	var failures []error
-	if err := logger.FlushOnExit(); err != nil {
-		failures = append(failures, err)
-	}
-	for _, transport := range logger.Transports {
-		if closer, ok := transport.(Closer); ok {
-			if err := closer.Close(); err != nil {
+
+		var failures []error
+		if err := logger.FlushOnExitContext(ctx); err != nil {
+			failures = append(failures, err)
+		}
+		for _, transport := range logger.Transports {
+			if err := closeTransport(ctx, transport); err != nil {
 				failures = append(failures, err)
 			}
 		}
-	}
+		logger.closeErr = errors.Join(failures...)
+	})
+	return logger.closeErr
+}
+
+// IsClosed reports whether Close or CloseContext has claimed this logger.
+func (logger *Logger) IsClosed() bool {
 	logger.mu.Lock()
-	logger.closed = true
-	logger.mu.Unlock()
-	return errors.Join(failures...)
+	defer logger.mu.Unlock()
+	return logger.closed
 }

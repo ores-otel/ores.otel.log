@@ -1,8 +1,12 @@
 # frozen_string_literal: true
 
+# The version lives in exactly one place. A literal here is a second source of
+# truth that drifts silently, because nothing installs the gem during CI.
+require_relative "lib/oresoftware/next_loggers/version"
+
 Gem::Specification.new do |spec|
   spec.name = "oresoftware-next-loggers"
-  spec.version = "0.1.0"
+  spec.version = ORESoftware::NextLoggers::VERSION
   spec.authors = ["ORESoftware"]
   spec.email = ["opensource@oresoftware.com"]
 

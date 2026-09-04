@@ -156,7 +156,8 @@
     "recordFixture": "contracts/fixtures/conformance-record.json",
     "sourceFiles": [
       "sdk/ruby/lib/oresoftware/next_loggers.rb",
-      "sdk/ruby/test/next_loggers_test.rb"
+      "sdk/ruby/test/next_loggers_test.rb",
+      "sdk/ruby/lib/oresoftware/next_loggers/shutdown.rb"
     ],
     "validatesJsonSchema": false,
     "testsContextIsolation": true,
@@ -168,5 +169,28 @@
       "Add Fiber-local context isolation on runtimes where multiple fibers share one thread.",
       "Validate Ruby-emitted records directly against the canonical JSON Schema."
     ]
+  },
+  "shutdown": {
+    "processHooks": [
+      "at-exit",
+      "signal-sigint",
+      "signal-sigterm"
+    ],
+    "autoRegistered": false,
+    "gracePeriodMillis": 15000,
+    "flushDeadlineMillis": 5000,
+    "idempotentFlush": true,
+    "doubleSignalForces": true,
+    "hooksRemovable": true,
+    "symbols": [
+      "install_process_hooks!",
+      "ProcessHooks",
+      "ShutdownError",
+      "Logger#flush",
+      "Logger#flush_on_exit",
+      "Logger#close",
+      "Logger#closed?"
+    ],
+    "notes": "Ruby forbids Mutex#synchronize in a trap context, so the handler sets a plain flag and drains on a thread started from the handler. at_exit cannot be deregistered; uninstall flips a flag the block reads."
   }
 }

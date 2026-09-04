@@ -167,7 +167,22 @@
   "promotion": {
     "ready": false,
     "blockers": [
-      "Validate Erlang-emitted records directly against the canonical JSON Schema."
+      "Validate Erlang-emitted records directly against the canonical JSON Schema.",
+      "Export flush/1, flush_on_exit/1 and close/1, and own the transports from a gen_server whose terminate/2 performs the exit flush.",
+      "Declare a mod entry and a supervisor with an explicit shutdown timeout so application:stop/1 drains."
     ]
+  },
+  "shutdown": {
+    "processHooks": [],
+    "autoRegistered": false,
+    "gracePeriodMillis": 0,
+    "flushDeadlineMillis": 0,
+    "idempotentFlush": false,
+    "doubleSignalForces": false,
+    "hooksRemovable": false,
+    "symbols": [
+      "next_loggers:new/2"
+    ],
+    "notes": "No lifecycle at all: loggers are plain maps holding transport funs, the application has no mod entry and therefore no stop/1 callback, and flush/close/flush_on_exit are not exported -- see promotion.blockers."
   }
 }

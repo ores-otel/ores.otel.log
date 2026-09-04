@@ -165,7 +165,8 @@
       "sdk/dart/lib/next_loggers.dart",
       "sdk/dart/lib/supabase_realtime_transport.dart",
       "sdk/dart/test/conformance_test.dart",
-      "sdk/dart/test/supabase_realtime_transport_test.dart"
+      "sdk/dart/test/supabase_realtime_transport_test.dart",
+      "sdk/dart/lib/shutdown.dart"
     ],
     "validatesJsonSchema": false,
     "testsContextIsolation": true,
@@ -177,7 +178,28 @@
     "ready": false,
     "blockers": [
       "Expand Zone context to the complete canonical user, baggage, map-merge, and trace-ID merge contract.",
-      "Validate Dart-emitted records directly against the canonical JSON Schema."
+      "Validate Dart-emitted records directly against the canonical JSON Schema.",
+      "Add a Flutter-safe lifecycle path: a WidgetsBindingObserver draining on AppLifecycleState.paused/detached, and a dart:html pagehide/visibilitychange entrypoint for Flutter Web.",
+      "Arm the stdin EOF listener on the first interactive SIGINT rather than at install time, matching the Go and TypeScript policy."
     ]
+  },
+  "shutdown": {
+    "processHooks": [
+      "signal-sigint",
+      "signal-sigterm"
+    ],
+    "autoRegistered": false,
+    "gracePeriodMillis": 15000,
+    "flushDeadlineMillis": 5000,
+    "idempotentFlush": true,
+    "doubleSignalForces": true,
+    "hooksRemovable": true,
+    "symbols": [
+      "installProcessShutdown",
+      "ProcessShutdownController",
+      "Logger.flush",
+      "Logger.close"
+    ],
+    "notes": "dart:io only. Flutter Web has no ProcessSignal and Flutter mobile is torn down through AppLifecycleState, neither of which is covered -- see promotion.blockers."
   }
 }

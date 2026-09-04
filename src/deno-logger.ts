@@ -24,21 +24,80 @@ type DenoRuntime = {
     v8?: string;
     typescript?: string;
   };
+  addSignalListener?: (signal: string, handler: () => void) => void;
+  removeSignalListener?: (signal: string, handler: () => void) => void;
+  exit?: (code?: number) => never;
 };
+
+/**
+ * `unload` does not fire when a process is signalled, and a signal is how a
+ * container stops. Without these, every record buffered by a Deno service is
+ * lost on every ordinary deployment.
+ */
+const DENO_SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'] as const;
 
 export class DenoLogger extends BaseLogger {
   protected declare readonly options: Readonly<DenoLoggerOptions>;
 
   private removeUnloadHandler: (() => void) | null = null;
+  private shutdownInProgress = false;
 
   constructor(options: DenoLoggerOptions = {}) {
     super(options, 'deno');
-    if (options.flushOnUnload !== false && typeof globalThis.addEventListener === 'function') {
-      const unload = (): void => {
-        void this.flushOnExit({ timeoutMillis: options.shutdownTimeoutMillis ?? 2_000 });
+    if (options.flushOnUnload === false) {
+      return;
+    }
+
+    const timeoutMillis = options.shutdownTimeoutMillis ?? 2_000;
+    const removers: Array<() => void> = [];
+
+    if (typeof globalThis.addEventListener === 'function') {
+      const drain = (): void => {
+        void this.flushOnExit({ timeoutMillis });
       };
-      globalThis.addEventListener('unload', unload);
-      this.removeUnloadHandler = () => globalThis.removeEventListener('unload', unload);
+      for (const event of ['unload', 'beforeunload']) {
+        globalThis.addEventListener(event, drain);
+        removers.push(() => globalThis.removeEventListener(event, drain));
+      }
+    }
+
+    const deno = (globalThis as { Deno?: DenoRuntime }).Deno;
+    if (typeof deno?.addSignalListener === 'function') {
+      for (const signal of DENO_SIGNALS) {
+        const onSignal = (): void => {
+          if (this.shutdownInProgress) {
+            // Second signal: stop waiting on the drain and let the process go.
+            this.removeUnloadHandler?.();
+            deno.exit?.(130);
+            return;
+          }
+          this.shutdownInProgress = true;
+          void this.flushOnExit({ timeoutMillis }).finally(() => {
+            this.removeUnloadHandler?.();
+            deno.exit?.(0);
+          });
+        };
+        try {
+          deno.addSignalListener(signal, onSignal);
+          removers.push(() => deno.removeSignalListener?.(signal, onSignal));
+        } catch {
+          // Deno rejects SIGHUP on Windows and refuses any signal listener
+          // without --allow-run in some sandboxes; the unload path still holds.
+        }
+      }
+    }
+
+    if (removers.length > 0) {
+      this.removeUnloadHandler = () => {
+        for (const remove of removers) {
+          try {
+            remove();
+          } catch {
+            // Detaching is best-effort during teardown.
+          }
+        }
+        this.removeUnloadHandler = null;
+      };
     }
   }
 

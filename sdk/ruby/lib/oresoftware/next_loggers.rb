@@ -3,6 +3,7 @@
 require "securerandom"
 require "time"
 require_relative "next_loggers/version"
+require_relative "next_loggers/shutdown"
 
 module ORESoftware
   # Dependency-free Ruby implementation of the next-loggers/v1 wire contract.
@@ -176,6 +177,14 @@ module ORESoftware
       def open_telemetry?
         true
       end
+
+      # The sink is the application's; it owns whatever buffering it does. These
+      # exist so a Logger can drive the lifecycle uniformly across transports.
+      def flush(timeout: nil) = nil
+
+      def flush_on_exit(records = [], timeout: nil) = nil
+
+      def close(timeout: nil) = nil
     end
 
     # Client-safe Supabase transport; the application supplies its sender.
@@ -189,6 +198,12 @@ module ORESoftware
       def write(record)
         @sender.call(record)
       end
+
+      def flush(timeout: nil) = nil
+
+      def flush_on_exit(records = [], timeout: nil) = nil
+
+      def close(timeout: nil) = nil
     end
 
     class LogEvent
@@ -252,6 +267,99 @@ module ORESoftware
         @otel_enabled = !!otel
         @id_factory = id_factory
         @clock = clock
+        @lifecycle_mutex = Mutex.new
+        @closed = false
+      end
+
+      # True once close has run to completion. A closed logger drops records
+      # rather than resurrecting transports that have already been torn down.
+      def closed?
+        @lifecycle_mutex.synchronize { @closed }
+      end
+
+      # Drives one lifecycle hook across every transport.
+      #
+      # Every transport is attempted even after one fails, and the failures are
+      # raised together: during shutdown, a single unreachable destination must
+      # not be allowed to silence the rest.
+      def run_lifecycle(operation, hook, timeout, *args)
+        deadline = NextLoggers.shutdown_deadline(timeout)
+        errors = []
+        @transports.each do |transport|
+          NextLoggers.call_transport_hook(
+            transport, hook, NextLoggers.shutdown_remaining(deadline), *args
+          )
+        rescue StandardError => error
+          errors << error
+        end
+        raise ShutdownError.new(operation, errors) unless errors.empty?
+
+        nil
+      end
+      private :run_lifecycle
+
+      def flush(timeout: nil)
+        run_lifecycle("flush", :flush, timeout)
+      end
+
+      # Last-gasp drain. Any records the caller still holds are written first,
+      # because the point of an exit flush is the tail nothing else will carry.
+      def flush_on_exit(records = [], timeout: nil)
+        deadline = NextLoggers.shutdown_deadline(timeout)
+        errors = []
+        Array(records).each do |record|
+          @transports.each do |transport|
+            transport.write(record) if transport.respond_to?(:write)
+          rescue StandardError => error
+            errors << error
+          end
+        end
+        @transports.each do |transport|
+          result = NextLoggers.call_transport_hook(
+            transport, :flush_on_exit, NextLoggers.shutdown_remaining(deadline), []
+          )
+          if result == :absent
+            NextLoggers.call_transport_hook(
+              transport, :flush, NextLoggers.shutdown_remaining(deadline)
+            )
+          end
+        rescue StandardError => error
+          errors << error
+        end
+        raise ShutdownError.new("flush_on_exit", errors) unless errors.empty?
+
+        nil
+      end
+
+      # Idempotent: a signal handler racing an ordinary ensure block is the
+      # normal case, not an error. The flag is set inside the same critical
+      # section it is read in, so exactly one caller does the work.
+      def close(timeout: nil)
+        claimed = @lifecycle_mutex.synchronize do
+          next false if @closed
+
+          @closed = true
+          true
+        end
+        return nil unless claimed
+
+        deadline = NextLoggers.shutdown_deadline(timeout)
+        errors = []
+        begin
+          flush_on_exit([], timeout: NextLoggers.shutdown_remaining(deadline))
+        rescue ShutdownError => error
+          errors.concat(error.errors)
+        end
+        @transports.each do |transport|
+          NextLoggers.call_transport_hook(
+            transport, :close, NextLoggers.shutdown_remaining(deadline)
+          )
+        rescue StandardError => error
+          errors << error
+        end
+        raise ShutdownError.new("close", errors) unless errors.empty?
+
+        nil
       end
 
       def set_otel_enabled(enabled)
