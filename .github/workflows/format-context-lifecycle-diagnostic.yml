@@ -62,10 +62,21 @@ jobs:
             sdk/go/request_context_test.go
           cargo fmt --manifest-path sdk/rust-context/Cargo.toml
           cargo fmt --manifest-path sdk/rust-request-context/Cargo.toml
-          dart format \
-            sdk/dart/lib/next_loggers.dart \
-            sdk/dart/lib/shutdown.dart \
-            sdk/dart/test/context_shutdown.dart
+          # Run inside the package so the formatter picks up the pubspec language
+          # version (>=3.3.0 => short style). From the repo root, or without a resolved
+          # package config, it would default to the tall style and the in-package `dart format --set-exit-if-changed` check in
+          # `npm run test:polyglot` would flip the same files straight back.
+          (
+            cd sdk/dart
+            # `dart format` reads the package language version from
+            # .dart_tool/package_config.json, so resolve the package first;
+            # without it the formatter falls back to the newest (tall) style.
+            dart pub get
+            dart format \
+              lib/next_loggers.dart \
+              lib/shutdown.dart \
+              test/context_shutdown.dart
+          )
           (cd sdk/gleam && gleam format src test)
 
       - name: Validate Node request-context isolation
