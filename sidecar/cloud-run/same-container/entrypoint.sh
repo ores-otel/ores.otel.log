@@ -36,7 +36,7 @@ terminate_children() {
 }
 
 # ShellCheck does not model trap-dispatched function calls.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 on_signal() {
   signal_received=true
   log_event INFO shutdown_requested
