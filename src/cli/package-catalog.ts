@@ -28,6 +28,7 @@ export const ZED_TARGET_NAMES = [
   'repository',
   'contracts',
   'k8s-sidecar',
+  'cloud-run-sidecar',
   'nodejs',
   'python',
   'golang',

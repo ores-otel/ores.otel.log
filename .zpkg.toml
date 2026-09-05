@@ -82,6 +82,11 @@ dir = "sidecar"
 name = "otel-k8s-sidecar"
 adapter = "none"
 
+[targets.cloud-run-sidecar]
+dir = "sidecar/cloud-run"
+name = "otel-cloud-run-sidecar"
+adapter = "none"
+
 [targets.nodejs]
 dir = "sdk/nodejs"
 name = "next-loggers-nodejs"

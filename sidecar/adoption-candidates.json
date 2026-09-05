@@ -1,18 +1,18 @@
 {
   "$schema": "./adoption-candidates.schema.json",
-  "schemaVersion": "1.0.0",
-  "observedAt": "2026-08-25T15:34:00Z",
+  "schemaVersion": "1.1.0",
+  "observedAt": "2026-09-04T21:40:44Z",
   "policy": {
-    "minimumCandidates": 7,
-    "maximumCandidates": 15,
+    "minimumCandidates": 12,
+    "maximumCandidates": 20,
     "sidecarPackage": "oresoftware/otel-k8s-sidecar",
     "sidecarVersion": "0.1.0",
     "collectorImage": {
       "repository": "otel/opentelemetry-collector-contrib",
-      "tag": "0.159.0",
-      "digest": "sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
-      "releaseUrl": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/tag/v0.159.0",
-      "publishedAt": "2026-08-18T01:09:57Z"
+      "tag": "0.160.0",
+      "digest": "sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6",
+      "releaseUrl": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/tag/v0.160.0",
+      "publishedAt": "2026-09-02T22:47:58Z"
     },
     "upstreamEndpoint": "dd-otel-collector.observability.svc.cluster.local:4317",
     "productionMutation": false
@@ -20,7 +20,7 @@
   "candidates": [
     {
       "repository": "3FA-app/3fa-backend.rs",
-      "ref": "bb470b4e2737db775718110a03623a87b636cdee",
+      "ref": "7824076908803fc1e83d726f5f6a64311a26c096",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -49,7 +49,7 @@
     },
     {
       "repository": "3FA-app/3fa-web-server.rs",
-      "ref": "3fded3a9779a3a6da14e0a681742cf85f9ee77ee",
+      "ref": "b600e5b7edf7f2c9b7137746eb357b84b82212dc",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -77,7 +77,7 @@
     },
     {
       "repository": "athlet-o/athleto-app-rs",
-      "ref": "102ebbc2f37d256ddc55418225fff99370e3b306",
+      "ref": "37a55cd3921e2dfae6adb7feb58bb3870086a8bc",
       "visibility": "public",
       "workload": {
         "apiVersion": "apps/v1",
@@ -105,7 +105,7 @@
     },
     {
       "repository": "athlet-o/athleto-backend.rs",
-      "ref": "bfa03d04ecfb32c3213467a17de15783169a35b8",
+      "ref": "3cdb7985397f595e847ac6fdeb69d2f307586ff1",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -134,7 +134,7 @@
     },
     {
       "repository": "benefactor-cc/backend.rs",
-      "ref": "0b118fdea09e20bc698343b06237bcf44235280b",
+      "ref": "af01f89da9604d3b002161d12c96efbeb9c253fa",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -162,7 +162,7 @@
     },
     {
       "repository": "quaestor-ledger/quaestor-ledger-server.rs",
-      "ref": "a3759dc3980e2fca305977a1cd0584f169a45af0",
+      "ref": "36e8d370bd1a45656f2d27fb6b9de6f27f33a2f6",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -191,7 +191,7 @@
     },
     {
       "repository": "daedalus-fab/daedalus-api-server.rs",
-      "ref": "aef9908f10c7898eff219c1faeb001694a335334",
+      "ref": "123dc6500596d38461e5ddc9718f0c61058f1307",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -220,7 +220,7 @@
     },
     {
       "repository": "daedalus-fab/daedalus-web-server.rs",
-      "ref": "27c02bdebe198becdce4566d20b47a6ff4aaa432",
+      "ref": "f16205bff28ffd9baa58e6fce42eea39167b5e98",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -249,7 +249,7 @@
     },
     {
       "repository": "daedalus-fab/fabrication-server.rs",
-      "ref": "b5617b5b002fbf9748e9f01ae66d477deb0bc810",
+      "ref": "5c516be49c3ebe239dd510c4c93c960d1f1221db",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -278,7 +278,7 @@
     },
     {
       "repository": "scintilla-run/gleam-lambda-runner",
-      "ref": "75c44bd160e3c79328a7a4d35b2b5f085c4cd18c",
+      "ref": "3d255ca33afe259ded5ccc50659a111b10892d01",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -306,7 +306,7 @@
     },
     {
       "repository": "ORESoftware/mip-solver-node.rs",
-      "ref": "e61d20b337f64f9e80fe5ce36aa3695e737c4dff",
+      "ref": "aac782640b3c0202c937a86fda2e567eb090b737",
       "visibility": "public",
       "workload": {
         "apiVersion": "apps/v1",
@@ -334,7 +334,7 @@
     },
     {
       "repository": "ORESoftware/tor-server.rs",
-      "ref": "3124b1a8e305e0aa141c4b6e87846c740405b22e",
+      "ref": "0bc463a3e5197a8afb24b9ccce27656d9aaca840",
       "visibility": "private",
       "workload": {
         "apiVersion": "apps/v1",
@@ -359,6 +359,150 @@
         "no-pod-local-collector",
         "multi-signal-runtime",
         "existing-network-policy"
+      ]
+    },
+    {
+      "repository": "sonus-auris/sonus-auris-api-server.rs",
+      "ref": "71e548c956df19c9920955d2854a71dd20ae7b49",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-sound-recorder-rs",
+        "container": "sound-recorder-rs",
+        "deploymentRepository": "ORESoftware/k8s-cluster",
+        "deploymentRef": "0eed5ee5e5efbd1178e9e0d195e76d775769d16c",
+        "manifests": ["remote/argocd/dd-next-runtime/dd-sound-recorder-rs.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "explicit"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 5,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "akrion-sim/akrion-backend.rs",
+      "ref": "d379e28bdf344626c056b23f11a49c883db4c5e3",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-soccer-rs",
+        "container": "soccer-rs",
+        "deploymentRepository": "ORESoftware/k8s-cluster",
+        "deploymentRef": "0eed5ee5e5efbd1178e9e0d195e76d775769d16c",
+        "manifests": ["remote/argocd/dd-next-runtime/dd-soccer-rs.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "explicit"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 5,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "canonical-cloud/canonical-web-server.rs",
+      "ref": "8cae04230f4fd53df42b9d2a3dd7d9179c8e3683",
+      "visibility": "public",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "canonical-cloud-web",
+        "container": "web",
+        "deploymentRepository": "ORESoftware/k8s-cluster",
+        "deploymentRef": "0eed5ee5e5efbd1178e9e0d195e76d775769d16c",
+        "manifests": ["remote/argocd/canonical-cloud/web.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4317",
+        "protocol": "grpc",
+        "protocolSource": "explicit"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4317",
+        "rolloutWave": 5,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector",
+        "multi-signal-runtime"
+      ]
+    },
+    {
+      "repository": "sagitta-stack/dart-server",
+      "ref": "83083cabce61f4364263b1f9bd9e890727ed9eba",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-dart-server",
+        "container": "dart-server",
+        "manifests": ["k8s/ec2/dd-dart-server.deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "application-default"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 5,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector"
+      ]
+    },
+    {
+      "repository": "shared-auth/shared-auth-server.rs",
+      "ref": "5cb47d3169df6829c468ea724e8acd61fecbcd6d",
+      "visibility": "private",
+      "workload": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "name": "dd-shared-auth",
+        "container": "shared-auth",
+        "manifests": ["deploy/k8s/deployment.yaml"]
+      },
+      "current": {
+        "endpoint": "http://dd-otel-collector.observability.svc.cluster.local:4318",
+        "protocol": "http/protobuf",
+        "protocolSource": "explicit"
+      },
+      "adoption": {
+        "localEndpoint": "http://127.0.0.1:4318",
+        "rolloutWave": 5,
+        "requiresLiveCanary": true
+      },
+      "selectionEvidence": [
+        "kubernetes-workload-at-exact-head",
+        "direct-remote-otlp-export",
+        "no-pod-local-collector"
       ]
     }
   ]

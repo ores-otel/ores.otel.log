@@ -1,8 +1,10 @@
-# Ores OTEL Kubernetes sidecar
+# Ores OTEL Kubernetes and Cloud Run sidecars
 
 `oresoftware/otel-k8s-sidecar` is an opt-in Zed package target containing a
-hardened OpenTelemetry Collector sidecar configuration, a Kustomize ConfigMap
-base, a deterministic patch renderer, and an exact-head adoption catalog.
+hardened OpenTelemetry Collector sidecar configuration, a reproducible
+Dockerfile, a Kustomize ConfigMap base, a deterministic patch renderer, and an
+exact-head adoption catalog. `oresoftware/otel-cloud-run-sidecar` adds native
+multi-container and same-container Cloud Run layouts.
 
 The sidecar accepts OTLP logs, metrics, and traces over `127.0.0.1:4317` and
 `127.0.0.1:4318`. It adds pod, namespace, node, and GitHub-repository resource
@@ -28,8 +30,12 @@ collection, so this package deliberately does not do that.
 
 - OTLP receivers bind to pod-local loopback, not `0.0.0.0`.
 - Kubelet health binds separately on port `13133`; no Service is created.
-- The collector image is `0.159.0` pinned to the official multi-architecture
-  digest `sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc`.
+- The collector image is `0.160.0` pinned to the official multi-architecture
+  digest `sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6`.
+- `k8s/Dockerfile` has an explicit `entrypoint.sh` `ENTRYPOINT` and collector
+  `CMD`; it adds only a pinned BusyBox runtime around the pinned collector.
+- Application signals and collector self-telemetry identify Ores with
+  `ores.telemetry.source=https://github.com/ores-otel`.
 - The container runs as UID/GID `10001`, read-only, without privilege
   escalation or Linux capabilities, under `RuntimeDefault` seccomp.
 - Memory is limited to `128Mi`; the collector limiter uses `96Mi`, with a
@@ -97,11 +103,47 @@ adds the `ores-otel-sidecar` container, and merges the sidecar ConfigMap volume.
 Review the rendered diff; if the workload has more than one application
 container, render or hand-review one explicit patch per emitting container.
 
+Build the sidecar itself from the installed package rather than treating its
+configuration as a loose file:
+
+```sh
+docker build \
+  --file zed_modules/oresoftware/otel-k8s-sidecar/k8s/Dockerfile \
+  --tag ghcr.io/ores-otel/otel-k8s-sidecar:0.1.0 \
+  zed_modules/oresoftware/otel-k8s-sidecar
+```
+
+The renderer continues to use the pinned upstream collector image until the
+Ores wrapper image is published and its immutable digest is recorded. Generated
+patches are review artifacts, not permission to deploy an unpinned wrapper.
+
+## Cloud Run
+
+Install the dedicated target when a workload is moving to Cloud Run:
+
+```sh
+zed add oresoftware/otel-cloud-run-sidecar@=0.1.0
+zed install --frozen --install-mode copy --target cloud-run-sidecar
+```
+
+[`cloud-run/README.md`](cloud-run/README.md) covers two supported layouts. The
+preferred layout uses Cloud Run's native multi-container model. The fallback
+layout runs the collector and application under one shell supervisor, whose
+Dockerfile still keeps `ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]` separate
+from the application `CMD`. Both layouts keep OTLP on loopback and require an
+authenticated TLS upstream.
+
+There is deliberately no stdout named pipe. Applications install the matching
+Ores Rust, TypeScript/Node, or Dart SDK through Zed and send typed OTLP locally;
+Cloud Run continues to capture stdout/stderr independently. This avoids making
+application availability depend on pipe consumers or telemetry backpressure.
+
 ## Evidence-backed candidate cohort
 
-The catalog was refreshed against each default branch on 2026-08-25. All 12
+The catalog was refreshed against each default branch on 2026-09-04. All 17
 repositories had an exact-head Kubernetes workload, a direct remote OTLP
-endpoint, and no pod-local collector in that manifest.
+endpoint in the manifest or runtime default, and no pod-local collector. The
+five additions deliberately span five more GitHub organizations.
 
 | Wave | Repository | Workload | Current OTLP |
 | ---: | --- | --- | --- |
@@ -117,10 +159,23 @@ endpoint, and no pod-local collector in that manifest.
 | 4 | `scintilla-run/gleam-lambda-runner` | `dd-gleam-lambda-runner` | gRPC `:4317` |
 | 4 | `ORESoftware/mip-solver-node.rs` | `dd-in-house-mip-solver-node-master` | gRPC `:4317` |
 | 4 | `ORESoftware/tor-server.rs` | `tor-client` | gRPC `:4317` |
+| 5 | `sonus-auris/sonus-auris-api-server.rs` | `dd-sound-recorder-rs` | gRPC `:4317` |
+| 5 | `akrion-sim/akrion-backend.rs` | `dd-soccer-rs` | HTTP/protobuf `:4318` |
+| 5 | `canonical-cloud/canonical-web-server.rs` | `canonical-cloud-web` | gRPC `:4317` |
+| 5 | `sagitta-stack/dart-server` | `dd-dart-server` | HTTP/protobuf `:4318` runtime default |
+| 5 | `shared-auth/shared-auth-server.rs` | `dd-shared-auth` | HTTP/protobuf `:4318` |
 
-`adoption-candidates.json` records the exact 40-character ref and source
-manifest path for every row. It is selection evidence, not an auto-deployment
-list. Refresh the ref and re-audit the manifest before opening each consumer PR.
+`adoption-candidates.json` records the exact 40-character source ref and
+deployment manifest path for every row. Where `ORESoftware/k8s-cluster` is the
+deployment authority, the workload also records that repository and its exact
+ref instead of pretending the application repo owns the manifest. It is
+selection evidence, not an auto-deployment list. Refresh both refs and re-audit
+the manifest before opening each consumer PR.
+
+`claritas-viz/data-viz-server.rs` was inspected but is not counted: its current
+application and deployment do not emit OTLP, so a collector-only change would
+create an empty sidecar. Instrument that service with an Ores SDK first, then
+add it in a later cohort.
 
 ## Per-workload acceptance
 
