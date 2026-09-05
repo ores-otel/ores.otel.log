@@ -175,8 +175,7 @@
       "src/bun-logger.ts",
       "src/edge-logger.ts",
       "src/cloudflare-worker-logger.ts",
-      "src/supabase-realtime.ts",
-      "src/session-identity.ts"
+      "src/supabase-realtime.ts"
     ],
     "validatesJsonSchema": true,
     "testsContextIsolation": true,
