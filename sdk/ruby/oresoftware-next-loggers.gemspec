@@ -1,12 +1,11 @@
 # frozen_string_literal: true
 
-# The version lives in exactly one place. A literal here is a second source of
-# truth that drifts silently, because nothing installs the gem during CI.
-require_relative "lib/oresoftware/next_loggers/version"
-
 Gem::Specification.new do |spec|
   spec.name = "oresoftware-next-loggers"
-  spec.version = ORESoftware::NextLoggers::VERSION
+  # RubyGems tooling and the Zed preflight require a literal artifact version.
+  # Keep this synchronized with lib/oresoftware/next_loggers/version.rb; the
+  # package parity test rejects drift between the published gem and the SDK.
+  spec.version = "0.1.0"
   spec.authors = ["ORESoftware"]
   spec.email = ["opensource@oresoftware.com"]
 
