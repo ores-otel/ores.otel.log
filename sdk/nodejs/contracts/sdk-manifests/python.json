@@ -166,7 +166,8 @@
       "sdk/python/src/next_loggers/__init__.py",
       "sdk/python/src/next_loggers/context.py",
       "sdk/python/tests/test_conformance.py",
-      "sdk/python/tests/test_context.py"
+      "sdk/python/tests/test_context.py",
+      "sdk/python/src/next_loggers/shutdown.py"
     ],
     "validatesJsonSchema": false,
     "testsContextIsolation": true,
@@ -177,5 +178,27 @@
     "blockers": [
       "Validate Python-emitted records directly against the canonical JSON Schema before package promotion."
     ]
+  },
+  "shutdown": {
+    "processHooks": [
+      "atexit",
+      "signal-sigint",
+      "signal-sigterm"
+    ],
+    "autoRegistered": false,
+    "gracePeriodMillis": 15000,
+    "flushDeadlineMillis": 5000,
+    "idempotentFlush": true,
+    "doubleSignalForces": true,
+    "hooksRemovable": true,
+    "symbols": [
+      "install_process_hooks",
+      "ProcessHooks",
+      "ShutdownError",
+      "Logger.flush",
+      "Logger.flush_on_exit",
+      "Logger.close"
+    ],
+    "notes": "install_process_hooks chains the previous signal handler and skips signal installation off the main thread, reporting why through ProcessHooks.reason."
   }
 }

@@ -102,6 +102,28 @@ const expectedTargets = {
       tag_format: 'sdk/ruby/v{version}',
     },
   },
+  'rust-context': {
+    dir: 'sdk/rust-context',
+    name: 'next-loggers-rust-context',
+    adapter: 'rust',
+    ecosystem: 'cargo',
+    native: {
+      registry: 'crates-io',
+      package: 'oresoftware-next-loggers-context',
+      tag_format: 'sdk/rust-context/v{version}',
+    },
+  },
+  'rust-otel': {
+    dir: 'sdk/rust-otel',
+    name: 'next-loggers-rust-otel',
+    adapter: 'rust',
+    ecosystem: 'cargo',
+    native: {
+      registry: 'crates-io',
+      package: 'oresoftware-next-loggers-otel',
+      tag_format: 'sdk/rust-otel/v{version}',
+    },
+  },
   gleam: { dir: 'sdk/gleam', name: 'next-loggers-gleam', adapter: 'none' },
   erlang: { dir: 'sdk/erlang', name: 'next-loggers-erlang', adapter: 'none' },
   elixir: { dir: 'sdk/elixir', name: 'next-loggers-elixir', adapter: 'none' },
@@ -236,6 +258,27 @@ test('all native package versions are synchronized', async () => {
     ['Python', capture(await read('sdk/python/pyproject.toml'), /^version\s*=\s*"([^"]+)"/m, 'Python')],
     ['Rust', capture(await read('sdk/rust/Cargo.toml'), /^version\s*=\s*"([^"]+)"/m, 'Rust')],
     ['WASM', capture(await read('sdk/wasm/Cargo.toml'), /^version\s*=\s*"([^"]+)"/m, 'WASM')],
+    // Two publishable crates sat outside this check entirely, so they could
+    // ship a version no other artifact reported.
+    [
+      'Rust context',
+      capture(await read('sdk/rust-context/Cargo.toml'), /^version\s*=\s*"([^"]+)"/m, 'Rust context'),
+    ],
+    [
+      'Rust OTEL',
+      capture(await read('sdk/rust-otel/Cargo.toml'), /^version\s*=\s*"([^"]+)"/m, 'Rust OTEL'),
+    ],
+    // The gemspec is the artifact RubyGems publishes. It carried its own
+    // literal, unchecked by anything, so it could ship a version the library
+    // did not report.
+    [
+      'Ruby gemspec',
+      capture(
+        await read('sdk/ruby/oresoftware-next-loggers.gemspec'),
+        /spec\.version\s*=\s*(.+)$/m,
+        'Ruby gemspec',
+      ).trim().replace(/^"|"$/g, ''),
+    ],
     ['Java', capture(await read('sdk/java/pom.xml'), /<version>([^<]+)<\/version>/, 'Java')],
     ['Dart', capture(await read('sdk/dart/pubspec.yaml'), /^version:\s*([^\s]+)$/m, 'Dart')],
     ['Ruby', capture(await read('sdk/ruby/lib/oresoftware/next_loggers/version.rb'), /VERSION\s*=\s*"([^"]+)"/, 'Ruby')],
@@ -244,6 +287,11 @@ test('all native package versions are synchronized', async () => {
     ['Elixir', capture(await read('sdk/elixir/mix.exs'), /@version\s+"([^"]+)"/, 'Elixir')],
   ]);
   for (const [name, version] of versions) {
+    if (version === 'ORESoftware::NextLoggers::VERSION') {
+      // Derived from lib/oresoftware/next_loggers/version.rb, checked on its
+      // own row above; there is no second literal to drift.
+      continue;
+    }
     assert.equal(version, pkg.version, `${name} version drifted`);
   }
 });

@@ -27,7 +27,7 @@ declare const process: {
   env: Record<string, string | undefined>;
   on(event: string, listener: ProcessListener): void;
   off(event: string, listener: ProcessListener): void;
-  kill(pid: number, signal: 'SIGINT' | 'SIGTERM'): boolean;
+  kill(pid: number, signal: string): boolean;
 };
 
 export interface NodeLoggerOptions extends LoggerOptions {
@@ -51,29 +51,53 @@ async function flushRegisteredNodeLoggers(): Promise<void> {
   );
 }
 
+/**
+ * Signals the loggers attach to. SIGHUP and SIGQUIT are included because a
+ * terminal hangup and a container stop are both ordinary ways for a process to
+ * end, and records buffered at that moment are worth the same as any other.
+ */
+const LIFECYCLE_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT'] as const;
+type LifecycleSignal = (typeof LIFECYCLE_SIGNALS)[number];
+
 const handleBeforeExit = (): void => {
   if (beforeExitDrainInProgress || shutdownInProgress) {
     return;
   }
+  // Detached for the duration of the drain, because flushing keeps the event
+  // loop alive and would otherwise re-enter this handler. It is re-attached
+  // below: a beforeExit drain can revive the loop, and the next quiescence
+  // deserves a flush just as much as this one did.
   process.off('beforeExit', handleBeforeExit);
   beforeExitDrainInProgress = true;
   void flushRegisteredNodeLoggers().finally(() => {
     beforeExitDrainInProgress = false;
+    if (lifecycleHandlersInstalled && !shutdownInProgress) {
+      process.on('beforeExit', handleBeforeExit);
+    }
   });
 };
 
-async function handleSignal(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
+async function handleSignal(signal: LifecycleSignal): Promise<void> {
   if (shutdownInProgress) {
+    // A second Ctrl-C means the operator is done waiting. Because attaching a
+    // listener overrode the kernel default, doing nothing here would make the
+    // process unkillable for as long as a wedged transport takes to give up.
+    removeLifecycleHandlers();
+    process.kill(process.pid, signal);
     return;
   }
   shutdownInProgress = true;
-  await flushRegisteredNodeLoggers();
-  removeLifecycleHandlers();
-  process.kill(process.pid, signal);
+  try {
+    await flushRegisteredNodeLoggers();
+  } finally {
+    removeLifecycleHandlers();
+    process.kill(process.pid, signal);
+  }
 }
 
-const handleSigint = (): void => void handleSignal('SIGINT');
-const handleSigterm = (): void => void handleSignal('SIGTERM');
+const signalHandlers = new Map<LifecycleSignal, () => void>(
+  LIFECYCLE_SIGNALS.map((signal) => [signal, () => void handleSignal(signal)]),
+);
 
 function installLifecycleHandlers(): void {
   if (lifecycleHandlersInstalled) {
@@ -81,8 +105,13 @@ function installLifecycleHandlers(): void {
   }
   lifecycleHandlersInstalled = true;
   process.on('beforeExit', handleBeforeExit);
-  process.on('SIGINT', handleSigint);
-  process.on('SIGTERM', handleSigterm);
+  for (const [signal, handler] of signalHandlers) {
+    try {
+      process.on(signal, handler);
+    } catch {
+      // Windows has no SIGQUIT and rejects some POSIX names outright.
+    }
+  }
 }
 
 function removeLifecycleHandlers(): void {
@@ -91,8 +120,13 @@ function removeLifecycleHandlers(): void {
   }
   lifecycleHandlersInstalled = false;
   process.off('beforeExit', handleBeforeExit);
-  process.off('SIGINT', handleSigint);
-  process.off('SIGTERM', handleSigterm);
+  for (const [signal, handler] of signalHandlers) {
+    try {
+      process.off(signal, handler);
+    } catch {
+      // Mirrors the install guard above.
+    }
+  }
 }
 
 function registerNodeLogger(logger: NodeLogger): void {

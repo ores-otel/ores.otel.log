@@ -58,9 +58,14 @@ export interface BrowserStreamOptions {
   urgentLevels?: readonly string[];
   /** Wraps a batch before it goes on the wire. Default {type:'log-batch',records}. */
   mapBatch?: (records: readonly LogRecord[]) => string;
-  /** Endpoint for the pagehide sendBeacon flush. Without it, no beacon is sent. */
+  /**
+   * HTTP endpoint for the page-teardown flush. sendBeacon is tried first and
+   * a keepalive fetch is the fallback, because sendBeacon has a small
+   * per-origin quota (~64 KiB) and silently returns false once it is spent.
+   */
   beaconUrl?: string;
   sendBeacon?: (url: string, data?: BodyInit | null) => boolean;
+  fetch?: typeof fetch;
   /** Attach pagehide/visibilitychange flush handlers. Default true. */
   flushOnPageHide?: boolean;
   onError?: (error: unknown) => void;
@@ -325,17 +330,62 @@ export class BrowserStreamTransport implements LogTransport {
     if (pending.length === 0) {
       return;
     }
+    const beaconUrl = this.options.beaconUrl;
+    if (!beaconUrl) {
+      // Silence here would be indistinguishable from delivery. The records are
+      // genuinely lost, and the application deserves to be told which and how
+      // many, not to discover it later from a gap in the log.
+      this.options.onError?.(
+        new Error(
+          `browser-stream dropped ${pending.length} records at page teardown: ` +
+            'no beaconUrl is configured',
+        ),
+      );
+      return;
+    }
+
+    const body = this.encode(pending);
     const beacon =
       this.options.sendBeacon ??
       (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function'
         ? navigator.sendBeacon.bind(navigator)
         : undefined);
-    const beaconUrl = this.options.beaconUrl;
-    if (!beacon || !beaconUrl) {
+
+    try {
+      if (beacon?.(beaconUrl, body)) {
+        this.queue.clear();
+        return;
+      }
+    } catch (error) {
+      // A sendBeacon that throws rather than returning false is an environment
+      // fault, not backpressure. Reporting and retaining is the long-standing
+      // contract here, and retrying the same payload down a different path
+      // would risk duplicating whatever the beacon may already have sent.
+      this.options.onError?.(error);
+      return;
+    }
+
+    // sendBeacon returned false: over its per-origin quota, or unavailable in
+    // this runtime. A keepalive fetch survives the document going away for the
+    // same reason a beacon does, and carries the batch when the beacon cannot.
+    const fetchImplementation = this.options.fetch ?? globalThis.fetch;
+    if (typeof fetchImplementation !== 'function') {
+      this.options.onError?.(
+        new Error(
+          `browser-stream dropped ${pending.length} records at page teardown: ` +
+            'sendBeacon refused and no fetch implementation is available',
+        ),
+      );
       return;
     }
     try {
-      beacon(beaconUrl, this.encode(pending));
+      void fetchImplementation(beaconUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        keepalive: true,
+        credentials: 'omit',
+      }).catch((error: unknown) => this.options.onError?.(error));
       this.queue.clear();
     } catch (error) {
       this.options.onError?.(error);

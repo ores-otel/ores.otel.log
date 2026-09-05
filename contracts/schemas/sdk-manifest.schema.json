@@ -18,7 +18,8 @@
     "context",
     "telemetry",
     "conformance",
-    "promotion"
+    "promotion",
+    "shutdown"
   ],
   "properties": {
     "manifestVersion": {
@@ -529,6 +530,98 @@
           }
         }
       ]
+    },
+    "shutdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How this SDK guarantees that buffered records reach their destination when the host stops.",
+      "required": [
+        "processHooks",
+        "autoRegistered",
+        "gracePeriodMillis",
+        "flushDeadlineMillis",
+        "idempotentFlush",
+        "doubleSignalForces",
+        "hooksRemovable",
+        "symbols"
+      ],
+      "properties": {
+        "processHooks": {
+          "type": "array",
+          "description": "Runtime-native lifecycle events this SDK can attach to. Empty only for hosts with no exit event at all (wasm).",
+          "items": {
+            "type": "string",
+            "enum": [
+              "atexit",
+              "signal-sigint",
+              "signal-sigterm",
+              "signal-sighup",
+              "signal-sigquit",
+              "process-beforeExit",
+              "process-exit",
+              "shutdown-hook",
+              "drop",
+              "finalizer",
+              "context-cancel",
+              "otp-terminate",
+              "application-stop",
+              "at-exit",
+              "pagehide",
+              "visibilitychange-hidden",
+              "freeze",
+              "beforeunload",
+              "unload",
+              "app-lifecycle-detached",
+              "wait-until",
+              "host-driven"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "autoRegistered": {
+          "type": "boolean",
+          "description": "True when importing the SDK attaches the hooks. False when the application must call an install function."
+        },
+        "gracePeriodMillis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000,
+          "description": "Default total drain budget. 0 means the host provides no time to drain."
+        },
+        "flushDeadlineMillis": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 600000,
+          "description": "Hard ceiling on the flush itself, so a wedged destination cannot hang shutdown."
+        },
+        "idempotentFlush": {
+          "type": "boolean",
+          "description": "Flush/close may be invoked twice (signal plus atexit) without double-sending or throwing."
+        },
+        "doubleSignalForces": {
+          "type": "boolean",
+          "description": "A second SIGINT/SIGTERM abandons the drain and exits immediately, so the host stays interruptible."
+        },
+        "hooksRemovable": {
+          "type": "boolean",
+          "description": "Installation returns a disposer, so tests and embedded uses do not leak listeners."
+        },
+        "symbols": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "description": "Public identifiers implementing the contract, verified against sourceFiles."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      }
     }
   }
 }

@@ -50,12 +50,27 @@ async function flushBunLoggers(): Promise<void> {
 }
 
 const handleBunBeforeExit = (): void => {
+  if (bunShutdownInProgress) {
+    return;
+  }
+  // Detached for the drain, because flushing keeps the loop alive and would
+  // re-enter this handler; re-attached afterwards, because a beforeExit drain
+  // can revive the loop and the next quiescence deserves a flush too.
   getBunProcess()?.off('beforeExit', handleBunBeforeExit);
-  void flushBunLoggers();
+  void flushBunLoggers().finally(() => {
+    if (bunHandlersInstalled && !bunShutdownInProgress) {
+      getBunProcess()?.on('beforeExit', handleBunBeforeExit);
+    }
+  });
 };
 
 async function handleBunSignal(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
   if (bunShutdownInProgress) {
+    // A second signal abandons the drain: attaching a listener overrode the
+    // kernel default, so swallowing this would leave the process unkillable.
+    removeBunHandlers();
+    const escalate = getBunProcess();
+    escalate?.kill(escalate.pid, signal);
     return;
   }
   bunShutdownInProgress = true;

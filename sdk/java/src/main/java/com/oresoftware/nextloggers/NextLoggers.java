@@ -1,6 +1,7 @@
 package com.oresoftware.nextloggers;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -93,6 +94,11 @@ public final class NextLoggers {
     void write(LogRecord record) throws Exception;
     default boolean isOpenTelemetry() { return false; }
     default void flush() throws Exception {}
+    /** Last-gasp drain: any records the caller still holds, then a flush. */
+    default void flushOnExit(List<LogRecord> records) throws Exception {
+      for (LogRecord record : records) write(record);
+      flush();
+    }
     default void close() throws Exception {}
   }
 
@@ -244,6 +250,8 @@ public final class NextLoggers {
     private final List<Transport> transports;
     private volatile boolean otelEnabled;
     private volatile boolean closed;
+    private final java.util.concurrent.atomic.AtomicBoolean closing =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public Logger(Options options) {
       Objects.requireNonNull(options, "options");
@@ -321,11 +329,39 @@ public final class NextLoggers {
       if (failure != null) throw failure;
     }
 
+    /**
+     * Drains whatever the caller still holds. Every transport is attempted even
+     * after one fails, and the failures are reported together: shutdown is
+     * exactly when a single broken destination must not hide the others.
+     */
+    public void flushOnExit(List<LogRecord> records) {
+      List<LogRecord> pending = records == null ? List.of() : List.copyOf(records);
+      RuntimeException failure = null;
+      for (Transport transport : transports) {
+        try {
+          transport.flushOnExit(pending);
+        } catch (Exception error) {
+          if (failure == null) failure = new RuntimeException("next-loggers exit flush failure");
+          failure.addSuppressed(error);
+        }
+      }
+      if (failure != null) throw failure;
+    }
+
+    /**
+     * Idempotent. A JVM shutdown hook racing a try-with-resources block is the
+     * normal case, not an error, so the winner is decided before any work
+     * starts rather than after it finishes.
+     */
     @Override
     public void close() {
-      if (closed) return;
-      flush();
+      if (!closing.compareAndSet(false, true)) return;
       RuntimeException failure = null;
+      try {
+        flushOnExit(List.of());
+      } catch (RuntimeException error) {
+        failure = error;
+      }
       for (Transport transport : transports) {
         try {
           transport.close();
@@ -337,6 +373,60 @@ public final class NextLoggers {
       closed = true;
       if (failure != null) throw failure;
     }
+
+    public boolean isClosed() {
+      return closed;
+    }
+  }
+
+  /** Detaches a shutdown hook; see {@link #installShutdownHook}. */
+  public static final class ShutdownHookHandle {
+    private final Thread hook;
+
+    private ShutdownHookHandle(Thread hook) {
+      this.hook = hook;
+    }
+
+    /** Removes the hook. Returns false once the JVM has begun shutting down. */
+    public boolean uninstall() {
+      try {
+        return Runtime.getRuntime().removeShutdownHook(hook);
+      } catch (IllegalStateException alreadyShuttingDown) {
+        return false;
+      }
+    }
+  }
+
+  /**
+   * Closes {@code logger} when the JVM exits.
+   *
+   * Nothing is installed by loading this class: a host that embeds the SDK owns
+   * its own lifecycle. The drain runs on a daemon worker the hook waits on for
+   * at most {@code timeout}, because the JVM gives shutdown hooks no deadline of
+   * their own and a wedged transport would otherwise hang exit indefinitely.
+   * Note that a hook does not run for SIGKILL or {@code Runtime.halt}.
+   */
+  public static ShutdownHookHandle installShutdownHook(Logger logger, Duration timeout) {
+    Objects.requireNonNull(logger, "logger");
+    Duration budget = timeout == null ? Duration.ofSeconds(5) : timeout;
+    Thread hook = new Thread(() -> {
+      Thread worker = new Thread(() -> {
+        try {
+          logger.close();
+        } catch (RuntimeException error) {
+          System.err.println("next-loggers shutdown drain failed: " + error.getMessage());
+        }
+      }, "next-loggers-shutdown-drain");
+      worker.setDaemon(true);
+      worker.start();
+      try {
+        worker.join(Math.max(1L, budget.toMillis()));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }, "next-loggers-shutdown");
+    Runtime.getRuntime().addShutdownHook(hook);
+    return new ShutdownHookHandle(hook);
   }
 
   public static final class Event {
