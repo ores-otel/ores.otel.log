@@ -34,6 +34,14 @@ const releases = {
     prefix: 'sdk/rust/v',
     version: textVersion('sdk/rust/Cargo.toml', /^version\s*=\s*"([^"]+)"/m, 'Rust'),
   },
+  'rust-context': {
+    prefix: 'sdk/rust-context/v',
+    version: textVersion('sdk/rust-context/Cargo.toml', /^version\s*=\s*"([^"]+)"/m, 'Rust context'),
+  },
+  'rust-otel': {
+    prefix: 'sdk/rust-otel/v',
+    version: textVersion('sdk/rust-otel/Cargo.toml', /^version\s*=\s*"([^"]+)"/m, 'Rust OTEL'),
+  },
   wasm: {
     prefix: 'sdk/wasm/v',
     version: textVersion('sdk/wasm/Cargo.toml', /^version\s*=\s*"([^"]+)"/m, 'WASM'),

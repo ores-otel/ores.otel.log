@@ -1,5 +1,6 @@
 import {
   BaseLogger,
+  type FlushOptions,
   type LogEvent,
   type LogFields,
   type LoggerOptions,
@@ -46,6 +47,32 @@ export class EdgeLogger extends BaseLogger {
       this.options.onLifecycleError?.(error, 'waitUntil');
     }
     return promise;
+  }
+
+  /**
+   * There is no process exit in an isolate: the only thing that keeps work
+   * alive past the response is `ctx.waitUntil`. Without handing the final
+   * drain to it, whatever a buffering transport still holds is discarded when
+   * the isolate is evicted -- which is precisely the tail of every request.
+   */
+  override async flush(options: FlushOptions = {}): Promise<void> {
+    const drain = super.flush(options);
+    this.handOff(drain);
+    await drain;
+  }
+
+  override async close(options: FlushOptions = {}): Promise<void> {
+    const drain = super.close(options);
+    this.handOff(drain);
+    await drain;
+  }
+
+  private handOff(promise: Promise<unknown>): void {
+    try {
+      this.options.executionContext?.waitUntil(promise);
+    } catch (error) {
+      this.options.onLifecycleError?.(error, 'waitUntil');
+    }
   }
 
   override anew(options: EdgeLoggerOptions = {}): EdgeLogger {

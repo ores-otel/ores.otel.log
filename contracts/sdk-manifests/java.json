@@ -172,5 +172,25 @@
       "Add an explicit executor context capture and propagation helper.",
       "Validate Java-emitted records directly against the canonical JSON Schema."
     ]
+  },
+  "shutdown": {
+    "processHooks": [
+      "shutdown-hook"
+    ],
+    "autoRegistered": false,
+    "gracePeriodMillis": 15000,
+    "flushDeadlineMillis": 5000,
+    "idempotentFlush": true,
+    "doubleSignalForces": false,
+    "hooksRemovable": true,
+    "symbols": [
+      "installShutdownHook",
+      "ShutdownHookHandle",
+      "Logger.flush",
+      "Logger.flushOnExit",
+      "Logger.close",
+      "Logger.isClosed"
+    ],
+    "notes": "The JVM gives shutdown hooks no deadline, so the hook waits on a daemon worker for at most the configured timeout. A hook does not run for SIGKILL or Runtime.halt, and the JVM offers no second-signal escalation."
   }
 }

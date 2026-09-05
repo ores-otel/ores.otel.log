@@ -4,7 +4,11 @@ export type SupabaseAccessToken =
   | string
   | (() => string | undefined | Promise<string | undefined>);
 
-export type SupabaseRealtimeDropReason = 'queue-full' | 'closed' | 'delivery-failed';
+export type SupabaseRealtimeDropReason =
+  | 'queue-full'
+  | 'closed'
+  | 'delivery-failed'
+  | 'record-too-large';
 
 export interface SupabaseRealtimeDrop {
   reason: SupabaseRealtimeDropReason;
@@ -43,6 +47,25 @@ export interface SupabaseRealtimeAckOptions {
   flushTimeoutMillis?: number;
   reconnect?: boolean;
   maxReconnectAttempts?: number;
+  /**
+   * Records larger than this are dropped rather than wedging the queue.
+   * Realtime rejects frames above roughly 256 KiB, and a frame it refuses is
+   * indistinguishable from one that was never acknowledged, so an oversized
+   * record would otherwise retry until it exhausted maxAttempts. Default
+   * 128 KiB.
+   */
+  maxRecordBytes?: number;
+  /**
+   * Re-resolve the access token this long before its `exp` and push it over
+   * the joined channel. Default 60s. Without it a token is only ever resolved
+   * at join, so a session outliving its JWT keeps a socket the server will
+   * reject and the callback is not consulted again until a reconnect.
+   */
+  tokenRefreshLeadMillis?: number;
+  /** Flush on pagehide/visibilitychange:hidden/freeze. Default true. */
+  flushOnPageHide?: boolean;
+  /** Retry immediately on online/focus/visible instead of waiting out the backoff. Default true. */
+  resumeOnUserSignals?: boolean;
   retryBaseMillis?: number;
   retryMaxMillis?: number;
   random?: () => number;
@@ -126,26 +149,78 @@ export const realtimeUrl = (value: string): string => {
   if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
     throw new TypeError(`Supabase Realtime requires http(s) or ws(s), got ${url.protocol}`);
   }
+  if (url.username || url.password) {
+    throw new TypeError('Supabase Realtime url must not contain embedded credentials');
+  }
+  // The apikey is appended deliberately at connect time; nothing else belongs
+  // in a URL that ends up in proxy and CDN logs.
+  url.search = '';
+  url.hash = '';
   if (!url.pathname.endsWith('/websocket')) {
     url.pathname = `${url.pathname.replace(/\/$/, '')}/realtime/v1/websocket`;
   }
   return url.toString();
 };
 
-const jwtRole = (value: string): string | undefined => {
-  const payload = value.split('.')[1];
-  if (value.split('.').length !== 3 || !payload) return undefined;
+/**
+ * Decode base64url without atob.
+ *
+ * This used to call `globalThis.atob` and return undefined when it was absent
+ * — which made the service-role check below fail OPEN in any runtime without
+ * it. A guard that silently passes in some runtimes is worse than no guard,
+ * because it reads as protection everywhere.
+ */
+const decodeBase64Url = (value: string): string | undefined => {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/').replace(/=+$/, '');
+  const bytes: number[] = [];
+  let buffer = 0;
+  let bits = 0;
+  for (const character of normalized) {
+    const index = alphabet.indexOf(character);
+    if (index < 0) return undefined;
+    buffer = (buffer << 6) | index;
+    bits += 6;
+    while (bits >= 8) {
+      bits -= 8;
+      bytes.push((buffer >> bits) & 0xff);
+    }
+    buffer &= bits === 0 ? 0 : (1 << bits) - 1;
+  }
   try {
-    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-    const decode = (globalThis as { atob?: (input: string) => string }).atob;
-    if (!decode) return undefined;
-    const parsed = JSON.parse(decode(padded)) as { role?: unknown };
-    return typeof parsed.role === 'string' ? parsed.role : undefined;
+    return typeof TextDecoder === 'function'
+      ? new TextDecoder().decode(Uint8Array.from(bytes))
+      : String.fromCharCode(...bytes);
   } catch {
     return undefined;
   }
 };
+
+const jwtClaims = (value: string): Record<string, unknown> | undefined => {
+  const parts = value.split('.');
+  if (parts.length !== 3 || !parts[1]) return undefined;
+  try {
+    const decoded = decodeBase64Url(parts[1]);
+    return decoded ? (JSON.parse(decoded) as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const jwtRole = (value: string): string | undefined => {
+  const role = jwtClaims(value)?.role;
+  return typeof role === 'string' ? role : undefined;
+};
+
+/** Expiry as epoch milliseconds, or undefined for an opaque key. */
+export const jwtExpiryMillis = (value: string): number | undefined => {
+  const exp = jwtClaims(value)?.exp;
+  return typeof exp === 'number' && Number.isFinite(exp) ? exp * 1_000 : undefined;
+};
+
+/** UTF-8 byte length, for the frame-size caps Realtime enforces. */
+export const byteLength = (value: string): number =>
+  typeof TextEncoder === 'function' ? new TextEncoder().encode(value).byteLength : value.length;
 
 export const assertClientCredential = (value: string, label: string): void => {
   const normalized = value.trim();

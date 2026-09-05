@@ -168,7 +168,22 @@
   "promotion": {
     "ready": false,
     "blockers": [
-      "Validate Elixir-emitted records directly against the canonical JSON Schema."
+      "Validate Elixir-emitted records directly against the canonical JSON Schema.",
+      "Add flush/1, flush_on_exit/1 and close/1 backed by a GenServer with terminate/2.",
+      "Add an Application module with start/2 and stop/1 wired through mix.exs so a release shutdown drains."
     ]
+  },
+  "shutdown": {
+    "processHooks": [],
+    "autoRegistered": false,
+    "gracePeriodMillis": 0,
+    "flushDeadlineMillis": 0,
+    "idempotentFlush": false,
+    "doubleSignalForces": false,
+    "hooksRemovable": false,
+    "symbols": [
+      "NextLoggers.new/2"
+    ],
+    "notes": "No lifecycle at all: no GenServer, no terminate/2, no Application start/2 + stop/1, and no flush/close/flush_on_exit -- see promotion.blockers."
   }
 }

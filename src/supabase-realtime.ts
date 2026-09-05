@@ -1,7 +1,9 @@
 import type { LogRecord, LogTransport, WebSocketLike } from './base-logger.js';
 import {
   assertClientCredential,
+  byteLength,
   createWaiter,
+  jwtExpiryMillis,
   numberOption,
   realtimeUrl,
   unref,
@@ -43,11 +45,124 @@ export class SupabaseRealtimeAckTransport implements LogTransport {
   private acknowledged = 0;
   private failures = 0;
   private dropped = 0;
+  private tokenTimer: ReturnType<typeof setTimeout> | null = null;
+  private detachLifecycle: (() => void) | null = null;
 
   constructor(options: SupabaseRealtimeAckOptions) {
     assertClientCredential(options.publishableKey, 'publishableKey');
     realtimeUrl(options.url);
     this.options = options;
+    this.installLifecycleHandlers();
+  }
+
+  /**
+   * Page teardown and resume.
+   *
+   * A browser tab's most valuable records are the ones just before it goes
+   * away, and nothing here listened for that. The resume signals matter for a
+   * different reason: a laptop that slept for an hour should stream again the
+   * moment it wakes, not at whatever rung of the backoff ladder it reached.
+   */
+  private installLifecycleHandlers(): void {
+    const target = globalThis as {
+      addEventListener?: (type: string, listener: () => void) => void;
+      removeEventListener?: (type: string, listener: () => void) => void;
+    };
+    if (typeof target.addEventListener !== 'function') return;
+
+    const removers: Array<() => void> = [];
+    const add = (type: string, listener: () => void): void => {
+      target.addEventListener!(type, listener);
+      removers.push(() => target.removeEventListener?.(type, listener));
+    };
+    const hidden = (): boolean =>
+      (globalThis as { document?: { visibilityState?: string } }).document?.visibilityState ===
+      'hidden';
+
+    if (this.options.flushOnPageHide !== false) {
+      const exit = (): void => {
+        void this.flush().catch(() => undefined);
+      };
+      add('pagehide', exit);
+      // The last reliable moment on mobile Safari, which routinely discards a
+      // tab without ever firing pagehide.
+      add('visibilitychange', () => {
+        if (hidden()) exit();
+      });
+      add('freeze', exit);
+    }
+
+    if (this.options.resumeOnUserSignals !== false) {
+      const resume = (): void => {
+        if (this.closed || (!this.queue.length && !this.inFlight.size)) return;
+        this.reconnectAttempts = 0;
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+        void this.flush().catch(() => undefined);
+      };
+      add('online', resume);
+      add('focus', resume);
+      add('visibilitychange', () => {
+        if (!hidden()) resume();
+      });
+    }
+
+    if (removers.length) {
+      this.detachLifecycle = () => {
+        for (const remove of removers) {
+          try {
+            remove();
+          } catch {
+            // Detaching is best-effort during teardown.
+          }
+        }
+        this.detachLifecycle = null;
+      };
+    }
+  }
+
+  /**
+   * Re-resolve the token before it expires and hand it to the joined channel.
+   *
+   * Realtime accepts an `access_token` push on a live channel, so this avoids
+   * tearing the socket down. Only meaningful for a callback token: a static
+   * string cannot outlive its own expiry.
+   */
+  private scheduleTokenRefresh(token: string | undefined): void {
+    if (this.tokenTimer) {
+      clearTimeout(this.tokenTimer);
+      this.tokenTimer = null;
+    }
+    if (this.closed || !token || typeof this.options.accessToken !== 'function') return;
+    const expiry = jwtExpiryMillis(token);
+    if (expiry === undefined) return;
+    const lead = numberOption(this.options.tokenRefreshLeadMillis, 60_000);
+    this.tokenTimer = setTimeout(() => {
+      this.tokenTimer = null;
+      void this.pushFreshToken();
+    }, Math.max(1_000, expiry - lead - Date.now()));
+    unref(this.tokenTimer);
+  }
+
+  private async pushFreshToken(): Promise<void> {
+    try {
+      const token = await this.token();
+      this.scheduleTokenRefresh(token);
+      if (!token || !this.joined || this.socket?.readyState !== 1) return;
+      this.socket.send(
+        JSON.stringify({
+          topic: this.topic,
+          event: 'access_token',
+          payload: { access_token: token },
+          ref: this.nextRef(),
+          join_ref: this.joinRef,
+        }),
+      );
+    } catch (error) {
+      this.error(error);
+    }
   }
 
   snapshot(): SupabaseRealtimeSnapshot {
@@ -266,6 +381,7 @@ export class SupabaseRealtimeAckTransport implements LogTransport {
 
   private async open(): Promise<void> {
     const accessToken = await this.token();
+    this.scheduleTokenRefresh(accessToken);
     const socket = this.socketFactory();
     this.socket = socket;
     this.joined = false;
@@ -501,6 +617,27 @@ export class SupabaseRealtimeAckTransport implements LogTransport {
       attempts: 0,
       ...(deliveryWaiter ? { waiter: deliveryWaiter } : {}),
     };
+    // Realtime refuses an oversized frame, and a refused frame looks exactly
+    // like an unacknowledged one, so without this the record would retry until
+    // it burned through maxAttempts and took the queue's throughput with it.
+    const maximumBytes = numberOption(this.options.maxRecordBytes, 128 * 1_024);
+    let encodedBytes = 0;
+    try {
+      encodedBytes = byteLength(JSON.stringify(record));
+    } catch {
+      encodedBytes = maximumBytes + 1;
+    }
+    if (encodedBytes > maximumBytes) {
+      const error = new Error(
+        `Supabase Realtime record ${record.id} is ${encodedBytes} bytes, over the ${maximumBytes} byte limit`,
+      );
+      this.drop(item, 'record-too-large', error);
+      if (deliveryWaiter) {
+        deliveryWaiter.reject(error);
+        return deliveryWaiter.promise;
+      }
+      return Promise.resolve();
+    }
     const maximum = numberOption(this.options.maxQueueSize, 2_000, 0);
     while (this.queue.length >= maximum && this.queue.length) {
       const displaced = this.queue.shift();
@@ -560,6 +697,11 @@ export class SupabaseRealtimeAckTransport implements LogTransport {
     }
     this.closed = true;
     this.stopHeartbeat();
+    if (this.tokenTimer) {
+      clearTimeout(this.tokenTimer);
+      this.tokenTimer = null;
+    }
+    this.detachLifecycle?.();
     const error = failure ?? new Error('Supabase Realtime closed before delivery');
     this.failPending(error);
     this.closeSocket(1000, 'transport closed');

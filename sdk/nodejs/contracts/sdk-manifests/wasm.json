@@ -166,7 +166,23 @@
     "ready": false,
     "blockers": [
       "Define a stable Component Model ABI for the explicit host-owned context bridge.",
-      "Validate guest-produced records against the canonical schema."
+      "Validate guest-produced records against the canonical schema.",
+      "Add flush, flush_on_exit and close to Transport and Logger, and export a guest drain the embedder calls before proc_exit."
     ]
+  },
+  "shutdown": {
+    "processHooks": [
+      "host-driven"
+    ],
+    "autoRegistered": false,
+    "gracePeriodMillis": 0,
+    "flushDeadlineMillis": 0,
+    "idempotentFlush": false,
+    "doubleSignalForces": false,
+    "hooksRemovable": false,
+    "symbols": [
+      "Transport::write"
+    ],
+    "notes": "WebAssembly has no process-exit event: nothing fires when an instance is dropped or proc_exit is called, so the embedder must drain explicitly. The guest side of that contract is not implemented yet -- see promotion.blockers."
   }
 }

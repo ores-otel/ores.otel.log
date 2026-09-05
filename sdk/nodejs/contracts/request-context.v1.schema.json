@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ores-otel.github.io/ores.otel.log/contracts/request-context.v1.schema.json",
+  "title": "ORES request context v1",
+  "description": "Human-authored JSON Schema authority for allowlisted request-scoped correlation values. Credentials, raw tokens, cookies, authorization headers, and email addresses are forbidden.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["requestId"],
+  "properties": {
+    "schema": { "const": "ores.request-context.v1" },
+    "requestId": { "$ref": "#/$defs/id" },
+    "loggedInUserId": { "$ref": "#/$defs/id" },
+    "tenantId": { "$ref": "#/$defs/id" },
+    "sessionId": { "$ref": "#/$defs/id" },
+    "correlationId": { "$ref": "#/$defs/id" },
+    "parentRequestId": { "$ref": "#/$defs/id" },
+    "traceId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "spanId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "operation": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "serviceName": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "locale": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "startedAtUnixMs": { "type": "integer", "minimum": 0 },
+    "deadlineUnixMs": { "type": "integer", "minimum": 0 },
+    "baggage": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "type": "string", "minLength": 1, "maxLength": 256 },
+      "additionalProperties": { "type": "string", "maxLength": 4096 }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[^\\s]+(?: [^\\s]+)*$"
+    }
+  }
+}

@@ -2,6 +2,9 @@
 
 Gem::Specification.new do |spec|
   spec.name = "oresoftware-next-loggers"
+  # RubyGems tooling and the Zed preflight require a literal artifact version.
+  # Keep this synchronized with lib/oresoftware/next_loggers/version.rb; the
+  # package parity test rejects drift between the published gem and the SDK.
   spec.version = "0.1.0"
   spec.authors = ["ORESoftware"]
   spec.email = ["opensource@oresoftware.com"]

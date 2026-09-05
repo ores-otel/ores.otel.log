@@ -11,6 +11,10 @@ import {
   sha256,
 } from '../scripts/backpressure-conformance.mjs';
 
+const packageVersion = JSON.parse(
+  await readFile(new URL('../package.json', import.meta.url), 'utf8'),
+).version;
+
 async function readJson(relativeUrl) {
   const file = fileURLToPath(new URL(relativeUrl, import.meta.url));
   return JSON.parse(await readFile(file, 'utf8'));
@@ -103,7 +107,9 @@ test('machine-readable conformance report binds source, runtime, schema, and vec
   assert.equal(report.schemaVersion, 1);
   assert.equal(report.vectorDigest, `sha256:${sha256(vectorBytes)}`);
   assert.equal(report.implementation.sourceSha, sourceSha);
-  assert.equal(report.implementation.version, '0.1.0');
+  // Derived, not a literal: a hardcoded version here silently passes while the
+  // report it is meant to pin has drifted away from the package.
+  assert.equal(report.implementation.version, packageVersion);
   assert.equal(report.runtime.name, 'node');
   assert.equal(report.runtime.version, process.versions.node);
   assert.deepEqual(report.results, {

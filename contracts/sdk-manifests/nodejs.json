@@ -164,7 +164,18 @@
       "src/context.ts",
       "src/context-shared.ts",
       "src/otel.ts",
-      "src/supabase-ingest.ts"
+      "src/supabase-ingest.ts",
+      "src/shutdown.ts",
+      "src/node-shutdown.ts",
+      "src/server-lifecycle.ts",
+      "src/node-logger.ts",
+      "src/browser-logger.ts",
+      "src/browser-stream.ts",
+      "src/deno-logger.ts",
+      "src/bun-logger.ts",
+      "src/edge-logger.ts",
+      "src/cloudflare-worker-logger.ts",
+      "src/supabase-realtime.ts"
     ],
     "validatesJsonSchema": true,
     "testsContextIsolation": true,
@@ -173,5 +184,34 @@
   "promotion": {
     "ready": true,
     "blockers": []
+  },
+  "shutdown": {
+    "processHooks": [
+      "process-beforeExit",
+      "signal-sigint",
+      "signal-sigterm",
+      "signal-sighup",
+      "signal-sigquit",
+      "pagehide",
+      "visibilitychange-hidden",
+      "freeze",
+      "wait-until"
+    ],
+    "autoRegistered": true,
+    "gracePeriodMillis": 15000,
+    "flushDeadlineMillis": 5000,
+    "idempotentFlush": true,
+    "doubleSignalForces": true,
+    "hooksRemovable": true,
+    "symbols": [
+      "ShutdownCoordinator",
+      "createShutdownCoordinator",
+      "installNodeShutdownSignals",
+      "createNodeHttpShutdown",
+      "installNodeServerShutdown",
+      "flushOnExit",
+      "close"
+    ],
+    "notes": "Importing a runtime entrypoint attaches that runtime hooks; close() detaches them. Edge and Cloudflare isolates have no exit event, so flush() and close() hand the drain to ctx.waitUntil instead."
   }
 }

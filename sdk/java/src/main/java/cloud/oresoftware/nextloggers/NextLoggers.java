@@ -1,5 +1,6 @@
 package cloud.oresoftware.nextloggers;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -9,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /** Dependency-free Java implementation of the next-loggers/v1 contract. */
@@ -80,6 +82,16 @@ public final class NextLoggers {
     default boolean isOpenTelemetry() {
       return false;
     }
+
+    default void flush() throws Exception {}
+
+    /** Last-gasp drain: any records the caller still holds, then a flush. */
+    default void flushOnExit(List<Map<String, Object>> records) throws Exception {
+      for (Map<String, Object> record : records) write(record);
+      flush();
+    }
+
+    default void close() throws Exception {}
   }
 
   /** Application-owned OTEL sink. No global provider or instrumentation is installed. */
@@ -172,13 +184,15 @@ public final class NextLoggers {
     }
   }
 
-  public static final class Logger {
+  public static final class Logger implements AutoCloseable {
     private final String appName;
     private final String name;
     private final String runtime;
     private final Map<String, Object> fields;
     private final List<Transport> transports;
     private volatile boolean otelEnabled = true;
+    private volatile boolean closed;
+    private final AtomicBoolean closing = new AtomicBoolean(false);
 
     public Logger(
         String appName,
@@ -292,6 +306,120 @@ public final class NextLoggers {
     public Logger notOtel() {
       return setOtelEnabled(false);
     }
+
+    /**
+     * Drives one lifecycle hook across every transport, attempting all of them
+     * even after one fails and reporting the failures together. During shutdown
+     * a single unreachable destination must not hide the state of the rest.
+     */
+    private void runLifecycle(String operation, TransportHook hook) {
+      RuntimeException failure = null;
+      for (Transport transport : transports) {
+        try {
+          hook.run(transport);
+        } catch (Exception error) {
+          if (failure == null) {
+            failure = new RuntimeException("next-loggers " + operation + " failure");
+          }
+          failure.addSuppressed(error);
+        }
+      }
+      if (failure != null) throw failure;
+    }
+
+    public void flush() {
+      runLifecycle("flush", Transport::flush);
+    }
+
+    public void flushOnExit(List<Map<String, Object>> records) {
+      List<Map<String, Object>> pending = records == null ? List.of() : List.copyOf(records);
+      runLifecycle("exit flush", transport -> transport.flushOnExit(pending));
+    }
+
+    /**
+     * Idempotent. A JVM shutdown hook racing a try-with-resources block is the
+     * normal case, not an error, so the winner is decided before any work
+     * starts rather than after it finishes.
+     */
+    @Override
+    public void close() {
+      if (!closing.compareAndSet(false, true)) return;
+      RuntimeException failure = null;
+      try {
+        flushOnExit(List.of());
+      } catch (RuntimeException error) {
+        failure = error;
+      }
+      for (Transport transport : transports) {
+        try {
+          transport.close();
+        } catch (Exception error) {
+          if (failure == null) failure = new RuntimeException("next-loggers close failure");
+          failure.addSuppressed(error);
+        }
+      }
+      closed = true;
+      if (failure != null) throw failure;
+    }
+
+    public boolean isClosed() {
+      return closed;
+    }
+  }
+
+  @FunctionalInterface
+  private interface TransportHook {
+    void run(Transport transport) throws Exception;
+  }
+
+  /** Detaches a shutdown hook; see {@link #installShutdownHook}. */
+  public static final class ShutdownHookHandle {
+    private final Thread hook;
+
+    private ShutdownHookHandle(Thread hook) {
+      this.hook = hook;
+    }
+
+    /** Removes the hook. Returns false once the JVM has begun shutting down. */
+    public boolean uninstall() {
+      try {
+        return Runtime.getRuntime().removeShutdownHook(hook);
+      } catch (IllegalStateException alreadyShuttingDown) {
+        return false;
+      }
+    }
+  }
+
+  /**
+   * Closes {@code logger} when the JVM exits.
+   *
+   * Nothing is installed by loading this class: a host that embeds the SDK owns
+   * its own lifecycle. The drain runs on a daemon worker the hook waits on for
+   * at most {@code timeout}, because the JVM gives shutdown hooks no deadline of
+   * their own and a wedged transport would otherwise hang exit indefinitely.
+   * Note that a hook does not run for SIGKILL or {@code Runtime.halt}.
+   */
+  public static ShutdownHookHandle installShutdownHook(Logger logger, Duration timeout) {
+    Objects.requireNonNull(logger, "logger");
+    Duration budget = timeout == null ? Duration.ofSeconds(5) : timeout;
+    Thread hook = new Thread(() -> {
+      Thread worker = new Thread(() -> {
+        try {
+          logger.close();
+        } catch (RuntimeException error) {
+          System.err.println("next-loggers shutdown drain failed: " + error.getMessage());
+        }
+      }, "next-loggers-shutdown-drain");
+      worker.setDaemon(true);
+      worker.start();
+      try {
+        worker.join(Math.max(1L, budget.toMillis()));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }, "next-loggers-shutdown");
+    Runtime.getRuntime().addShutdownHook(hook);
+    return new ShutdownHookHandle(hook);
   }
 
   /** Structural bridge to an application-owned OpenTelemetry span. */

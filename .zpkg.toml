@@ -168,6 +168,28 @@ registry = "rubygems"
 package = "oresoftware-next-loggers"
 tag_format = "sdk/ruby/v{version}"
 
+[targets.rust-context]
+dir = "sdk/rust-context"
+name = "next-loggers-rust-context"
+adapter = "rust"
+ecosystem = "cargo"
+
+[targets.rust-context.native]
+registry = "crates-io"
+package = "oresoftware-next-loggers-context"
+tag_format = "sdk/rust-context/v{version}"
+
+[targets.rust-otel]
+dir = "sdk/rust-otel"
+name = "next-loggers-rust-otel"
+adapter = "rust"
+ecosystem = "cargo"
+
+[targets.rust-otel.native]
+registry = "crates-io"
+package = "oresoftware-next-loggers-otel"
+tag_format = "sdk/rust-otel/v{version}"
+
 # Zed currently models BEAM packages as installable Hex targets but does not
 # yet expose Hex as a native mirror registry. The tag-scoped release workflow
 # publishes these three targets independently to Hex.

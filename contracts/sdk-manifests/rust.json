@@ -169,7 +169,8 @@
       "sdk/rust/src/span.rs",
       "sdk/rust/tests/conformance.rs",
       "sdk/rust/tests/context.rs",
-      "sdk/rust/tests/span.rs"
+      "sdk/rust/tests/span.rs",
+      "sdk/rust/src/shutdown.rs"
     ],
     "validatesJsonSchema": false,
     "testsContextIsolation": true,
@@ -178,7 +179,27 @@
   "promotion": {
     "ready": false,
     "blockers": [
-      "Validate Rust-emitted records directly against the canonical JSON Schema before package promotion."
+      "Validate Rust-emitted records directly against the canonical JSON Schema before package promotion.",
+      "Implement Drop for Logger, deadline-bounded flush, and error accumulation across transports during shutdown."
     ]
+  },
+  "shutdown": {
+    "processHooks": [
+      "drop"
+    ],
+    "autoRegistered": false,
+    "gracePeriodMillis": 0,
+    "flushDeadlineMillis": 0,
+    "idempotentFlush": true,
+    "doubleSignalForces": false,
+    "hooksRemovable": false,
+    "symbols": [
+      "ShutdownStateMachine",
+      "transition_shutdown_state",
+      "Logger::flush",
+      "Logger::flush_on_exit",
+      "Logger::close"
+    ],
+    "notes": "Signal wiring is the application-s: the crate is dependency-free by design and will not pull in a signal crate. The state machine is provided for the host to drive. Drop, deadline-bounded flush and error accumulation are outstanding -- see promotion.blockers."
   }
 }

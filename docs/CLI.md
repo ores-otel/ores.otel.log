@@ -67,6 +67,8 @@ next-loggers lint src
 | `python` | Python | PyPI `oresoftware-next-loggers` | `sdk/python/vX.Y.Z` | `pypi` |
 | `golang` | Go | `github.com/ores-otel/ores.otel.log/sdk/go` | `sdk/go/vX.Y.Z` | `go-modules` |
 | `rust` | Rust | crates.io `oresoftware-next-loggers` | `sdk/rust/vX.Y.Z` | `crates-io` |
+| `rust-context` | Rust | crates.io `oresoftware-next-loggers-context` | `sdk/rust-context/vX.Y.Z` | `crates-io` |
+| `rust-otel` | Rust | crates.io `oresoftware-next-loggers-otel` | `sdk/rust-otel/vX.Y.Z` | `crates-io` |
 | `wasm` | Rust / WebAssembly | crates.io `oresoftware-next-loggers-wasm` | `sdk/wasm/vX.Y.Z` | `crates-io` |
 | `java` | Java | Maven Central `io.github.oresoftware:next-loggers` | `sdk/java/vX.Y.Z` | `maven-central` |
 | `dart` | Dart / Flutter | pub.dev `oresoftware_next_loggers` | `sdk/dart/vX.Y.Z` | `pub.dev` |

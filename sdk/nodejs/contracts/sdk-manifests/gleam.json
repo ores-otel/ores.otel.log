@@ -158,6 +158,8 @@
     "recordFixture": "contracts/fixtures/conformance-record.json",
     "sourceFiles": [
       "sdk/gleam/src/oresoftware_next_loggers.gleam",
+      "sdk/gleam/src/oresoftware_next_loggers_shutdown_ffi.erl",
+      "sdk/gleam/src/oresoftware_next_loggers_shutdown.gleam",
       "sdk/gleam/test/oresoftware_next_loggers_test.gleam"
     ],
     "validatesJsonSchema": false,
@@ -168,7 +170,28 @@
     "ready": false,
     "blockers": [
       "Expand explicit span context to the complete canonical user and baggage merge contract.",
-      "Validate Gleam-emitted records directly against the canonical JSON Schema."
+      "Validate Gleam-emitted records directly against the canonical JSON Schema.",
+      "Supervise the logger actor and trap exits so a BEAM init:stop drains the pending buffer instead of dropping it.",
+      "Make close/1 idempotent; it currently stops the actor, so a second call crashes the caller."
     ]
+  },
+  "shutdown": {
+    "processHooks": [
+      "otp-terminate"
+    ],
+    "autoRegistered": false,
+    "gracePeriodMillis": 5000,
+    "flushDeadlineMillis": 5000,
+    "idempotentFlush": false,
+    "doubleSignalForces": false,
+    "hooksRemovable": false,
+    "symbols": [
+      "flush",
+      "flush_on_exit",
+      "close",
+      "graceful_stop",
+      "force_stop"
+    ],
+    "notes": "The logger is an unsupervised actor with a 5s call timeout. It does not trap exits and has no terminate callback, so a BEAM init:stop drops whatever is buffered, and close is not idempotent -- see promotion.blockers."
   }
 }
