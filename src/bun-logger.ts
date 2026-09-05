@@ -53,15 +53,14 @@ const handleBunBeforeExit = (): void => {
   if (bunShutdownInProgress) {
     return;
   }
-  // Detached for the drain, because flushing keeps the loop alive and would
-  // re-enter this handler; re-attached afterwards, because a beforeExit drain
-  // can revive the loop and the next quiescence deserves a flush too.
+  // This hook is deliberately one-shot. Re-attaching it after an async drain
+  // makes Bun emit `beforeExit` again, which can keep reviving the event loop
+  // forever (the default exported logger is always registered). A process that
+  // reaches beforeExit is shutting down; explicit writes after that boundary
+  // must use an application-owned lifecycle hook instead.
+  bunShutdownInProgress = true;
   getBunProcess()?.off('beforeExit', handleBunBeforeExit);
-  void flushBunLoggers().finally(() => {
-    if (bunHandlersInstalled && !bunShutdownInProgress) {
-      getBunProcess()?.on('beforeExit', handleBunBeforeExit);
-    }
-  });
+  void flushBunLoggers();
 };
 
 async function handleBunSignal(signal: 'SIGINT' | 'SIGTERM'): Promise<void> {
