@@ -6,6 +6,9 @@ license = "MIT"
 description = "Mint and verify one-time HMAC tickets for the ores-otel/ws-ingest/v1 Supabase WebSocket telemetry protocol; optional axum route."
 repository = "https://github.com/ores-otel/ores.otel.log"
 
+# Standalone crate inside the ores.otel.log repo (whose root Cargo.toml is a workspace that does not list it).
+[workspace]
+
 [features]
 default = []
 axum = ["dep:axum"]
