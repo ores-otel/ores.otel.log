@@ -13,7 +13,8 @@ const pkg = JSON.parse(await read('package.json'));
 const nodePackage = JSON.parse(await read('sdk/nodejs/package.json'));
 const rustCargo = await read('sdk/rust/Cargo.toml');
 const zedInclude = await read('.zedinclude');
-const zedCliCommit = '5cef340b85b91f77c8b8644ac66e3534f58f85b6';
+const zedCliVersion = 'v0.3.0';
+const zedCliArchiveSha256 = 'f87576bc289e43ed647902527e7be70566445d2f1fd11249f067ab35547d4b8a';
 const interfacesCommit = '6b2e674464933a4de38785c03c33564661290454';
 const checkoutCommit = '3d3c42e5aac5ba805825da76410c181273ba90b1';
 
@@ -356,7 +357,17 @@ test('Zed roundtrip workflows seed the canonical interface dependency hermetical
       `${path} must use the reviewed checkout commit`,
     );
     assert.ok(workflow.includes(`ref: ${interfacesCommit}`), `${path} must pin ores-interfaces`);
-    assert.match(workflow, new RegExp(`--rev\\s+${zedCliCommit}`, 'u'), `${path} must pin zed-cli`);
+    assert.match(workflow, new RegExp(`ZED_VERSION:\\s+${zedCliVersion}`, 'u'), `${path} must pin zed-cli version`);
+    assert.match(
+      workflow,
+      new RegExp(`ZED_ARCHIVE_SHA256:\\s+${zedCliArchiveSha256}`, 'u'),
+      `${path} must pin the zed-cli archive checksum`,
+    );
+    assert.ok(workflow.includes('sha256sum --check --strict'), `${path} must verify the zed-cli checksum`);
+    assert.ok(
+      workflow.includes('test \"$(\"$RUNNER_TEMP/zed\" --version)\" = \'zed 0.3.0\''),
+      `${path} must verify the exact zed-cli binary version`,
+    );
     assert.match(
       workflow,
       /zed \\\n\s+--registry "file:\/\/\$registry" \\\n\s+--home "\$RUNNER_TEMP\/zed-seed-home" \\\n\s+publish --skip-vcs-checks/u,
