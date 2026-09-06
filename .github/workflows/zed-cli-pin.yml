@@ -1,0 +1,61 @@
+name: Update zed-pkg CLI pin
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: zed-cli-pin
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: Check latest zed-pkg release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Refresh the immutable release pin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/update-zed-cli-pin.py --write
+
+      - name: Verify the generated pin and package contract
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/update-zed-cli-pin.py --check
+          node --test tests/zpkg.test.mjs
+
+      - name: Open a reviewed pin update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- .github/workflows/ci.yml .github/workflows/packaging.yml .github/workflows/release-zed.yml tests/zpkg.test.mjs; then
+            echo "zed-pkg is already current"
+            exit 0
+          fi
+          branch="automation/zed-cli-pin-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$branch"
+          git add .github/workflows/ci.yml .github/workflows/packaging.yml .github/workflows/release-zed.yml tests/zpkg.test.mjs
+          git commit -m "chore: pin latest zed-pkg CLI release"
+          git push --set-upstream origin "$branch"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore: pin latest zed-pkg CLI release" \
+            --body "Automated checksum-verified zed-pkg CLI update. CI must validate the exact archive and binary version before merge."
