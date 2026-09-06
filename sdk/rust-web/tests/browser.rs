@@ -1,5 +1,5 @@
 #![cfg(all(feature = "browser", target_arch = "wasm32"))]
-use ores_otel_web::browser::{BrowserLogger, new_trace, child_trace, traced_request};
+use ores_otel_web::browser::{child_trace, new_trace, traced_request, BrowserLogger};
 use std::{cell::RefCell, rc::Rc};
 use wasm_bindgen_test::*;
 use web_sys::{RequestInit, RequestMode, RequestRedirect};
@@ -9,7 +9,11 @@ wasm_bindgen_test_configure!(run_in_browser);
 fn clock_and_non_send_sink_work_in_real_browser() {
     let records = Rc::new(RefCell::new(Vec::new()));
     let sink = records.clone();
-    let logger = BrowserLogger::new("leptos-hydration", move |record| { sink.borrow_mut().push(record.clone()); Ok(()) }).unwrap();
+    let logger = BrowserLogger::new("leptos-hydration", move |record| {
+        sink.borrow_mut().push(record.clone());
+        Ok(())
+    })
+    .unwrap();
     let trace = new_trace(false).unwrap();
     let first = logger.info("hydrated", Some(&trace)).unwrap();
     let second = logger.info("event", None).unwrap();
@@ -39,7 +43,10 @@ fn propagation_is_same_origin_and_redirect_safe() {
     assert_eq!(request.method(), "POST");
     assert_eq!(request.mode(), RequestMode::SameOrigin);
     assert_eq!(request.redirect(), RequestRedirect::Error);
-    assert_eq!(request.headers().get("traceparent").unwrap().unwrap(), trace.to_string());
+    assert_eq!(
+        request.headers().get("traceparent").unwrap().unwrap(),
+        trace.to_string()
+    );
     assert!(traced_request("https://example.invalid/api", &init, &trace).is_err());
     assert!(traced_request("data:text/plain,hello", &init, &trace).is_err());
 }
@@ -47,5 +54,8 @@ fn propagation_is_same_origin_and_redirect_safe() {
 #[wasm_bindgen_test]
 fn sink_failure_is_explicit_not_a_panic() {
     let logger = BrowserLogger::new("dioxus-web", |_| Err("export unavailable".into())).unwrap();
-    assert_eq!(logger.info("event", None).unwrap_err(), "export unavailable");
+    assert_eq!(
+        logger.info("event", None).unwrap_err(),
+        "export unavailable"
+    );
 }
