@@ -364,6 +364,7 @@ test('Zed roundtrip workflows seed the canonical interface dependency hermetical
       `${path} must pin the zed-cli archive checksum`,
     );
     assert.match(workflow, /Install audited just v1\.51\.0/u, `${path} must install the pre-pack hook runtime`);
+    assert.match(workflow, /Install audited ores-sops/u, `${path} must install the encrypted-environment helper`);
     assert.ok(workflow.includes('sha256sum --check --strict'), `${path} must verify the zed-cli checksum`);
     assert.ok(
       workflow.includes('test \"$(\"$RUNNER_TEMP/zed\" --version)\" = \'zed 0.3.0\''),
@@ -382,6 +383,7 @@ test('Zed roundtrip workflows seed the canonical interface dependency hermetical
   }
   const releaseWorkflow = await read('.github/workflows/release-zed.yml');
   assert.match(releaseWorkflow, /Install audited just v1\.51\.0/u, 'release-zed.yml must install the pre-pack hook runtime');
+  assert.match(releaseWorkflow, /Install audited ores-sops/u, 'release-zed.yml must install the encrypted-environment helper');
   assert.match(releaseWorkflow, new RegExp(`ZED_VERSION:\\s+${zedCliVersion}`, 'u'));
   assert.match(releaseWorkflow, new RegExp(`ZED_ARCHIVE_SHA256:\\s+${zedCliArchiveSha256}`, 'u'));
 });

@@ -283,6 +283,18 @@ jobs:
           tar -xzf "$RUNNER_TEMP/just.tar.gz" -C "$RUNNER_TEMP" just
           sudo install -m 0755 "$RUNNER_TEMP/just" /usr/local/bin/just
           just --version
+      - name: Install audited ores-sops
+        env:
+          ORES_SOPS_REVISION: f152c11f76cc14b2af440b47c756b6c97c0aa36b
+          ORES_SOPS_SHA256: be990d1d6e4df75b3e6bcc8f183018879554844db054997394bc0d31eed4c5ef
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/ores-sops" \
+            "https://raw.githubusercontent.com/ORESoftware/ores-sops/${ORES_SOPS_REVISION}/ores-sops"
+          printf '%s  %s\n' "$ORES_SOPS_SHA256" "$RUNNER_TEMP/ores-sops" | sha256sum --check --strict
+          sudo install -m 0755 "$RUNNER_TEMP/ores-sops" /usr/local/bin/ores-sops
+          ores-sops --version
       - name: Install checksum-verified Zed CLI v0.3.0
         shell: bash
         env:
