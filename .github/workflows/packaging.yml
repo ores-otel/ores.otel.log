@@ -106,12 +106,21 @@ jobs:
           tests/cli-packages.test.mjs
           tests/cli-packages-hardening.test.mjs
 
-      - name: Install the pinned Zed CLI
-        run: >-
-          cargo install
-          --git https://github.com/zed-pkg/zed-cli
-          --rev 5cef340b85b91f77c8b8644ac66e3534f58f85b6
-          --locked zed-cli
+      - name: Install checksum-verified Zed CLI v0.3.0
+        shell: bash
+        env:
+          ZED_VERSION: v0.3.0
+          ZED_ARCHIVE_SHA256: f87576bc289e43ed647902527e7be70566445d2f1fd11249f067ab35547d4b8a
+        run: |
+          set -euo pipefail
+          archive=zed-x86_64-unknown-linux-gnu.tar.gz
+          base="https://github.com/zed-pkg/zed-cli/releases/download/${ZED_VERSION}"
+          curl --fail --location --retry 3 --proto '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/$archive" "$base/$archive"
+          printf '%s  %s\n' "$ZED_ARCHIVE_SHA256" "$RUNNER_TEMP/$archive" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          test "$("$RUNNER_TEMP/zed" --version)" = 'zed 0.3.0'
+          printf '%s\n' "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - name: Inspect the deterministic Zed/native release plan
         run: zed release plan --json | tee zed-release-plan.json
