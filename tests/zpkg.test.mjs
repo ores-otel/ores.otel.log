@@ -393,3 +393,19 @@ test('the eslint plugin version tracks package.json', async () => {
   const declared = source.match(/version:\s*'([^']+)'/)?.[1];
   assert.equal(declared, pkg.version);
 });
+
+test('zed-pkg pin automation is scheduled, checksum-aware, and review-gated', async () => {
+  const workflow = await read('.github/workflows/zed-cli-pin.yml');
+  const updater = await read('.github/scripts/update-zed-cli-pin.py');
+  assert.match(workflow, /schedule:\n\s+- cron:/u, 'pin updates must run on a schedule');
+  assert.match(
+    workflow,
+    /python3 \.github\/scripts\/update-zed-cli-pin\.py --write/u,
+    'the scheduled job must use the repository updater',
+  );
+  assert.match(workflow, /pull-requests: write/u, 'updates must be submitted for review');
+  assert.match(updater, /releases\/latest/u, 'the updater must query the latest zed-pkg release');
+  assert.match(updater, /CHECKSUM_ASSET/u, 'the updater must consume the published checksum asset');
+  assert.match(updater, /VERSION_RE/u, 'the updater must reject non-semver release tags');
+  assert.match(updater, /SHA256_RE/u, 'the updater must validate a SHA-256 digest');
+});
