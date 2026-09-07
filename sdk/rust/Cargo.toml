@@ -17,6 +17,15 @@ include = ["src/**", "tests/**", "README.md", "LICENSE"]
 name = "next_loggers"
 path = "src/lib.rs"
 
+[features]
+# Opt in explicitly: ordinary SDK consumers do not build a container launcher.
+launcher = []
+
+[[bin]]
+name = "ores-launcher"
+path = "src/bin/ores-launcher.rs"
+required-features = ["launcher"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 # Exact-pin the audited version used by current zed-interfaces consumers. This

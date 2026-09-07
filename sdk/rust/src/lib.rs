@@ -6,6 +6,8 @@ mod logger_core;
 pub use logger_core::*;
 
 pub mod context;
+#[cfg(all(unix, feature = "launcher"))]
+pub mod launcher;
 pub mod shutdown;
 pub mod span;
 
