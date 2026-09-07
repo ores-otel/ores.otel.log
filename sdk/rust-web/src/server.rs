@@ -206,6 +206,9 @@ mod tests {
         let records = capture.0.lock().unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].trace_id.as_deref(), Some(child.trace_id()));
-        assert!(!records[0].to_json().unwrap().contains("authorization=secret"));
+        assert!(!records[0]
+            .to_json()
+            .unwrap()
+            .contains("authorization=secret"));
     }
 }
