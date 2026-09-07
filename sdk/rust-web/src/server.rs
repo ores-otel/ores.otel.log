@@ -90,6 +90,10 @@ async fn correlate(State(logger): State<Logger>, mut request: Request, next: Nex
             .fields
             .insert("otel.parent_span_id".into(), json!(parent.span_id()));
     }
+    // The event API is deliberately explicit: entering a carrier alone does
+    // not project its fields onto records. Keep a validated snapshot, rather
+    // than copying arbitrary identity or baggage from later application scopes.
+    let record_context = context.clone();
     request.extensions_mut().insert(trace.clone());
     with_log_context_async(context, async move {
         let mut response = next.run(request).await;
@@ -102,12 +106,11 @@ async fn correlate(State(logger): State<Logger>, mut request: Request, next: Nex
         }
         // No URL, query, body, cookies, user IDs, authorization, baggage or raw
         // client header values are captured. Export failure cannot fail HTTP.
-        let _ = logger
-            .info(vec![json!({
-                "event.name": "http.server.complete", "http.request.method": method,
-                "http.response.status_code": response.status().as_u16()
-            })])
-            .send();
+        let event = logger.info(vec![json!({
+            "event.name": "http.server.complete", "http.request.method": method,
+            "http.response.status_code": response.status().as_u16()
+        })]);
+        let _ = next_loggers::apply_log_context(event, &record_context).send();
         response
     })
     .await
@@ -121,8 +124,19 @@ mod tests {
         http::{HeaderMap, Request as HttpRequest},
         routing::get,
     };
+    use std::sync::Mutex;
     use tower::ServiceExt;
     const PARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00";
+
+    #[derive(Default)]
+    struct Capture(Mutex<Vec<LogRecord>>);
+    impl Transport for Capture {
+        fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
+            self.0.lock().unwrap().push(record.clone());
+            Ok(())
+        }
+    }
+
     #[test]
     fn missing_or_duplicate_header_starts_unsampled_root() {
         let mut headers = HeaderMap::new();
@@ -145,7 +159,15 @@ mod tests {
     }
     #[tokio::test]
     async fn scopes_handler_and_preserves_response() {
-        let app = install(
+        let capture = Arc::new(Capture::default());
+        let logger = Logger::new(
+            Options {
+                console: false,
+                ..Options::default()
+            }
+            .with_transport(capture.clone()),
+        );
+        let app = install_with_logger(
             Router::new().route(
                 "/",
                 get(|| async {
@@ -160,7 +182,7 @@ mod tests {
                     (axum::http::StatusCode::ACCEPTED, "ok")
                 }),
             ),
-            "test-server",
+            logger,
         );
         let response = app
             .oneshot(
@@ -181,5 +203,9 @@ mod tests {
             .unwrap();
         assert_eq!(child.trace_id(), "4bf92f3577b34da6a3ce929d0e0e4736");
         assert!(next_loggers::current_log_context().trace_id.is_none());
+        let records = capture.0.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].trace_id.as_deref(), Some(child.trace_id()));
+        assert!(!records[0].to_json().unwrap().contains("authorization=secret"));
     }
 }
