@@ -39,20 +39,23 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt,clippy
-      - name: Generate the deterministic workspace lock
-        run: cargo generate-lockfile
-      - name: Preserve the reviewed lock for first-time workspace bootstrapping
+      - name: Resolve the committed workspace lock without dependency upgrades
+        # generate-lockfile selects today's latest compatible releases instead of
+        # validating the reviewed graph. --locked fails for a missing/stale lock
+        # while preserving tested versions when an unrelated crate is released.
+        run: |
+          set -euo pipefail
+          git ls-files --error-unmatch Cargo.lock
+          cargo fetch --locked
+      - name: Preserve the reviewed workspace lock as test evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: rust-workspace-lock-${{ github.event.pull_request.head.sha || github.sha }}
           path: Cargo.lock
           if-no-files-found: error
           retention-days: 1
-      - name: Require the generated lock to be committed and unchanged
-        run: |
-          set -euo pipefail
-          git ls-files --error-unmatch Cargo.lock
-          git diff --exit-code -- Cargo.lock
+      - name: Require the reviewed lock to remain unchanged
+        run: git diff --exit-code -- Cargo.lock
       - name: Verify workspace metadata
         run: cargo metadata --locked --format-version 1 --no-deps > /tmp/metadata.json
       - name: Verify formatting

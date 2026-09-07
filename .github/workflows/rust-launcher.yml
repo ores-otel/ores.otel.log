@@ -1,0 +1,48 @@
+name: Rust launcher contract
+
+on:
+  pull_request:
+    paths: ['Cargo.toml', 'Cargo.lock', 'sdk/rust/**', 'docker/launcher/**', '.github/workflows/rust-launcher.yml']
+  push:
+    branches: [main]
+    paths: ['Cargo.toml', 'Cargo.lock', 'sdk/rust/**', 'docker/launcher/**', '.github/workflows/rust-launcher.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launcher:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            architecture: amd64
+          - runner: ubuntu-24.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: '1.90.0'
+          components: rustfmt,clippy
+      - name: Check formatting
+        run: cargo fmt -p oresoftware-next-loggers -- --check
+      - name: Test real exec and the SDK
+        run: cargo test --locked -p oresoftware-next-loggers --features launcher --all-targets
+      - name: Lint launcher and SDK
+        run: cargo clippy --locked -p oresoftware-next-loggers --features launcher --all-targets -- -D warnings
+      - name: Build a shell-free nonroot image for the native architecture
+        run: docker build --platform linux/${{ matrix.architecture }} -f docker/launcher/Dockerfile -t ores-launcher:test .
+      - name: Verify container process and telemetry contracts
+        run: bash docker/launcher/smoke.sh ores-launcher:test
