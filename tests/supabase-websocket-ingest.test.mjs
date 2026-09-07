@@ -147,6 +147,50 @@ test('replays the identical batch after disconnect-before-ACK', async () => {
   assert.equal(transport.snapshot().accepted, 1);
 });
 
+test('ignores delayed callbacks from a superseded socket generation', async () => {
+  const sockets = [];
+  const batches = [];
+  let staleMessage;
+  let staleClose;
+  let connection = 0;
+  const transport = new SupabaseWebSocketIngestTransport(options(() => {
+    connection += 1;
+    const socket = new FakeSocket((message, currentSocket) => {
+      if (message.type !== 'telemetry_batch') return;
+      batches.push(message);
+      if (connection === 1) {
+        staleMessage = currentSocket.onmessage;
+        staleClose = currentSocket.onclose;
+        queueMicrotask(() => currentSocket.close(1012, 'worker rotation'));
+      }
+    });
+    sockets.push(socket);
+    return socket;
+  }, { maxReconnectAttempts: 1 }));
+
+  let settled = false;
+  const delivery = transport.write(record()).finally(() => {
+    settled = true;
+  });
+  await waitUntil(() => batches.length === 2);
+
+  staleMessage?.({ data: JSON.stringify(ack(batches[1])) });
+  staleClose?.({ code: 1012, reason: 'late-close', wasClean: false });
+  await Promise.resolve();
+
+  assert.equal(settled, false);
+  assert.equal(transport.snapshot().inFlight, 1);
+  assert.equal(transport.snapshot().accepted, 0);
+  assert.equal(transport.snapshot().protocolErrors, 0);
+
+  sockets[1].emit(ack(batches[1]));
+  await delivery;
+
+  assert.equal(transport.snapshot().accepted, 1);
+  assert.equal(transport.snapshot().inFlight, 0);
+  assert.equal(transport.snapshot().protocolErrors, 0);
+});
+
 test('rejects a mismatched ACK without clearing the in-flight batch', async () => {
   const transport = new SupabaseWebSocketIngestTransport(options(() => new FakeSocket((message, socket) => {
     if (message.type === 'telemetry_batch') {
