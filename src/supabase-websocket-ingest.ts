@@ -72,7 +72,11 @@ export interface WebSocketLike {
   onopen: ((event: unknown) => void) | null;
   onmessage: ((event: { data: unknown }) => void) | null;
   onerror: ((event: unknown) => void) | null;
-  onclose: ((event: { code?: number; reason?: string; wasClean?: boolean }) => void) | null;
+  onclose: ((event: {
+    code?: number;
+    reason?: string;
+    wasClean?: boolean;
+  }) => void) | null;
   send(data: string): void;
   close(code?: number, reason?: string): void;
 }
@@ -83,7 +87,9 @@ export interface SupabaseWebSocketExitFallback {
 }
 
 export interface SupabaseWebSocketIngestOptions {
-  ticketProvider: () => SupabaseWebSocketTicket | Promise<SupabaseWebSocketTicket>;
+  ticketProvider: () =>
+    | SupabaseWebSocketTicket
+    | Promise<SupabaseWebSocketTicket>;
   session: SupabaseTelemetrySession;
   webSocketFactory?: (url: string) => WebSocketLike;
   exitFallback?: SupabaseWebSocketExitFallback;
@@ -123,6 +129,7 @@ interface QueuedRecord extends SupabaseWebSocketRecord {
 interface AckWaiter {
   batchId: string;
   sequence: number;
+  generation: number;
   timer: ReturnType<typeof setTimeout>;
   resolve: (ack: SupabaseWebSocketCommitAck) => void;
   reject: (error: Error) => void;
@@ -139,38 +146,65 @@ const DEFAULTS: ResolvedOptions = {
   maxReconnectAttempts: 8,
 };
 
-function integer(value: number | undefined, fallback: number, minimum: number): number {
-  return Number.isInteger(value) && Number(value) >= minimum ? Number(value) : fallback;
+function integer(
+  value: number | undefined,
+  fallback: number,
+  minimum: number,
+): number {
+  return Number.isInteger(value) && Number(value) >= minimum
+    ? Number(value)
+    : fallback;
 }
 
 function byteLength(value: string): number {
-  return typeof TextEncoder === 'function' ? new TextEncoder().encode(value).byteLength : value.length;
+  return typeof TextEncoder === 'function'
+    ? new TextEncoder().encode(value).byteLength
+    : value.length;
 }
 
 function unref(timer: ReturnType<typeof setTimeout>): void {
-  (timer as ReturnType<typeof setTimeout> & { unref?: () => void }).unref?.();
+  (
+    timer as ReturnType<typeof setTimeout> & { unref?: () => void }
+  ).unref?.();
 }
 
 function randomId(prefix: string): string {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return `${prefix}-${uuid}`;
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return `${prefix}-${Date.now().toString(36)}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
 }
 
 function assertSession(session: SupabaseTelemetrySession): void {
   for (const [key, value] of Object.entries(session)) {
     if (typeof value !== 'string' || value.trim() === '') {
-      throw new TypeError(`Supabase WebSocket session ${key} must be a non-empty string`);
+      throw new TypeError(
+        `Supabase WebSocket session ${key} must be a non-empty string`,
+      );
     }
   }
 }
 
-function assertTicket(ticket: SupabaseWebSocketTicket, allowedHosts?: readonly string[]): URL {
-  if (!ticket || typeof ticket !== 'object') throw new TypeError('ticketProvider returned no ticket');
-  if (typeof ticket.ticket !== 'string' || ticket.ticket.trim().length < 16) {
-    throw new TypeError('Supabase WebSocket ticket must be a non-empty short-lived credential');
+function assertTicket(
+  ticket: SupabaseWebSocketTicket,
+  allowedHosts?: readonly string[],
+): URL {
+  if (!ticket || typeof ticket !== 'object') {
+    throw new TypeError('ticketProvider returned no ticket');
   }
-  if (ticket.expiresAtMillis !== undefined && ticket.expiresAtMillis <= Date.now()) {
+  if (
+    typeof ticket.ticket !== 'string' ||
+    ticket.ticket.trim().length < 16
+  ) {
+    throw new TypeError(
+      'Supabase WebSocket ticket must be a non-empty short-lived credential',
+    );
+  }
+  if (
+    ticket.expiresAtMillis !== undefined &&
+    ticket.expiresAtMillis <= Date.now()
+  ) {
     throw new Error('Supabase WebSocket ticket is expired');
   }
   let url: URL;
@@ -179,19 +213,29 @@ function assertTicket(ticket: SupabaseWebSocketTicket, allowedHosts?: readonly s
   } catch {
     throw new TypeError(`Supabase WebSocket URL is invalid: ${ticket.url}`);
   }
-  if (url.protocol !== 'wss:') throw new TypeError('Supabase telemetry WebSocket requires wss://');
-  if (url.username || url.password) throw new TypeError('Supabase WebSocket URL must not embed credentials');
+  if (url.protocol !== 'wss:') {
+    throw new TypeError('Supabase telemetry WebSocket requires wss://');
+  }
+  if (url.username || url.password) {
+    throw new TypeError('Supabase WebSocket URL must not embed credentials');
+  }
   if (allowedHosts && !allowedHosts.includes(url.hostname)) {
-    throw new TypeError(`Supabase WebSocket host ${url.hostname} is not in allowedHosts`);
+    throw new TypeError(
+      `Supabase WebSocket host ${url.hostname} is not in allowedHosts`,
+    );
   }
   return url;
 }
 
 function parseMessage(data: unknown): unknown {
   if (typeof data === 'string') return JSON.parse(data) as unknown;
-  if (data instanceof ArrayBuffer) return JSON.parse(new TextDecoder().decode(data)) as unknown;
+  if (data instanceof ArrayBuffer) {
+    return JSON.parse(new TextDecoder().decode(data)) as unknown;
+  }
   if (ArrayBuffer.isView(data)) {
-    return JSON.parse(new TextDecoder().decode(data as ArrayBufferView<ArrayBuffer>)) as unknown;
+    return JSON.parse(
+      new TextDecoder().decode(data as ArrayBufferView<ArrayBuffer>),
+    ) as unknown;
   }
   throw new TypeError('Supabase WebSocket message must be UTF-8 JSON');
 }
@@ -199,18 +243,26 @@ function parseMessage(data: unknown): unknown {
 function isCommitAck(value: unknown): value is SupabaseWebSocketCommitAck {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
-  return record.type === 'commit_ack'
-    && record.protocol === ORES_SUPABASE_WEBSOCKET_PROTOCOL
-    && typeof record.batchId === 'string'
-    && Number.isInteger(record.sequence)
-    && Number.isInteger(record.accepted)
-    && Number.isInteger(record.duplicates)
-    && typeof record.committedAt === 'string';
+  return (
+    record.type === 'commit_ack' &&
+    record.protocol === ORES_SUPABASE_WEBSOCKET_PROTOCOL &&
+    typeof record.batchId === 'string' &&
+    Number.isSafeInteger(record.sequence) &&
+    Number(record.sequence) >= 0 &&
+    Number.isSafeInteger(record.accepted) &&
+    Number(record.accepted) >= 0 &&
+    Number.isSafeInteger(record.duplicates) &&
+    Number(record.duplicates) >= 0 &&
+    typeof record.committedAt === 'string' &&
+    record.committedAt.trim() !== ''
+  );
 }
 
 function defaultWebSocketFactory(url: string): WebSocketLike {
   if (typeof WebSocket !== 'function') {
-    throw new Error('WebSocket is unavailable; provide webSocketFactory for this runtime');
+    throw new Error(
+      'WebSocket is unavailable; provide webSocketFactory for this runtime',
+    );
   }
   return new WebSocket(url) as unknown as WebSocketLike;
 }
@@ -230,6 +282,7 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
   private readonly resolved: ResolvedOptions;
   private readonly queue: QueuedRecord[] = [];
   private socket: WebSocketLike | null = null;
+  private socketGeneration = 0;
   private connectPromise: Promise<void> | null = null;
   private flushPromise: Promise<void> | null = null;
   private inFlight: SupabaseWebSocketBatch | null = null;
@@ -248,16 +301,36 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
   private closed = false;
 
   constructor(options: SupabaseWebSocketIngestOptions) {
-    if (!options || typeof options !== 'object') throw new TypeError('options are required');
-    if (typeof options.ticketProvider !== 'function') throw new TypeError('ticketProvider is required');
+    if (!options || typeof options !== 'object') {
+      throw new TypeError('options are required');
+    }
+    if (typeof options.ticketProvider !== 'function') {
+      throw new TypeError('ticketProvider is required');
+    }
     assertSession(options.session);
     this.options = options;
-    const reconnectBaseMillis = integer(options.reconnectBaseMillis, DEFAULTS.reconnectBaseMillis, 0);
+    const reconnectBaseMillis = integer(
+      options.reconnectBaseMillis,
+      DEFAULTS.reconnectBaseMillis,
+      0,
+    );
     this.resolved = {
       batchSize: integer(options.batchSize, DEFAULTS.batchSize, 1),
-      maxQueueSize: integer(options.maxQueueSize, DEFAULTS.maxQueueSize, 1),
-      maxRecordBytes: integer(options.maxRecordBytes, DEFAULTS.maxRecordBytes, 1),
-      flushIntervalMillis: integer(options.flushIntervalMillis, DEFAULTS.flushIntervalMillis, 1),
+      maxQueueSize: integer(
+        options.maxQueueSize,
+        DEFAULTS.maxQueueSize,
+        1,
+      ),
+      maxRecordBytes: integer(
+        options.maxRecordBytes,
+        DEFAULTS.maxRecordBytes,
+        1,
+      ),
+      flushIntervalMillis: integer(
+        options.flushIntervalMillis,
+        DEFAULTS.flushIntervalMillis,
+        1,
+      ),
       acknowledgementTimeoutMillis: integer(
         options.acknowledgementTimeoutMillis,
         DEFAULTS.acknowledgementTimeoutMillis,
@@ -266,9 +339,17 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
       reconnectBaseMillis,
       reconnectMaxMillis: Math.max(
         reconnectBaseMillis,
-        integer(options.reconnectMaxMillis, DEFAULTS.reconnectMaxMillis, 0),
+        integer(
+          options.reconnectMaxMillis,
+          DEFAULTS.reconnectMaxMillis,
+          0,
+        ),
       ),
-      maxReconnectAttempts: integer(options.maxReconnectAttempts, DEFAULTS.maxReconnectAttempts, 0),
+      maxReconnectAttempts: integer(
+        options.maxReconnectAttempts,
+        DEFAULTS.maxReconnectAttempts,
+        0,
+      ),
     };
   }
 
@@ -292,10 +373,15 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
 
   async write(record: LogRecord): Promise<void> {
     if (!this.enqueue(record)) return;
-    if (this.options.awaitAcknowledgement === true || this.queue.length >= this.resolved.batchSize) {
+    if (
+      this.options.awaitAcknowledgement === true ||
+      this.queue.length >= this.resolved.batchSize
+    ) {
       const delivery = this.flush();
       if (this.options.awaitAcknowledgement === true) await delivery;
-      else void delivery.catch((error: unknown) => this.reportError(error));
+      else {
+        void delivery.catch((error: unknown) => this.reportError(error));
+      }
     } else {
       this.scheduleFlush();
     }
@@ -340,7 +426,12 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
       this.rejectAck(new Error('Supabase WebSocket transport closed'));
       const socket = this.socket;
       this.socket = null;
-      if (socket && socket.readyState !== 3) socket.close(1000, 'transport closed');
+      if (socket) {
+        this.detachSocket(socket);
+        if (socket.readyState !== 3) {
+          socket.close(1000, 'transport closed');
+        }
+      }
     }
   }
 
@@ -370,7 +461,10 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
   private createBatch(): SupabaseWebSocketBatch | null {
     if (this.queue.length === 0) return null;
     const queued = this.queue.splice(0, this.resolved.batchSize);
-    const records = queued.map(({ recordId, record }) => ({ recordId, record }));
+    const records = queued.map(({ recordId, record }) => ({
+      recordId,
+      record,
+    }));
     return {
       type: 'telemetry_batch',
       protocol: ORES_SUPABASE_WEBSOCKET_PROTOCOL,
@@ -422,80 +516,148 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
     const url = assertTicket(ticket, this.options.allowedHosts);
     const factory = this.options.webSocketFactory ?? defaultWebSocketFactory;
     const socket = factory(url.toString());
+    const generation = this.socketGeneration + 1;
+    this.socketGeneration = generation;
     this.socket = socket;
 
     await new Promise<void>((resolve, reject) => {
       let opened = false;
       const timer = setTimeout(() => {
-        if (!opened) {
+        if (opened || !this.isCurrentSocket(socket, generation)) return;
+        this.socket = null;
+        this.detachSocket(socket);
+        if (socket.readyState !== 3) {
           socket.close(1008, 'connect timeout');
-          reject(new Error('Supabase WebSocket connection timed out'));
         }
+        reject(new Error('Supabase WebSocket connection timed out'));
       }, this.resolved.acknowledgementTimeoutMillis);
+      unref(timer);
 
       socket.onopen = () => {
+        if (!this.isCurrentSocket(socket, generation)) {
+          clearTimeout(timer);
+          this.detachSocket(socket);
+          if (socket.readyState !== 3) {
+            socket.close(1000, 'superseded connection');
+          }
+          reject(new Error('Supabase WebSocket connection was superseded'));
+          return;
+        }
         opened = true;
         clearTimeout(timer);
         try {
-          socket.send(JSON.stringify({
-            type: 'hello',
-            protocol: ORES_SUPABASE_WEBSOCKET_PROTOCOL,
-            ticket: ticket.ticket,
-            session: this.options.session,
-          }));
+          socket.send(
+            JSON.stringify({
+              type: 'hello',
+              protocol: ORES_SUPABASE_WEBSOCKET_PROTOCOL,
+              ticket: ticket.ticket,
+              session: this.options.session,
+            }),
+          );
           resolve();
         } catch (error) {
-          reject(error instanceof Error ? error : new Error(String(error)));
+          reject(
+            error instanceof Error ? error : new Error(String(error)),
+          );
         }
       };
-      socket.onmessage = (event) => this.handleMessage(event.data);
+      socket.onmessage = (event) => {
+        if (!this.isCurrentSocket(socket, generation)) return;
+        this.handleMessage(event.data, generation);
+      };
       socket.onerror = () => {
-        if (!opened) reject(new Error('Supabase WebSocket connection failed'));
+        if (!opened && this.isCurrentSocket(socket, generation)) {
+          reject(new Error('Supabase WebSocket connection failed'));
+        }
       };
       socket.onclose = (event) => {
         clearTimeout(timer);
-        if (this.socket === socket) this.socket = null;
-        const reason = event.reason ? `: ${event.reason}` : '';
-        const error = new Error(`Supabase WebSocket closed before commit ACK${reason}`);
-        this.rejectAck(error);
-        if (!opened) reject(error);
+        const isCurrent = this.isCurrentSocket(socket, generation);
+        if (isCurrent) {
+          this.socket = null;
+          const reason = event.reason ? `: ${event.reason}` : '';
+          const error = new Error(
+            `Supabase WebSocket closed before commit ACK${reason}`,
+          );
+          this.rejectAck(error, generation);
+          if (!opened) reject(error);
+        }
+        this.detachSocket(socket);
       };
     });
   }
 
-  private sendAndWait(batch: SupabaseWebSocketBatch): Promise<SupabaseWebSocketCommitAck> {
+  private sendAndWait(
+    batch: SupabaseWebSocketBatch,
+  ): Promise<SupabaseWebSocketCommitAck> {
     const socket = this.socket;
-    if (!socket || !this.isOpen()) throw new Error('Supabase WebSocket is not open');
-    if (this.ackWaiter) throw new Error('only one Supabase telemetry batch may be in flight');
+    const generation = this.socketGeneration;
+    if (
+      !socket ||
+      !this.isOpen() ||
+      !this.isCurrentSocket(socket, generation)
+    ) {
+      throw new Error('Supabase WebSocket is not open');
+    }
+    if (this.ackWaiter) {
+      throw new Error('only one Supabase telemetry batch may be in flight');
+    }
     return new Promise<SupabaseWebSocketCommitAck>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.rejectAck(new Error(`Supabase commit ACK timed out for ${batch.batchId}`));
+        this.rejectAck(
+          new Error(`Supabase commit ACK timed out for ${batch.batchId}`),
+          generation,
+        );
       }, this.resolved.acknowledgementTimeoutMillis);
-      this.ackWaiter = { batchId: batch.batchId, sequence: batch.sequence, timer, resolve, reject };
+      unref(timer);
+      this.ackWaiter = {
+        batchId: batch.batchId,
+        sequence: batch.sequence,
+        generation,
+        timer,
+        resolve,
+        reject,
+      };
       try {
         socket.send(JSON.stringify(batch));
       } catch (error) {
-        this.rejectAck(error instanceof Error ? error : new Error(String(error)));
+        this.rejectAck(
+          error instanceof Error ? error : new Error(String(error)),
+          generation,
+        );
       }
     });
   }
 
-  private handleMessage(data: unknown): void {
+  private handleMessage(data: unknown, generation: number): void {
+    if (generation !== this.socketGeneration) return;
     let message: unknown;
     try {
       message = parseMessage(data);
     } catch (error) {
-      this.protocolFailure(error instanceof Error ? error : new Error(String(error)));
+      this.protocolFailure(
+        error instanceof Error ? error : new Error(String(error)),
+        generation,
+      );
       return;
     }
     if (!isCommitAck(message)) return;
     const waiter = this.ackWaiter;
-    if (!waiter) {
-      this.protocolFailure(new Error('received a commit ACK with no in-flight batch'));
+    if (!waiter || waiter.generation !== generation) {
+      this.protocolFailure(
+        new Error('received a commit ACK with no in-flight batch'),
+        generation,
+      );
       return;
     }
-    if (message.batchId !== waiter.batchId || message.sequence !== waiter.sequence) {
-      this.protocolFailure(new Error('commit ACK batchId or sequence mismatch'));
+    if (
+      message.batchId !== waiter.batchId ||
+      message.sequence !== waiter.sequence
+    ) {
+      this.protocolFailure(
+        new Error('commit ACK batchId or sequence mismatch'),
+        generation,
+      );
       return;
     }
     clearTimeout(waiter.timer);
@@ -503,12 +665,17 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
     waiter.resolve(message);
   }
 
-  private commit(batch: SupabaseWebSocketBatch, ack: SupabaseWebSocketCommitAck): void {
-    if (!isCommitAck(ack)) throw new TypeError('fallback did not return a valid commit ACK');
+  private commit(
+    batch: SupabaseWebSocketBatch,
+    ack: SupabaseWebSocketCommitAck,
+  ): void {
+    if (!isCommitAck(ack)) {
+      throw new TypeError('fallback did not return a valid commit ACK');
+    }
     if (ack.batchId !== batch.batchId || ack.sequence !== batch.sequence) {
       throw new Error('commit ACK batchId or sequence mismatch');
     }
-    if (ack.accepted < 0 || ack.duplicates < 0 || ack.accepted + ack.duplicates !== batch.records.length) {
+    if (ack.accepted + ack.duplicates !== batch.records.length) {
       throw new Error('commit ACK does not account for the complete batch');
     }
     this.accepted += ack.accepted;
@@ -518,24 +685,52 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
     this.inFlight = null;
   }
 
-  private protocolFailure(error: Error): void {
+  private protocolFailure(error: Error, generation: number): void {
+    if (generation !== this.socketGeneration) return;
     this.protocolErrors += 1;
-    this.rejectAck(error);
-    this.disconnect(1002, 'invalid commit ACK');
+    this.rejectAck(error, generation);
+    this.disconnect(1002, 'invalid commit ACK', generation);
   }
 
-  private rejectAck(error: Error): void {
+  private rejectAck(error: Error, generation?: number): void {
     const waiter = this.ackWaiter;
     if (!waiter) return;
+    if (generation !== undefined && waiter.generation !== generation) return;
     clearTimeout(waiter.timer);
     this.ackWaiter = null;
     waiter.reject(error);
   }
 
-  private disconnect(code: number, reason: string): void {
+  private disconnect(
+    code: number,
+    reason: string,
+    generation?: number,
+  ): void {
     const socket = this.socket;
+    if (!socket) return;
+    if (
+      generation !== undefined &&
+      generation !== this.socketGeneration
+    ) {
+      return;
+    }
     this.socket = null;
-    if (socket && socket.readyState !== 3) socket.close(code, reason);
+    this.detachSocket(socket);
+    if (socket.readyState !== 3) socket.close(code, reason);
+  }
+
+  private detachSocket(socket: WebSocketLike): void {
+    socket.onopen = null;
+    socket.onmessage = null;
+    socket.onerror = null;
+    socket.onclose = null;
+  }
+
+  private isCurrentSocket(
+    socket: WebSocketLike,
+    generation: number,
+  ): boolean {
+    return this.socket === socket && this.socketGeneration === generation;
   }
 
   private isOpen(): boolean {
@@ -564,15 +759,27 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
       this.resolved.reconnectMaxMillis,
       this.resolved.reconnectBaseMillis * 2 ** exponent,
     );
-    const random = Math.min(1, Math.max(0, this.options.random?.() ?? Math.random()));
+    const random = Math.min(
+      1,
+      Math.max(0, this.options.random?.() ?? Math.random()),
+    );
     const delay = Math.round(base * (0.5 + random * 0.5));
-    if (delay > 0) await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    if (delay > 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    }
   }
 
-  private drop(record: LogRecord, reason: SupabaseWebSocketDrop['reason']): void {
+  private drop(
+    record: LogRecord,
+    reason: SupabaseWebSocketDrop['reason'],
+  ): void {
     this.dropped += 1;
     try {
-      this.options.onDrop?.({ reason, record, droppedTotal: this.dropped });
+      this.options.onDrop?.({
+        reason,
+        record,
+        droppedTotal: this.dropped,
+      });
     } catch {
       // Diagnostics must never create recursive logger failures.
     }
