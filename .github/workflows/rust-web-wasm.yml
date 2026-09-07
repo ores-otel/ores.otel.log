@@ -1,0 +1,35 @@
+name: Rust web WASM bridge
+on:
+  pull_request:
+    paths: ['sdk/rust-web/**', 'sdk/wasm/**', 'sdk/rust/**', 'Cargo.toml', '.github/workflows/rust-web-wasm.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal
+      - run: cargo +stable test -p ores-otel-web --no-default-features
+      - run: cargo +stable test -p ores-otel-web --features axum
+      - run: cargo +stable check -p ores-otel-web --all-features
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+      - run: cargo +stable check -p ores-otel-web --target wasm32-unknown-unknown --features browser
+      - name: Prove native dependencies are excluded
+        run: |
+          cargo +stable tree -p ores-otel-web --target wasm32-unknown-unknown --features browser -e normal > /tmp/wasm-tree.txt
+          cat /tmp/wasm-tree.txt
+          if grep -E ' (tokio|mio|axum|tonic|oresoftware-next-loggers) v' /tmp/wasm-tree.txt; then exit 1; fi
+      - run: cargo +stable install wasm-pack --locked
+      - run: wasm-pack test --headless --chrome sdk/rust-web --features browser

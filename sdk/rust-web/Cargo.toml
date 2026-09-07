@@ -1,0 +1,31 @@
+[package]
+name = "ores-otel-web"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+description = "Explicit browser WASM and native Axum adapters for ores-otel"
+repository = "https://github.com/ores-otel/ores.otel.log"
+
+[features]
+default = []
+browser = ["dep:next-loggers-wasm", "dep:js-sys", "dep:web-sys", "dep:wasm-bindgen"]
+axum = ["dep:axum", "dep:next-loggers", "dep:uuid"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+next-loggers-wasm = { package = "oresoftware-next-loggers-wasm", path = "../wasm", optional = true }
+js-sys = { version = "0.3", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Window", "Location", "Crypto", "Request", "RequestInit", "RequestMode", "RequestRedirect", "RequestCredentials", "Headers", "Url"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+axum = { version = "0.8", default-features = false, optional = true }
+next-loggers = { package = "oresoftware-next-loggers", path = "../rust", optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "~1.47.5", features = ["macros", "rt", "sync"] }
+tower = { version = "0.5", features = ["util"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

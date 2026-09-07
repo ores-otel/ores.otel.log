@@ -5,6 +5,7 @@ members = [
   "sdk/rust-request-context",
   "sdk/rust-otel",
   "sdk/wasm",
+  "sdk/rust-web",
 ]
 resolver = "2"
 
