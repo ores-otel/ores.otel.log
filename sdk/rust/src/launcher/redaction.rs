@@ -127,16 +127,33 @@ mod tests {
     #[test]
     fn masks_named_and_inline_credentials() {
         assert_eq!(
-            display(&["/app", "--token", "fixture", "--api-key=fixture", "DB_PASSWORD=fixture"]),
-            ["/app", "--token", REDACTED, "--api-key=[REDACTED]", "DB_PASSWORD=[REDACTED]"]
+            display(&[
+                "/app",
+                "--token",
+                "fixture",
+                "--api-key=fixture",
+                "DB_PASSWORD=fixture"
+            ]),
+            [
+                "/app",
+                "--token",
+                REDACTED,
+                "--api-key=[REDACTED]",
+                "DB_PASSWORD=[REDACTED]"
+            ]
         );
     }
 
     #[test]
     fn masks_short_aliases_headers_urls_and_bearer_values() {
         let output = display(&[
-            "/app", "-pfixture", "-H", "X-Custom: fixture", "https://example.invalid/signed",
-            "Bearer fixture", "--header=X-Custom: fixture",
+            "/app",
+            "-pfixture",
+            "-H",
+            "X-Custom: fixture",
+            "https://example.invalid/signed",
+            "Bearer fixture",
+            "--header=X-Custom: fixture",
         ]);
         assert!(!output.join(" ").contains("fixture"));
         assert!(!output.join(" ").contains("example.invalid"));

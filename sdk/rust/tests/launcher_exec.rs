@@ -22,8 +22,12 @@ fn launcher() -> Command {
 fn probe() -> &'static PathBuf {
     static PROBE: OnceLock<PathBuf> = OnceLock::new();
     PROBE.get_or_init(|| {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        let directory = std::env::temp_dir().join(format!("ores-launcher-{}-{nonce}", std::process::id()));
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("ores-launcher-{}-{nonce}", std::process::id()));
         fs::create_dir(&directory).unwrap();
         let source = directory.join("probe.rs");
         let binary = directory.join("probe");
@@ -64,8 +68,11 @@ fn first_record(output: &Output) -> Value {
 #[test]
 fn preserves_pid_native_arguments_environment_cwd_and_stdout() {
     let arguments = vec![
-        OsString::from("two words"), OsString::from(""), OsString::from("*"),
-        OsString::from("$(not-a-shell)"), OsString::from("quote\"\nline"),
+        OsString::from("two words"),
+        OsString::from(""),
+        OsString::from("*"),
+        OsString::from("$(not-a-shell)"),
+        OsString::from("quote\"\nline"),
         OsString::from_vec(vec![0xff, b'x']),
     ];
     let child = launcher()
@@ -81,9 +88,14 @@ fn preserves_pid_native_arguments_environment_cwd_and_stdout() {
     let output = finish(child);
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout.clone()).unwrap();
-    assert!(stdout.lines().any(|line| line == format!("pid={expected_pid}")));
+    assert!(stdout
+        .lines()
+        .any(|line| line == format!("pid={expected_pid}")));
     assert!(stdout.contains("env=696e68657269746564\n"));
-    assert!(stdout.contains(&format!("cwd={}\n", hex(probe().parent().unwrap().as_os_str().as_bytes()))));
+    assert!(stdout.contains(&format!(
+        "cwd={}\n",
+        hex(probe().parent().unwrap().as_os_str().as_bytes())
+    )));
     for (index, argument) in arguments.iter().enumerate() {
         assert!(stdout.contains(&format!("arg{index}={}\n", hex(argument.as_bytes()))));
     }
@@ -94,14 +106,21 @@ fn preserves_pid_native_arguments_environment_cwd_and_stdout() {
     assert_eq!(record["fields"]["process.pid"], expected_pid);
     assert_eq!(record["fields"]["event.name"], "process.exec.attempt");
     assert_eq!(record["fields"]["process.command_args"][6], "[NON_UTF8]");
-    assert_eq!(output.stderr.iter().filter(|byte| **byte == b'\n').count(), 1);
+    assert_eq!(
+        output.stderr.iter().filter(|byte| **byte == b'\n').count(),
+        1
+    );
 }
 
 #[test]
 fn redacts_only_the_log_not_the_childs_arguments() {
     let output = launcher()
         .arg(probe())
-        .args(["--token", "fixture-never-a-real-secret", "--password=fixture-never-a-real-secret"])
+        .args([
+            "--token",
+            "fixture-never-a-real-secret",
+            "--password=fixture-never-a-real-secret",
+        ])
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -118,13 +137,19 @@ fn missing_and_empty_commands_are_usage_errors() {
         }
         let output = invocation.output().unwrap();
         assert_eq!(output.status.code(), Some(64));
-        assert_eq!(first_record(&output)["fields"]["event.name"], "process.exec.invalid_command");
+        assert_eq!(
+            first_record(&output)["fields"]["event.name"],
+            "process.exec.invalid_command"
+        );
     }
 }
 
 #[test]
 fn not_found_and_not_executable_are_distinct_failures() {
-    let output = launcher().arg(probe().with_file_name("absent")).output().unwrap();
+    let output = launcher()
+        .arg(probe().with_file_name("absent"))
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(127));
     let file = probe().with_file_name("not-executable");
     fs::write(&file, "test-only fixture").unwrap();
@@ -135,7 +160,11 @@ fn not_found_and_not_executable_are_distinct_failures() {
 
 #[test]
 fn returns_the_application_exit_status() {
-    let output = launcher().arg(probe()).env("ORES_LAUNCHER_TEST_EXIT", "42").output().unwrap();
+    let output = launcher()
+        .arg(probe())
+        .env("ORES_LAUNCHER_TEST_EXIT", "42")
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(42));
 }
 
@@ -144,7 +173,12 @@ fn returns_the_application_exit_status() {
 fn failing_stderr_does_not_prevent_exec() {
     let output = launcher()
         .arg(probe())
-        .stderr(Stdio::from(fs::OpenOptions::new().write(true).open("/dev/full").unwrap()))
+        .stderr(Stdio::from(
+            fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        ))
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -167,7 +201,10 @@ fn application_owns_sigterm_after_exec() {
     let mut line = String::new();
     loop {
         line.clear();
-        assert!(stdout.read_line(&mut line).unwrap() > 0, "probe must become ready");
+        assert!(
+            stdout.read_line(&mut line).unwrap() > 0,
+            "probe must become ready"
+        );
         if line.trim_end() == "ready" {
             break;
         }

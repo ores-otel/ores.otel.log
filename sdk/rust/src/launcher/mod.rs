@@ -87,7 +87,10 @@ pub fn run(argv: Vec<OsString>) -> ExitCode {
 
     let mut fields = command_fields(&argv);
     fields.insert("event.name".into(), json!("process.exec.attempt"));
-    let _ = logger.info(vec![json!("command is")]).add_fields(fields).send();
+    let _ = logger
+        .info(vec![json!("command is")])
+        .add_fields(fields)
+        .send();
     // exec does not run destructors. Explicitly finish synchronous logging first.
     let _ = logger.flush(false);
 
