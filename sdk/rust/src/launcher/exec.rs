@@ -70,7 +70,11 @@ impl Prepared {
 
     fn execute(self) -> Failure {
         let mut argv: Vec<_> = self.arguments.iter().map(|value| value.as_ptr()).collect();
-        let mut envp: Vec<_> = self.environment.iter().map(|value| value.as_ptr()).collect();
+        let mut envp: Vec<_> = self
+            .environment
+            .iter()
+            .map(|value| value.as_ptr())
+            .collect();
         argv.push(ptr::null());
         envp.push(ptr::null());
 
@@ -115,7 +119,8 @@ impl Prepared {
         }
         // SAFETY: the first sigaction succeeded and initialized previous. Restore
         // the whole disposition before any logging; no signal mask is changed.
-        let can_log = unsafe { libc::sigaction(libc::SIGPIPE, previous.as_ptr(), ptr::null_mut()) == 0 };
+        let can_log =
+            unsafe { libc::sigaction(libc::SIGPIPE, previous.as_ptr(), ptr::null_mut()) == 0 };
         Failure { error, can_log }
     }
 }
