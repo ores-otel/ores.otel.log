@@ -88,6 +88,8 @@ tmp
 temp
 tmp/worktrees
 temp/worktrees
+tmp/
+temp/
 
 # --- environment / secrets (sops + age) -------------------------------------
 # Only env/enc/*.env.enc is tracked. Every plaintext form stays out of git;

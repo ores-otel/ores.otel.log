@@ -1,0 +1,23 @@
+# Scoped to docker/launcher/Dockerfile; do not change other image build contexts.
+# Real native-argv tests create non-UTF8 filenames and symlink loops in tmp/.
+# They are execution evidence, never image inputs. Exclude before BuildKit walks
+# them, and do not copy host-built target artifacts into the Bookworm builder.
+**/.git
+**/tmp
+**/temp
+**/target
+**/node_modules
+**/.cache
+**/.conformance-tmp
+**/coverage
+**/*.log
+
+# Never send runtime credentials or decrypted environment files to a builder.
+**/.env
+**/.env.*
+**/*.env
+**/env/dec
+**/*.agekey
+**/*.age-key
+**/keys.txt
+**/sops-private*.txt
