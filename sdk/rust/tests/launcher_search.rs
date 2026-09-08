@@ -82,7 +82,8 @@ fn path_search_continues_after_missing_not_directory_and_denied() {
     script(&denied.join("app"), "exit 93\n", false);
     script(&root.join("file"), "not a directory", false);
     symlink("/bin/true", valid.join("app")).unwrap();
-    let path = std::env::join_paths([root.join("absent"), root.join("file"), denied, valid]).unwrap();
+    let path =
+        std::env::join_paths([root.join("absent"), root.join("file"), denied, valid]).unwrap();
     let output = run(launcher().arg("app").env("PATH", path));
     assert!(output.status.success());
     assert_eq!(events(&output).len(), 1);
@@ -115,7 +116,10 @@ fn path_search_stops_at_executable_text_without_falling_back_to_shell_or_next_en
 fn explicit_empty_path_searches_cwd_but_unset_path_does_not() {
     let root = directory();
     symlink("/bin/true", root.join("only-here")).unwrap();
-    let output = run(launcher().arg("only-here").current_dir(&root).env("PATH", ""));
+    let output = run(launcher()
+        .arg("only-here")
+        .current_dir(&root)
+        .env("PATH", ""));
     assert!(output.status.success());
     let output = run(launcher()
         .arg("only-here")
