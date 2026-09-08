@@ -32,7 +32,10 @@ fn probe() -> &'static PathBuf {
             .as_nanos();
         let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../tmp")
-            .join(format!("launcher-adversarial-{}-{nonce}", std::process::id()));
+            .join(format!(
+                "launcher-adversarial-{}-{nonce}",
+                std::process::id()
+            ));
         fs::create_dir_all(&directory).unwrap();
         let source = directory.join("probe.rs");
         let binary = directory.join("probe");
@@ -198,12 +201,10 @@ fn stdin_and_stdout_are_forwarded_byte_for_byte() {
 #[test]
 fn native_environment_is_inherited_but_not_dumped_into_logs() {
     let value = OsString::from_vec(b"synthetic-env-needle\xff".to_vec());
-    let output = run(
-        launcher()
-            .arg(probe())
-            .env("ORES_LAUNCHER_TEST_VALUE", &value)
-            .env("OTEL_SERVICE_NAME", OsString::from_vec(vec![0xff])),
-    );
+    let output = run(launcher()
+        .arg(probe())
+        .env("ORES_LAUNCHER_TEST_VALUE", &value)
+        .env("OTEL_SERVICE_NAME", OsString::from_vec(vec![0xff])));
     assert!(output.status.success());
     assert!(String::from_utf8_lossy(&output.stdout).contains(&hex(value.as_bytes())));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("synthetic-env-needle"));
@@ -227,22 +228,18 @@ fn non_utf8_executable_paths_work_and_are_masked() {
 
 #[test]
 fn basename_lookup_uses_the_inherited_path() {
-    let output = run(
-        launcher()
-            .arg(probe().file_name().unwrap())
-            .env("PATH", probe().parent().unwrap()),
-    );
+    let output = run(launcher()
+        .arg(probe().file_name().unwrap())
+        .env("PATH", probe().parent().unwrap()));
     assert!(output.status.success());
     assert_eq!(records(&output).len(), 1);
 }
 
 #[test]
 fn failed_exec_emits_attempt_then_failure_without_raw_credentials() {
-    let output = run(
-        launcher()
-            .arg(probe().with_file_name("absent-executable"))
-            .arg("--password=synthetic-error-needle"),
-    );
+    let output = run(launcher()
+        .arg(probe().with_file_name("absent-executable"))
+        .arg("--password=synthetic-error-needle"));
     assert_eq!(output.status.code(), Some(127));
     assert!(output.stdout.is_empty());
     let events = records(&output);
@@ -286,38 +283,35 @@ fn directories_and_symlink_loops_fail_without_starting_a_child() {
 
 #[test]
 fn broken_stderr_does_not_prevent_successful_exec() {
-    let output = run(
-        launcher()
-            .arg(probe())
-            .env("ORES_LAUNCHER_TEST_EXIT", "42")
-            .stderr(broken_stderr()),
-    );
+    let output = run(launcher()
+        .arg(probe())
+        .env("ORES_LAUNCHER_TEST_EXIT", "42")
+        .stderr(broken_stderr()));
     assert_eq!(output.status.code(), Some(42));
     assert!(String::from_utf8_lossy(&output.stdout).contains("ready\n"));
 }
 
 #[test]
 fn broken_stderr_cannot_replace_the_failed_exec_exit_code_with_sigpipe() {
-    let output = run(
-        launcher()
-            .arg(probe().with_file_name("absent-with-broken-stderr"))
-            .stderr(broken_stderr()),
-    );
+    let output = run(launcher()
+        .arg(probe().with_file_name("absent-with-broken-stderr"))
+        .stderr(broken_stderr()));
     assert_eq!(output.status.code(), Some(127));
 }
 
 #[test]
 fn service_name_and_control_characters_cannot_forge_extra_log_records() {
     let service = format!("{}\nforged-service", "x".repeat(200));
-    let output = run(
-        launcher()
-            .arg(probe())
-            .arg("\n\r\t\u{1b}[31m\"forged event\"")
-            .env("OTEL_SERVICE_NAME", service),
-    );
+    let output = run(launcher()
+        .arg(probe())
+        .arg("\n\r\t\u{1b}[31m\"forged event\"")
+        .env("OTEL_SERVICE_NAME", service));
     assert!(output.status.success());
     let events = records(&output);
     assert_eq!(events.len(), 1);
     assert_eq!(events[0]["schema"], "next-loggers/v1");
-    assert_eq!(events[0]["appName"], format!("{}...[truncated]", "x".repeat(128)));
+    assert_eq!(
+        events[0]["appName"],
+        format!("{}...[truncated]", "x".repeat(128))
+    );
 }
