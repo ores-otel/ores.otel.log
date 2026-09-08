@@ -4,13 +4,13 @@
 //! The executable and its options are an opaque native argument vector. The
 //! application remains responsible for flags-2-env, signal handling and children.
 
+mod exec;
 mod redaction;
 
 use crate::{json, JsonObject, LogRecord, Logger, LoggerError, Options, Transport};
 use std::ffi::OsString;
 use std::io::{self, Write};
-use std::os::unix::process::CommandExt;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 use std::sync::Arc;
 
 /// Local transport for the canonical ores-otel record, not a second log schema.
@@ -59,19 +59,20 @@ fn command_fields(argv: &[OsString]) -> JsonObject {
         ("process.pid".into(), json!(std::process::id())),
         ("process.command_args".into(), json!(redaction::argv(argv))),
         ("process.command_args_count".into(), json!(argv.len())),
-        ("launcher.log_policy".into(), json!("redacted-bounded-v1")),
+        ("launcher.log_policy".into(), json!("redacted-bounded-v2")),
     ])
 }
 
 /// Log a display copy, then execute the original argv without a shell or fork.
 ///
+/// Call at single-threaded startup, before installing application signal handlers.
 /// Success never returns. Failure returns 64 for missing/empty executable, 127
 /// for NotFound (including a missing interpreter/loader), and 126 otherwise.
 /// Write/flush errors are best-effort and never replace the application's result.
 /// Like ordinary stderr writes, a blocked log consumer can exert backpressure.
 pub fn run(argv: Vec<OsString>) -> ExitCode {
     let logger = startup_logger();
-    let Some((program, arguments)) = argv.split_first().filter(|(p, _)| !p.is_empty()) else {
+    if argv.is_empty() || argv[0].is_empty() {
         let _ = logger
             .error(vec![json!(
                 "usage: ores-launcher <executable> [arguments...]"
@@ -83,7 +84,7 @@ pub fn run(argv: Vec<OsString>) -> ExitCode {
             .send();
         let _ = logger.flush(false);
         return ExitCode::from(64);
-    };
+    }
 
     let mut fields = command_fields(&argv);
     fields.insert("event.name".into(), json!("process.exec.attempt"));
@@ -96,18 +97,20 @@ pub fn run(argv: Vec<OsString>) -> ExitCode {
 
     // Never execute the redacted/truncated representation. No env/cwd/uid/stdin
     // changes are made, and the application takes over the same PID.
-    let error = Command::new(program).args(arguments).exec();
-
-    let mut fields = command_fields(&argv);
-    fields.insert("event.name".into(), json!("process.exec.failed"));
-    fields.insert("error.kind".into(), json!(format!("{:?}", error.kind())));
-    fields.insert("error.os_code".into(), json!(error.raw_os_error()));
-    // Avoid error strings that might embed raw command arguments in the future.
-    let _ = logger
-        .error(vec![json!("cannot execute command")])
-        .add_fields(fields)
-        .send();
-    let _ = logger.flush(false);
+    let failure = exec::replace(&argv);
+    let error = failure.error;
+    if failure.can_log {
+        let mut fields = command_fields(&argv);
+        fields.insert("event.name".into(), json!("process.exec.failed"));
+        fields.insert("error.kind".into(), json!(format!("{:?}", error.kind())));
+        fields.insert("error.os_code".into(), json!(error.raw_os_error()));
+        // Avoid error strings that might embed raw command arguments in the future.
+        let _ = logger
+            .error(vec![json!("cannot execute command")])
+            .add_fields(fields)
+            .send();
+        let _ = logger.flush(false);
+    }
     ExitCode::from(if error.kind() == io::ErrorKind::NotFound {
         127
     } else {

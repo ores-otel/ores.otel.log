@@ -19,7 +19,7 @@ path = "src/lib.rs"
 
 [features]
 # Opt in explicitly: ordinary SDK consumers do not build a container launcher.
-launcher = []
+launcher = ["dep:libc"]
 
 [[bin]]
 name = "ores-launcher"
@@ -35,3 +35,8 @@ serde_json = "=1.0.151"
 # Exact-pin the audited release so fresh consumers cannot resolve a vulnerable
 # 0.3.x version while the supported resolver/toolchain remains deterministic.
 time = { version = "=0.3.54", features = ["formatting"] }
+
+[target.'cfg(unix)'.dependencies]
+# Reuse the workspace's existing locked libc; no new version resolution.
+# Direct execve avoids execvp's implicit shell fallback on executable text.
+libc = { version = "=0.2.189", optional = true }

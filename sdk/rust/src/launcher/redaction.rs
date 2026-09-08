@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::os::unix::ffi::OsStrExt;
 
 const MAX_ARGUMENTS: usize = 32;
 const MAX_CHARACTERS: usize = 128;
@@ -49,6 +50,11 @@ fn sensitive_literal(value: &str) -> bool {
         || value.starts_with("eyJ")
 }
 
+fn opaque_option_needs_value(argument: &OsString) -> bool {
+    let bytes = argument.as_bytes();
+    bytes.starts_with(b"-") && !bytes.contains(&b'=')
+}
+
 /// This is a display transform only, not an argv parser. It does not promise to
 /// recognize arbitrary positional secrets: credentials must never enter argv.
 pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
@@ -57,11 +63,15 @@ pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
     for (index, argument) in arguments.iter().take(MAX_ARGUMENTS).enumerate() {
         if redact_next {
             output.push(REDACTED.into());
-            redact_next = false;
+            // A masked value may itself be another option. Continue hiding its
+            // possible value rather than leaking through a chain of options.
+            redact_next = opaque_option_needs_value(argument);
             continue;
         }
         let Some(value) = argument.to_str() else {
             output.push("[NON_UTF8]".into());
+            // Do not echo a malformed key's possible value on the next iteration.
+            redact_next = index > 0 && opaque_option_needs_value(argument);
             continue;
         };
         if sensitive_literal(value) {
@@ -69,19 +79,8 @@ pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
             continue;
         }
         if index > 0 {
-            let (key, inline) = value
-                .split_once('=')
-                .map_or((value, false), |(key, _)| (key, true));
-            if (inline || key.starts_with('-')) && sensitive_key(key) {
-                output.push(if inline {
-                    format!("{}={REDACTED}", bounded(key))
-                } else {
-                    redact_next = true;
-                    bounded(key)
-                });
-                continue;
-            }
-            // Conservative common short aliases, including attached values.
+            // Check attached short values BEFORE treating text as an option name.
+            // A value such as -p<text-containing-token> is not a safe key to echo.
             // -p is ambiguous (port/password); hiding it is the safer default.
             if let Some(alias) = ["-p", "-P", "-k", "-u", "-H"]
                 .iter()
@@ -93,6 +92,16 @@ pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
                 } else {
                     output.push(format!("{alias}{REDACTED}"));
                 }
+                continue;
+            }
+            let (key, inline) = value
+                .split_once('=')
+                .map_or((value, false), |(key, _)| (key, true));
+            if (inline || key.starts_with('-')) && sensitive_key(key) {
+                // Unknown option spellings can embed a secret in the apparent
+                // key itself. Hide the entire argument, not just the =value.
+                output.push(REDACTED.into());
+                redact_next = !inline;
                 continue;
             }
         }
@@ -125,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn masks_named_and_inline_credentials() {
+    fn masks_named_and_inline_credentials_including_the_apparent_key() {
         assert_eq!(
             display(&[
                 "/app",
@@ -134,13 +143,15 @@ mod tests {
                 "--api-key=fixture",
                 "DB_PASSWORD=fixture"
             ]),
-            [
-                "/app",
-                "--token",
-                REDACTED,
-                "--api-key=[REDACTED]",
-                "DB_PASSWORD=[REDACTED]"
-            ]
+            ["/app", REDACTED, REDACTED, REDACTED, REDACTED]
+        );
+    }
+
+    #[test]
+    fn masked_option_chains_do_not_expose_the_last_value() {
+        assert_eq!(
+            display(&["/app", "--token", "--password", "fixture", "public"]),
+            ["/app", REDACTED, REDACTED, REDACTED, "public"]
         );
     }
 
