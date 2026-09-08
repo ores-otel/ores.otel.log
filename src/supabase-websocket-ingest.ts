@@ -146,6 +146,15 @@ const DEFAULTS: ResolvedOptions = {
   maxReconnectAttempts: 8,
 };
 
+const MAX_INBOUND_MESSAGE_BYTES = 256 * 1_024;
+const CREDENTIAL_QUERY_KEYS = new Set([
+  'access_token',
+  'apikey',
+  'authorization',
+  'ticket',
+  'token',
+]);
+
 function integer(
   value: number | undefined,
   fallback: number,
@@ -160,6 +169,12 @@ function byteLength(value: string): number {
   return typeof TextEncoder === 'function'
     ? new TextEncoder().encode(value).byteLength
     : value.length;
+}
+
+function assertInboundSize(bytes: number): void {
+  if (bytes > MAX_INBOUND_MESSAGE_BYTES) {
+    throw new RangeError('Supabase WebSocket message exceeds the protocol limit');
+  }
 }
 
 function unref(timer: ReturnType<typeof setTimeout>): void {
@@ -188,24 +203,33 @@ function assertSession(session: SupabaseTelemetrySession): void {
 
 function assertTicket(
   ticket: SupabaseWebSocketTicket,
-  allowedHosts?: readonly string[],
+  allowedHosts: readonly string[] | undefined,
+  nowMillis: number,
 ): URL {
   if (!ticket || typeof ticket !== 'object') {
     throw new TypeError('ticketProvider returned no ticket');
   }
   if (
     typeof ticket.ticket !== 'string' ||
-    ticket.ticket.trim().length < 16
+    ticket.ticket.trim().length < 16 ||
+    ticket.ticket !== ticket.ticket.trim()
   ) {
     throw new TypeError(
-      'Supabase WebSocket ticket must be a non-empty short-lived credential',
+      'Supabase WebSocket ticket must be a normalized non-empty short-lived credential',
     );
   }
-  if (
-    ticket.expiresAtMillis !== undefined &&
-    ticket.expiresAtMillis <= Date.now()
-  ) {
-    throw new Error('Supabase WebSocket ticket is expired');
+  if (ticket.expiresAtMillis !== undefined) {
+    if (
+      !Number.isSafeInteger(ticket.expiresAtMillis) ||
+      ticket.expiresAtMillis <= 0
+    ) {
+      throw new TypeError(
+        'Supabase WebSocket ticket expiry must be a positive epoch-millisecond integer',
+      );
+    }
+    if (ticket.expiresAtMillis <= nowMillis) {
+      throw new Error('Supabase WebSocket ticket is expired');
+    }
   }
   let url: URL;
   try {
@@ -219,6 +243,16 @@ function assertTicket(
   if (url.username || url.password) {
     throw new TypeError('Supabase WebSocket URL must not embed credentials');
   }
+  if (url.hash) {
+    throw new TypeError('Supabase WebSocket URL must not contain a fragment');
+  }
+  for (const key of url.searchParams.keys()) {
+    if (CREDENTIAL_QUERY_KEYS.has(key.toLowerCase())) {
+      throw new TypeError(
+        'Supabase WebSocket URL must not contain credential query parameters',
+      );
+    }
+  }
   if (allowedHosts && !allowedHosts.includes(url.hostname)) {
     throw new TypeError(
       `Supabase WebSocket host ${url.hostname} is not in allowedHosts`,
@@ -228,11 +262,16 @@ function assertTicket(
 }
 
 function parseMessage(data: unknown): unknown {
-  if (typeof data === 'string') return JSON.parse(data) as unknown;
+  if (typeof data === 'string') {
+    assertInboundSize(byteLength(data));
+    return JSON.parse(data) as unknown;
+  }
   if (data instanceof ArrayBuffer) {
+    assertInboundSize(data.byteLength);
     return JSON.parse(new TextDecoder().decode(data)) as unknown;
   }
   if (ArrayBuffer.isView(data)) {
+    assertInboundSize(data.byteLength);
     return JSON.parse(
       new TextDecoder().decode(data as ArrayBufferView<ArrayBuffer>),
     ) as unknown;
@@ -512,10 +551,21 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
   }
 
   private async openConnection(): Promise<void> {
-    const ticket = await this.options.ticketProvider();
-    const url = assertTicket(ticket, this.options.allowedHosts);
+    let ticket: SupabaseWebSocketTicket;
+    try {
+      ticket = await this.options.ticketProvider();
+    } catch {
+      throw new Error('Supabase WebSocket ticket acquisition failed');
+    }
+    const now = (this.options.clock?.() ?? new Date()).getTime();
+    const url = assertTicket(ticket, this.options.allowedHosts, now);
     const factory = this.options.webSocketFactory ?? defaultWebSocketFactory;
-    const socket = factory(url.toString());
+    let socket: WebSocketLike;
+    try {
+      socket = factory(url.toString());
+    } catch {
+      throw new Error('Supabase WebSocket construction failed');
+    }
     const generation = this.socketGeneration + 1;
     this.socketGeneration = generation;
     this.socket = socket;
@@ -555,10 +605,13 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
             }),
           );
           resolve();
-        } catch (error) {
-          reject(
-            error instanceof Error ? error : new Error(String(error)),
-          );
+        } catch {
+          this.socket = null;
+          this.detachSocket(socket);
+          if (socket.readyState !== 3) {
+            socket.close(1011, 'hello send failed');
+          }
+          reject(new Error('Supabase WebSocket hello send failed'));
         }
       };
       socket.onmessage = (event) => {
@@ -566,9 +619,24 @@ export class SupabaseWebSocketIngestTransport implements LogTransport {
         this.handleMessage(event.data, generation);
       };
       socket.onerror = () => {
-        if (!opened && this.isCurrentSocket(socket, generation)) {
-          reject(new Error('Supabase WebSocket connection failed'));
+        if (!this.isCurrentSocket(socket, generation)) return;
+        const error = new Error(
+          opened
+            ? 'Supabase WebSocket connection failed after opening'
+            : 'Supabase WebSocket connection failed',
+        );
+        if (!opened) {
+          clearTimeout(timer);
+          this.socket = null;
+          this.detachSocket(socket);
+          if (socket.readyState !== 3) {
+            socket.close(1011, 'connection failed');
+          }
+          reject(error);
+          return;
         }
+        this.rejectAck(error, generation);
+        this.disconnect(1011, 'connection error', generation);
       };
       socket.onclose = (event) => {
         clearTimeout(timer);
