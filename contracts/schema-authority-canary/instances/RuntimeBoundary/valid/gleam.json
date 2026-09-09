@@ -1,0 +1,8 @@
+{
+  "language": "gleam",
+  "runtime": "gleam-1.15-otp-28",
+  "contractVersion": "next-loggers/runtime-boundary/v1",
+  "contextPropagation": "scoped-process-dictionary",
+  "supportsShutdown": true,
+  "supportsOpenTelemetry": true
+}

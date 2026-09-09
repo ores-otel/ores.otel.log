@@ -1,0 +1,51 @@
+name: TJSV runtime-boundary authority convergence
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/schema-authority-canary/**'
+      - '.github/workflows/tjsv-runtime-boundary.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/schema-authority-canary/**'
+      - '.github/workflows/tjsv-runtime-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tjsv-runtime-boundary-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  peer-authority-convergence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact repository head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Enforce TypeSpec and JSON Schema peer authorities
+        uses: ORESoftware/typespec-json-schema-validator@a4b731fbf82c4d162abd74fd03758fa32bb76176
+        with:
+          typespec: contracts/schema-authority-canary/main.tsp
+          schema: contracts/schema-authority-canary/authored.schema.json
+          instances: contracts/schema-authority-canary/instances
+          report: .typespec-json-schema-validator/runtime-boundary-report.json
+          contract_ir: .typespec-json-schema-validator/runtime-boundary-contract-ir.json
+          output_dir: .typespec-json-schema-validator/generated/runtime-boundary
+          quiet: 'false'
+
+      - name: Retain deterministic TJSV evidence
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: tjsv-runtime-boundary-${{ github.sha }}
+          path: .typespec-json-schema-validator/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
