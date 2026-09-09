@@ -1,0 +1,8 @@
+{
+  "language": "dart",
+  "runtime": "dart-flutter-stable",
+  "contractVersion": "next-loggers/runtime-boundary/v1",
+  "contextPropagation": "Zone",
+  "supportsShutdown": true,
+  "supportsOpenTelemetry": true
+}
