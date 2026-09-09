@@ -1,0 +1,8 @@
+{
+  "language": "go",
+  "runtime": "go-1.24",
+  "contractVersion": "next-loggers/runtime-boundary/v1",
+  "contextPropagation": "context.Context",
+  "supportsShutdown": true,
+  "supportsOpenTelemetry": true
+}
