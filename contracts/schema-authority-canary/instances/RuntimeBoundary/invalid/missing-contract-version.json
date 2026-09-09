@@ -1,0 +1,7 @@
+{
+  "language": "rust",
+  "runtime": "rust-stable",
+  "contextPropagation": "thread-local-plus-explicit-async",
+  "supportsShutdown": true,
+  "supportsOpenTelemetry": true
+}
