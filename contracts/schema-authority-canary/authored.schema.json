@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ores-otel/ores.otel.log/contracts/schema-authority-canary/authored.schema.json",
+  "$defs": {
+    "RuntimeBoundary": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "RuntimeBoundary",
+      "type": "object",
+      "properties": {
+        "language": { "type": "string" },
+        "runtime": { "type": "string" },
+        "contractVersion": { "type": "string" },
+        "contextPropagation": { "type": "string" },
+        "supportsShutdown": { "type": "boolean" },
+        "supportsOpenTelemetry": { "type": "boolean" }
+      },
+      "required": [
+        "language",
+        "runtime",
+        "contractVersion",
+        "contextPropagation",
+        "supportsShutdown",
+        "supportsOpenTelemetry"
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
