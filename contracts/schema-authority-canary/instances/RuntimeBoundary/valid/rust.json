@@ -1,0 +1,8 @@
+{
+  "language": "rust",
+  "runtime": "rust-stable",
+  "contractVersion": "next-loggers/runtime-boundary/v1",
+  "contextPropagation": "thread-local-plus-explicit-async",
+  "supportsShutdown": true,
+  "supportsOpenTelemetry": true
+}
