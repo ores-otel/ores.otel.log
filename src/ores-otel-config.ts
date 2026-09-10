@@ -238,15 +238,18 @@ function optionalStringArray(table: TomlTable, key: string, path: string): strin
 function parseLogging(table: TomlTable | undefined, path: string): OresOtelFileLoggingConfig | undefined {
   if (!table) return undefined;
   assertAllowedKeys(table, LOGGING_KEYS, path);
+  const enabled = optionalBoolean(table, 'enabled', path);
   const level = optionalString(table, 'level', path, 16);
+  const console = optionalBoolean(table, 'console', path);
+  const autoSend = optionalBoolean(table, 'auto_send', path);
   if (level !== undefined && !LOG_LEVELS_LOWER.has(level.toLowerCase() as OresOtelLogLevel)) {
     throw new RangeError(`${path}.level must be trace|debug|info|warn|error|fatal`);
   }
   return {
-    ...(optionalBoolean(table, 'enabled', path) === undefined ? {} : { enabled: optionalBoolean(table, 'enabled', path) }),
+    ...(enabled === undefined ? {} : { enabled }),
     ...(level === undefined ? {} : { level: level.toLowerCase() }),
-    ...(optionalBoolean(table, 'console', path) === undefined ? {} : { console: optionalBoolean(table, 'console', path) }),
-    ...(optionalBoolean(table, 'auto_send', path) === undefined ? {} : { auto_send: optionalBoolean(table, 'auto_send', path) }),
+    ...(console === undefined ? {} : { console }),
+    ...(autoSend === undefined ? {} : { auto_send: autoSend }),
   };
 }
 
@@ -301,8 +304,7 @@ function parseExporter(table: TomlTable | undefined, path: string): OresOtelFile
   };
 }
 
-function parseLayer(table: TomlTable | undefined, path: string): OresOtelFileLayer | undefined {
-  if (!table) return undefined;
+function parseLayer(table: TomlTable, path: string): OresOtelFileLayer {
   assertAllowedKeys(table, LAYER_KEYS, path);
   const enabled = optionalBoolean(table, 'enabled', path);
   const serviceName = optionalString(table, 'service_name', path, 256);
@@ -329,11 +331,14 @@ export function parseOresOtelToml(input: string): OresOtelFileConfigV1 {
   if (table.version !== ORES_OTEL_CONFIG_VERSION) {
     throw new RangeError(`root.version must equal ${ORES_OTEL_CONFIG_VERSION}`);
   }
+  const common = optionalTable(table, 'common', 'root');
+  const client = optionalTable(table, 'client', 'root');
+  const server = optionalTable(table, 'server', 'root');
   return {
     version: 1,
-    ...(table.common === undefined ? {} : { common: parseLayer(optionalTable(table, 'common', 'root'), 'common') }),
-    ...(table.client === undefined ? {} : { client: parseLayer(optionalTable(table, 'client', 'root'), 'client') }),
-    ...(table.server === undefined ? {} : { server: parseLayer(optionalTable(table, 'server', 'root'), 'server') }),
+    ...(common === undefined ? {} : { common: parseLayer(common, 'common') }),
+    ...(client === undefined ? {} : { client: parseLayer(client, 'client') }),
+    ...(server === undefined ? {} : { server: parseLayer(server, 'server') }),
   };
 }
 
