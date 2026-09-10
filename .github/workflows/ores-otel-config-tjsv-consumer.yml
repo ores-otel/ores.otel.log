@@ -1,0 +1,61 @@
+name: ORES OTEL config TJSV consumer admission
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/public/ores-otel-config.v1/**'
+      - '.github/workflows/ores-otel-config-tjsv-consumer.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/public/ores-otel-config.v1/**'
+      - '.github/workflows/ores-otel-config-tjsv-consumer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-otel-config-tjsv-consumer-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tjsv-consumer-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact consumer head without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify read-only mirror provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          provenance='contracts/public/ores-otel-config.v1/PROVENANCE.md'
+          test -s "$provenance"
+          grep -Fq 'b544872d13323de7be19a9d5879c419149679f7a' "$provenance"
+          grep -Fq 'This public mirror is not a third authority' "$provenance"
+          grep -Fq 'typespec-json-schema-validator' "$provenance"
+
+      - name: Re-admit mirrored TypeSpec and Draft 2020-12 peer authorities
+        uses: ORESoftware/typespec-json-schema-validator@4a5d049218adc2740d4cf78f612caf7f38f6f64c
+        with:
+          typespec: contracts/public/ores-otel-config.v1/main.tsp
+          schema: contracts/public/ores-otel-config.v1/authored.schema.json
+          report: .typespec-json-schema-validator/ores-otel-config-consumer-report.json
+          contract_ir: .typespec-json-schema-validator/ores-otel-config-consumer-contract-ir.json
+          output_dir: .typespec-json-schema-validator/generated/ores-otel-config-consumer
+          quiet: 'false'
+
+      - name: Retain deterministic TJSV consumer evidence
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: ores-otel-config-consumer-tjsv-${{ github.sha }}
+          path: .typespec-json-schema-validator/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
