@@ -210,3 +210,7 @@ export async function createLoggerFromConfig(
   const { options } = await loadNextLoggerConfig(loadOptions);
   return createLogger({ ...options, ...overrides });
 }
+
+// `.ores-otel.toml` is the language-neutral telemetry policy surface. The
+// legacy executable `.next-logger.*` config remains supported for compatibility.
+export * from './ores-otel-config.js';
