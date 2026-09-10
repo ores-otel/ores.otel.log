@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ores-otel/ores-otel-interfaces/contracts/ores-otel-config.v1/authored.schema.json",
+  "$defs": {
+    "OresOtelConfigV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresOtelConfigV1",
+      "type": "object",
+      "properties": {
+        "version": { "type": "integer", "minimum": 1, "maximum": 1 },
+        "common": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "service_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "environment": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "logging": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "level": { "type": "string", "minLength": 1, "maxLength": 16 },
+                "console": { "type": "boolean" },
+                "auto_send": { "type": "boolean" }
+              },
+              "unevaluatedProperties": false
+            },
+            "tracing": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "sample_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+                "propagators": { "type": "array", "items": { "type": "string" } }
+              },
+              "unevaluatedProperties": false
+            },
+            "metrics": {
+              "type": "object",
+              "properties": { "enabled": { "type": "boolean" } },
+              "unevaluatedProperties": false
+            },
+            "exporter": {
+              "type": "object",
+              "properties": {
+                "protocol": { "type": "string", "minLength": 1, "maxLength": 32 },
+                "endpoint_env": { "type": "string", "minLength": 1, "maxLength": 128 }
+              },
+              "unevaluatedProperties": false
+            }
+          },
+          "unevaluatedProperties": false
+        },
+        "client": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "service_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "environment": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "logging": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "level": { "type": "string", "minLength": 1, "maxLength": 16 },
+                "console": { "type": "boolean" },
+                "auto_send": { "type": "boolean" }
+              },
+              "unevaluatedProperties": false
+            },
+            "tracing": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "sample_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+                "propagators": { "type": "array", "items": { "type": "string" } }
+              },
+              "unevaluatedProperties": false
+            },
+            "metrics": {
+              "type": "object",
+              "properties": { "enabled": { "type": "boolean" } },
+              "unevaluatedProperties": false
+            },
+            "exporter": {
+              "type": "object",
+              "properties": {
+                "protocol": { "type": "string", "minLength": 1, "maxLength": 32 },
+                "endpoint_env": { "type": "string", "minLength": 1, "maxLength": 128 }
+              },
+              "unevaluatedProperties": false
+            }
+          },
+          "unevaluatedProperties": false
+        },
+        "server": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "service_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "environment": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "logging": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "level": { "type": "string", "minLength": 1, "maxLength": 16 },
+                "console": { "type": "boolean" },
+                "auto_send": { "type": "boolean" }
+              },
+              "unevaluatedProperties": false
+            },
+            "tracing": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "sample_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+                "propagators": { "type": "array", "items": { "type": "string" } }
+              },
+              "unevaluatedProperties": false
+            },
+            "metrics": {
+              "type": "object",
+              "properties": { "enabled": { "type": "boolean" } },
+              "unevaluatedProperties": false
+            },
+            "exporter": {
+              "type": "object",
+              "properties": {
+                "protocol": { "type": "string", "minLength": 1, "maxLength": 32 },
+                "endpoint_env": { "type": "string", "minLength": 1, "maxLength": 128 }
+              },
+              "unevaluatedProperties": false
+            }
+          },
+          "unevaluatedProperties": false
+        }
+      },
+      "required": ["version"],
+      "unevaluatedProperties": false
+    }
+  }
+}
