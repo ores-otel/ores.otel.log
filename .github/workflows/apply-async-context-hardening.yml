@@ -60,23 +60,22 @@ jobs:
 
           path = Path("scripts/apply-async-context-hardening.py")
           text = path.read_text()
-          old = '''def write_exact(path: str, content: str) -> None:
-              target = ROOT / path
-              target.parent.mkdir(parents=True, exist_ok=True)
-              if target.exists() and target.read_text() == content:
-                  return
-              if target.exists():
-                  raise RuntimeError(f"{path}: refusing to overwrite unexpected existing file")
-              target.write_text(content)
-          '''.replace('              ', '')
-          new = '''def write_exact(path: str, content: str) -> None:
+          start = text.find("def write_exact(path: str, content: str) -> None:\n")
+          end_marker = "\n\n# ---------------------------------------------------------------------------\n# TypeScript:"
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("write_exact guard drifted; refusing partial transformation")
+          current = text[start:end]
+          if "refusing to overwrite unexpected existing file" not in current:
+              raise SystemExit("unexpected write_exact implementation")
+          replacement = '''def write_exact(path: str, content: str) -> None:
               target = ROOT / path
               target.parent.mkdir(parents=True, exist_ok=True)
               if target.exists() and target.read_text() == content:
                   return
               admitted_existing = {
                   "tests/context-deep-snapshot.test.mjs":
-                      "captured base context deeply isolates caller-owned nested values",
+                      "runWithLogContext recursively snapshots nested caller-owned values",
                   "sdk/go/context_deep_snapshot_test.go":
                       "TestLogContextRecursivelySnapshotsNestedCallerValues",
               }
@@ -87,10 +86,8 @@ jobs:
                       return
                   raise RuntimeError(f"{path}: refusing to overwrite unexpected existing file")
               target.write_text(content)
-          '''.replace('              ', '')
-          if old not in text:
-              raise SystemExit("write_exact guard drifted; refusing partial transformation")
-          path.write_text(text.replace(old, new, 1))
+          '''
+          path.write_text(text[:start] + replacement + text[end:])
           PY
 
       - name: Apply exact reviewed transformation and follow-up repairs
