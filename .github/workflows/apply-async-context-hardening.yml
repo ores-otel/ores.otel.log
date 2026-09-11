@@ -6,6 +6,7 @@ on:
       - hardening/async-context-fiber-snapshots-20260911
     paths:
       - scripts/apply-async-context-hardening.py
+      - scripts/apply-async-context-hardening-followup.py
       - .github/workflows/apply-async-context-hardening.yml
 
 permissions:
@@ -26,6 +27,7 @@ jobs:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
           persist-credentials: true
+          clean: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -48,16 +50,18 @@ jobs:
         with:
           ruby-version: "3.4"
 
-      - name: Apply exact reviewed transformation
-        run: python scripts/apply-async-context-hardening.py
+      - name: Apply exact reviewed transformation and follow-up repairs
+        run: |
+          python scripts/apply-async-context-hardening.py
+          python scripts/apply-async-context-hardening-followup.py
 
       - name: Format generated Go sources
         run: gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
 
-      - name: TypeScript build and adversarial context tests
+      - name: TypeScript build, types, and adversarial context tests
         run: |
           npm ci
-          npm run build
+          npm run typecheck
           node --test \
             tests/context.test.mjs \
             tests/context-captured-absence.test.mjs \
@@ -83,9 +87,9 @@ jobs:
           ruby sdk/ruby/test/context_adversarial_test.rb
           ruby sdk/ruby/test/shutdown_test.rb
 
-      - name: Verify patch is idempotent and clean
+      - name: Verify follow-up is idempotent and patch is clean
         run: |
-          python scripts/apply-async-context-hardening.py
+          python scripts/apply-async-context-hardening-followup.py
           gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
           git diff --check
           git status --short
