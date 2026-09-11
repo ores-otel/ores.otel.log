@@ -12,7 +12,7 @@ func TestLogContextRecursivelySnapshotsNestedCallerValues(t *testing.T) {
 		LoggedInUser: map[string]any{
 			"id": "user-1",
 			"profile": map[string]any{
-				"roles": []any{"reader"},
+				"roles":       []any{"reader"},
 				"preferences": map[string]any{"locale": "en"},
 			},
 		},
@@ -119,7 +119,7 @@ func TestLogContextNestedValuesRemainRaceFreeAcrossWorkers(t *testing.T) {
 			source := LogContext{
 				TraceID: fmt.Sprintf("trace-%d", index),
 				LoggedInUser: map[string]any{
-					"id": fmt.Sprintf("user-%d", index),
+					"id":     fmt.Sprintf("user-%d", index),
 					"claims": map[string]any{"tenant": tenant},
 				},
 				Fields: map[string]any{
