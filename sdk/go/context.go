@@ -49,7 +49,7 @@ func cloneUserList(source []map[string]any) []map[string]any {
 	}
 	target := make([]map[string]any, 0, len(source))
 	for _, value := range source {
-		target = append(target, cloneMap(value))
+		target = append(target, cloneContextMap(value))
 	}
 	return target
 }
@@ -58,14 +58,14 @@ func cloneLogContext(value LogContext) LogContext {
 	if value.TraceFlags != 0 {
 		value.TraceFlagsSet = true
 	}
-	value.LoggedInUser = cloneMap(value.LoggedInUser)
+	value.LoggedInUser = cloneContextMap(value.LoggedInUser)
 	value.Users = cloneUserList(value.Users)
-	value.Fields = cloneMap(value.Fields)
+	value.Fields = cloneContextMap(value.Fields)
 	value.TraceIDs = append([]string(nil), value.TraceIDs...)
 	value.Baggage = cloneStringMap(value.Baggage)
 	value.Tags = append([]string(nil), value.Tags...)
-	value.Context = append([]any(nil), value.Context...)
-	value.Meta = append([]any(nil), value.Meta...)
+	value.Context = cloneContextSlice(value.Context)
+	value.Meta = cloneContextSlice(value.Meta)
 	return value
 }
 
@@ -86,6 +86,7 @@ func appendUniqueString(values []string, candidate string) []string {
 // while retaining order; and present scalar values replace their parent value.
 func MergeLogContexts(base LogContext, patch LogContext) LogContext {
 	merged := cloneLogContext(base)
+	patch = cloneLogContext(patch)
 	if merged.TraceID != "" {
 		merged.TraceIDs = appendUniqueString(merged.TraceIDs, merged.TraceID)
 	}
@@ -93,7 +94,7 @@ func MergeLogContexts(base LogContext, patch LogContext) LogContext {
 		merged.LoggedInUser[key] = value
 	}
 	for _, user := range patch.Users {
-		merged.Users = append(merged.Users, cloneMap(user))
+		merged.Users = append(merged.Users, cloneContextMap(user))
 	}
 	for key, value := range patch.Fields {
 		merged.Fields[key] = value
@@ -203,7 +204,7 @@ func LoggedInUserFrom(ctx context.Context) (map[string]any, bool) {
 	if !ok || len(value.LoggedInUser) == 0 {
 		return nil, false
 	}
-	return cloneMap(value.LoggedInUser), true
+	return cloneContextMap(value.LoggedInUser), true
 }
 
 func WithTraceFlags(ctx context.Context, traceFlags byte) context.Context {
@@ -259,7 +260,7 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		return event
 	}
 
-	fields := cloneMap(value.Fields)
+	fields := cloneContextMap(value.Fields)
 	if value.SpanID != "" {
 		fields["otel.span_id"] = value.SpanID
 	}
