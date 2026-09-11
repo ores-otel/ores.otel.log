@@ -14,20 +14,23 @@ permissions:
 
 concurrency:
   group: apply-async-context-hardening-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   apply-test-commit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - name: Check out exact branch head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: true
           clean: false
+
+      - name: Verify exact candidate identity
+        run: test "$(git rev-parse HEAD)" = "${GITHUB_SHA}"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -58,15 +61,11 @@ jobs:
       - name: Format generated Go sources
         run: gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
 
-      - name: TypeScript build, types, and adversarial context tests
+      - name: TypeScript full build, types, and adversarial suite
         run: |
           npm ci
           npm run typecheck
-          node --test \
-            tests/context.test.mjs \
-            tests/context-captured-absence.test.mjs \
-            tests/context-deep-snapshot.test.mjs \
-            tests/execution-context.test.mjs
+          npm test
 
       - name: Python contextvars tests
         run: |
@@ -75,23 +74,29 @@ jobs:
 
       - name: Go race and nested-snapshot tests
         working-directory: sdk/go
-        run: go test -race ./...
+        run: |
+          test -z "$(gofmt -d .)"
+          go test -race ./...
 
       - name: Java ThreadLocal, executor, and virtual-thread tests
         run: bash sdk/java/test.sh
 
-      - name: Ruby fiber/thread context tests
+      - name: Ruby Fiber/thread context tests
         run: |
           ruby -c sdk/ruby/lib/oresoftware/next_loggers.rb
           ruby sdk/ruby/test/next_loggers_test.rb
           ruby sdk/ruby/test/context_adversarial_test.rb
           ruby sdk/ruby/test/shutdown_test.rb
 
-      - name: Verify follow-up is idempotent and patch is clean
+      - name: Verify follow-up idempotence and tree integrity
         run: |
           python scripts/apply-async-context-hardening-followup.py
           gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
           git diff --check
+          if git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!package-lock.json'; then
+            echo 'unresolved conflict marker found' >&2
+            exit 1
+          fi
           git status --short
 
       - name: Commit the tested source patch
@@ -118,5 +123,6 @@ jobs:
             sdk/java/test.sh \
             sdk/ruby/lib/oresoftware/next_loggers.rb \
             sdk/ruby/test/context_adversarial_test.rb
+          git diff --cached --check
           git commit -m "fix: isolate nested async context across runtimes"
           git push origin "HEAD:${GITHUB_REF_NAME}"
