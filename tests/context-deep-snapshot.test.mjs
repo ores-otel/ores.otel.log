@@ -134,8 +134,9 @@ test('recursive snapshots preserve cycles without retaining caller aliases', asy
     cyclic.self = cyclic;
     await runWithLogContext({ fields: { cyclic } }, async () => {
       cyclic.id = 'attacker';
-      assert.equal(getLogContext().fields.cyclic.id, 'cycle');
-      assert.equal(getLogContext().fields.cyclic.self, getLogContext().fields.cyclic);
+      const observed = getLogContext();
+      assert.equal(observed.fields.cyclic.id, 'cycle');
+      assert.equal(observed.fields.cyclic.self, observed.fields.cyclic);
     });
   } finally {
     uninstall();
