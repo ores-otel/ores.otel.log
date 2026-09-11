@@ -7,6 +7,8 @@ on:
     paths:
       - scripts/apply-async-context-hardening.py
       - scripts/apply-async-context-hardening-followup.py
+      - scripts/apply-async-context-accessor-boundary.py
+      - tests/context-clone-value-types.test.mjs
       - .github/workflows/apply-async-context-hardening.yml
 
 permissions:
@@ -90,10 +92,12 @@ jobs:
           path.write_text(text[:start] + replacement + text[end:])
           PY
 
-      - name: Apply exact reviewed transformation and follow-up repairs
+      - name: Apply exact reviewed transformation and layered repairs
         run: |
           python scripts/apply-async-context-hardening.py
           python scripts/apply-async-context-hardening-followup.py
+          python scripts/apply-async-context-hardening-followup.py
+          python scripts/apply-async-context-accessor-boundary.py
 
       - name: Format generated Go sources
         run: gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
@@ -125,9 +129,9 @@ jobs:
           ruby sdk/ruby/test/context_adversarial_test.rb
           ruby sdk/ruby/test/shutdown_test.rb
 
-      - name: Verify follow-up idempotence and tree integrity
+      - name: Verify final repair idempotence and tree integrity
         run: |
-          python scripts/apply-async-context-hardening-followup.py
+          python scripts/apply-async-context-accessor-boundary.py
           gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
           git diff --check
           if git grep -nE '^(<<<<<<<|=======|>>>>>>>)' -- . ':!package-lock.json'; then
