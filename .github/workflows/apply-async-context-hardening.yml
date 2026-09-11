@@ -1,0 +1,118 @@
+name: Apply reviewed async-context hardening
+
+on:
+  push:
+    branches:
+      - hardening/async-context-fiber-snapshots-20260911
+    paths:
+      - scripts/apply-async-context-hardening.py
+      - .github/workflows/apply-async-context-hardening.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-async-context-hardening-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "22.20.0"
+          cache: npm
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: sdk/python/pyproject.toml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: "1.24.7"
+          cache: false
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b
+        with:
+          ruby-version: "3.4"
+
+      - name: Apply exact reviewed transformation
+        run: python scripts/apply-async-context-hardening.py
+
+      - name: Format generated Go sources
+        run: gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
+
+      - name: TypeScript build and adversarial context tests
+        run: |
+          npm ci
+          npm run build
+          node --test \
+            tests/context.test.mjs \
+            tests/context-captured-absence.test.mjs \
+            tests/context-deep-snapshot.test.mjs \
+            tests/execution-context.test.mjs
+
+      - name: Python contextvars tests
+        run: |
+          python -m pip install -e sdk/python
+          python -m unittest discover -s sdk/python/tests -p 'test_*.py' -v
+
+      - name: Go race and nested-snapshot tests
+        working-directory: sdk/go
+        run: go test -race ./...
+
+      - name: Java ThreadLocal, executor, and virtual-thread tests
+        run: bash sdk/java/test.sh
+
+      - name: Ruby fiber/thread context tests
+        run: |
+          ruby -c sdk/ruby/lib/oresoftware/next_loggers.rb
+          ruby sdk/ruby/test/next_loggers_test.rb
+          ruby sdk/ruby/test/context_adversarial_test.rb
+          ruby sdk/ruby/test/shutdown_test.rb
+
+      - name: Verify patch is idempotent and clean
+        run: |
+          python scripts/apply-async-context-hardening.py
+          gofmt -w sdk/go/logger.go sdk/go/context.go sdk/go/context_deep_snapshot_test.go
+          git diff --check
+          git status --short
+
+      - name: Commit the tested source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && [[ -z "$(git status --short --untracked-files=all)" ]]; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            src/context-shared.ts \
+            src/execution-context-shared.ts \
+            tests/context-deep-snapshot.test.mjs \
+            sdk/python/src/next_loggers/context.py \
+            sdk/python/tests/test_context_adversarial.py \
+            sdk/go/logger.go \
+            sdk/go/context.go \
+            sdk/go/context_deep_snapshot_test.go \
+            sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java \
+            sdk/java/src/test/java/com/oresoftware/nextloggers/NextLoggersContextExecutorTest.java \
+            sdk/java/test.sh \
+            sdk/ruby/lib/oresoftware/next_loggers.rb \
+            sdk/ruby/test/context_adversarial_test.rb
+          git commit -m "fix: isolate nested async context across runtimes"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
