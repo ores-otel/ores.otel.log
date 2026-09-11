@@ -36,6 +36,15 @@ replace_once(
     """\tif merged.Fields == nil && len(patch.Fields) > 0 {\n\t\tmerged.Fields = make(map[string]any, len(patch.Fields))\n\t}\n\tfor key, value := range patch.Fields {\n\t\tmerged.Fields[key] = cloneValue(value)\n\t}\n""",
 )
 
+# Applying context to a fresh Event can also need to add only OTEL-derived
+# fields. Allocate the destination even when the user's ordinary Fields map was
+# empty, rather than panicking while writing span/flags/baggage metadata.
+replace_once(
+    "sdk/go/context.go",
+    """\tfields := cloneMap(value.Fields)\n\tif value.SpanID != \"\" {\n""",
+    """\tfields := cloneMap(value.Fields)\n\tif fields == nil {\n\t\tfields = make(map[string]any)\n\t}\n\tif value.SpanID != \"\" {\n""",
+)
+
 # Java has Runnable and Callable wrappers by design. Cast value-returning
 # lambdas in the adversarial test so javac proves the intended overload rather
 # than relying on target-type inference at the nested submit call.
