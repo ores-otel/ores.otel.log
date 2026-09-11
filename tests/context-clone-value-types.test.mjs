@@ -17,11 +17,29 @@ test('context snapshots clone supported structured values without rejecting opaq
     const error = new Error('context error');
     error.details = { code: 'E_CONTEXT' };
     const opaqueFunction = () => 'opaque';
+    let accessorReads = 0;
+    const opaqueAccessorObject = {};
+    Object.defineProperty(opaqueAccessorObject, 'secret', {
+      configurable: true,
+      enumerable: true,
+      get() {
+        accessorReads += 1;
+        return { id: 'must-not-be-read' };
+      },
+    });
 
     await runWithLogContext(
       {
         traceId: 'trace-types',
-        fields: { date, map, set, bytes, error, opaqueFunction },
+        fields: {
+          date,
+          map,
+          set,
+          bytes,
+          error,
+          opaqueFunction,
+          opaqueAccessorObject,
+        },
       },
       async () => {
         date.setUTCFullYear(1999);
@@ -46,8 +64,11 @@ test('context snapshots clone supported structured values without rejecting opaq
         assert.equal(observed.error.details.code, 'E_CONTEXT');
         assert.equal(observed.opaqueFunction, opaqueFunction);
         assert.equal(observed.opaqueFunction(), 'opaque');
+        assert.equal(observed.opaqueAccessorObject, opaqueAccessorObject);
+        assert.equal(accessorReads, 0);
       },
     );
+    assert.equal(accessorReads, 0);
   } finally {
     uninstall();
   }
