@@ -30,7 +30,6 @@ const record = (id = 'r1', message = 'hello') => ({
  */
 test('a service-role JWT is refused without relying on atob', () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'atob');
-  // eslint-disable-next-line no-undef
   delete globalThis.atob;
   try {
     assert.throws(
@@ -48,7 +47,6 @@ test('a service-role JWT is refused without relying on atob', () => {
 
 test('jwt expiry decodes without atob', () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'atob');
-  // eslint-disable-next-line no-undef
   delete globalThis.atob;
   try {
     assert.equal(jwtExpiryMillis(jwt({ exp: 1_700_000_000 })), 1_700_000_000_000);
