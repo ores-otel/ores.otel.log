@@ -4,8 +4,25 @@ import {
   SingleFrameLogContextStorage,
   type LogContextStorage,
 } from './context-shared.js';
+import { createRequestBoundaryApi } from './request-boundary.js';
 
 export type { LogContext, LogContextProvider, LogContextStorage };
+export {
+  httpRequestBoundary,
+  requestFailureKinds,
+  tcpConnectionBoundary,
+  tcpMessageBoundary,
+  webSocketMessageBoundary,
+  webSocketSessionBoundary,
+} from './request-boundary.js';
+export type {
+  RequestBoundary,
+  RequestBoundaryApi,
+  RequestBoundaryFailure,
+  RequestBoundaryOptions,
+  RequestBoundaryResult,
+  RequestFailureKind,
+} from './request-boundary.js';
 
 /**
  * Browser build of `@oresoftware/next-loggers/context`.
@@ -16,6 +33,7 @@ export type { LogContext, LogContextProvider, LogContextStorage };
  */
 export const logContextStorage: LogContextStorage = new SingleFrameLogContextStorage();
 const api = createLogContextApi(logContextStorage, false);
+const requestBoundaryApi = createRequestBoundaryApi(api);
 
 export const isAsyncContextTracked = api.isAsyncContextTracked;
 export const runWithLogContext = api.runWithLogContext;
@@ -32,3 +50,8 @@ export const updateLogContext = api.updateLogContext;
 export const setContextLoggedInUser = api.setContextLoggedInUser;
 export const logContextProvider = api.logContextProvider;
 export const installLogContextProvider = api.installLogContextProvider;
+/**
+ * Reporter callbacks always receive the explicit defensive context snapshot;
+ * ambient getters intentionally remain synchronous-only in this build.
+ */
+export const runWithRequestBoundary = requestBoundaryApi.runWithRequestBoundary;

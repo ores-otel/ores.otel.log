@@ -2,6 +2,9 @@
 //! execution context. This crate never creates a second thread-local or Tokio
 //! task-local.
 
+mod boundary;
+pub use boundary::*;
+
 use next_loggers::{
     capture_log_context, current_log_context, json, with_log_context, with_log_context_async,
     JsonObject, LogContext, Value,
