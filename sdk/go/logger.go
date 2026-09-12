@@ -140,7 +140,7 @@ func (transport *MemoryTransport) Write(record LogRecord) error {
 	if transport.Closed {
 		return errors.New("transport is closed")
 	}
-	transport.Records = append(transport.Records, record)
+	transport.Records = append(transport.Records, cloneLogRecord(record))
 	return nil
 }
 
@@ -154,7 +154,7 @@ func (transport *MemoryTransport) Flush() error {
 func (transport *MemoryTransport) FlushOnExit(records []LogRecord) error {
 	transport.mu.Lock()
 	defer transport.mu.Unlock()
-	transport.ExitRecords = append(transport.ExitRecords, records...)
+	transport.ExitRecords = append(transport.ExitRecords, cloneLogRecords(records)...)
 	return nil
 }
 
@@ -555,7 +555,7 @@ func (event *Event) ToRecord() LogRecord {
 	event.mu.Lock()
 	defer event.mu.Unlock()
 	if event.record != nil {
-		return *event.record
+		return cloneLogRecord(*event.record)
 	}
 	fields := cloneMap(event.Logger.Fields)
 	for key, value := range event.Fields {
@@ -615,7 +615,7 @@ func (event *Event) ToRecord() LogRecord {
 		record.Meta = append(record.Meta, normalizeValue(value))
 	}
 	event.record = &record
-	return record
+	return cloneLogRecord(record)
 }
 
 func (event *Event) Send() error {
@@ -653,7 +653,7 @@ func (logger *Logger) emit(event *Event, store bool) error {
 		if marker, ok := transport.(openTelemetryTransport); ok && marker.IsOpenTelemetry() && !event.IsOtelEnabled(logger.OtelEnabled) {
 			continue
 		}
-		if err := transport.Write(record); err != nil {
+		if err := transport.Write(cloneLogRecord(record)); err != nil {
 			failures = append(failures, err)
 		}
 	}
@@ -692,11 +692,12 @@ func flushTransport(ctx context.Context, transport Transport) error {
 }
 
 func flushTransportOnExit(ctx context.Context, transport Transport, records []LogRecord) error {
+	snapshot := cloneLogRecords(records)
 	if flusher, ok := transport.(ContextExitFlusher); ok {
-		return flusher.FlushOnExitContext(ctx, records)
+		return flusher.FlushOnExitContext(ctx, snapshot)
 	}
 	if flusher, ok := transport.(ExitFlusher); ok {
-		return runBounded(ctx, func() error { return flusher.FlushOnExit(records) })
+		return runBounded(ctx, func() error { return flusher.FlushOnExit(snapshot) })
 	}
 	return nil
 }
