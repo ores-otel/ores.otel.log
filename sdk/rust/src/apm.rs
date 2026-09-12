@@ -472,10 +472,12 @@ fn count_open_file_descriptors() -> Result<u64, ApmError> {
     })
 }
 
+#[cfg(all(unix, feature = "apm"))]
 fn bounded_u64(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+#[cfg(all(unix, feature = "apm"))]
 fn ratio(part: u64, whole: u64) -> Option<f64> {
     (whole != 0).then(|| part as f64 / whole as f64)
 }
