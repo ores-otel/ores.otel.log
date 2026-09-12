@@ -1,0 +1,3 @@
+version = 1
+[common.metrics.filesystem]
+min_inode_free_ratio = 1.5

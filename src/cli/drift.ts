@@ -50,8 +50,8 @@ function readFlagTable(scope: string, key: string, table: TomlTable): DeclaredFl
     throw new Error(`[${scope}.flags.${key}] is missing a string "env"`);
   }
   const aliases = table.aliases;
-  if (!Array.isArray(aliases)) {
-    throw new Error(`[${scope}.flags.${key}] is missing an "aliases" array`);
+  if (!Array.isArray(aliases) || !aliases.every((alias): alias is string => typeof alias === 'string')) {
+    throw new Error(`[${scope}.flags.${key}] is missing an "aliases" array of strings`);
   }
   const type = table.type;
   if (typeof type !== 'string') {

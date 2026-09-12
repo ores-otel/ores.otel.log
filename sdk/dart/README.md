@@ -30,3 +30,30 @@ await log.event(LogLevel.info, 'computed').withOtel(routeToOtel).send();
 `resetOtel()` restores the logger default and `isOtelEnabled(fallback)`
 resolves it. Logger `setOtelEnabled`, `useOtel`, and `notOtel` update the
 default. Other transports still receive records excluded from OTEL.
+
+## `.ores-otel.toml` configuration and APM helpers
+
+The loader follows the shared v1 contract in
+[`docs/ores-otel-config.md`](../../docs/ores-otel-config.md). Precedence is
+`defaults < common < role < env < flagOverrides < overrides`, and every
+malformed file, environment value, or flag throws `OresOtelConfigException`.
+
+```dart
+final loaded = await loadOresOtelConfig(
+  role: OresOtelRuntimeRole.server,
+  flagOverrides: flags2EnvMap, // e.g. {'ORES_OTEL_METRICS_SAMPLE_INTERVAL_MS': '2000'}
+);
+final endpoint =
+    resolveOresOtelExporterEndpoint(loaded.config, Platform.environment);
+```
+
+`parseOresOtelToml` and `resolveOresOtelConfig` are pure (no `dart:io`); only
+`loadOresOtelConfig` in `ores_otel_config_io.dart` reads files. Resolved values
+are immutable, and `toJson()` produces the snake_case shape checked against
+`tests/fixtures/ores-otel-config`.
+
+APM helpers stay application-owned and pure:
+`OresOtelResourceThresholds.fromResolved`, `evaluateDiskPressure` (caller
+supplies free and capacity numbers; emits `ores.apm.resource.pressure` gauge
+points), and `LatencyHistogram` (`record` returns a new value; `toMetricPoint`
+emits an `ores.apm.latency` histogram in `ms`).
