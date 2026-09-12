@@ -28,9 +28,29 @@ void main() {
   final cases = _fixtureRoot.listSync().whereType<Directory>().toList()
     ..sort((a, b) => a.path.compareTo(b.path));
 
-  test('fixture corpus contains at least 14 cases', () {
-    expect(cases.length, greaterThanOrEqualTo(14));
+  test('fixture corpus contains at least 18 cases', () {
+    expect(cases.length, greaterThanOrEqualTo(18));
   });
+
+  final lookup = _readJson(_fixtureRoot.parent, 'ores-otel-config-lookup.json')!
+      as Map<String, dynamic>;
+  for (final raw in lookup['cases'] as List<dynamic>) {
+    final item = raw as Map<String, dynamic>;
+    test('lookup: ${item['name']}', () {
+      expect(
+        oresOtelConfigFilePath(
+          cwd: item['cwd'] as String?,
+          filePath: item['file_path'] as String?,
+          env: effectiveOresOtelEnv(
+            _strings(item['env']),
+            _strings(item['flag_overrides']),
+          ),
+          currentDirectory: item['current_directory'] as String,
+        ),
+        item['expected'],
+      );
+    });
+  }
 
   for (final dir in cases) {
     final name = dir.uri.pathSegments.lastWhere((s) => s.isNotEmpty);

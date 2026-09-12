@@ -60,6 +60,28 @@ Resolution is deterministic:
 
 Malformed environment overrides fail rather than being silently ignored.
 
+## File lookup
+
+Every loader picks the file the same way (first non-blank input wins; values are trimmed and trailing directory separators stripped):
+
+1. an explicit file path argument (`filePath` / `file_path`);
+2. an explicit directory argument (`cwd`);
+3. `ORES_OTEL_CONFIG_FILE`;
+4. `ORES_OTEL_CONFIG_DIR`;
+5. the process working directory.
+
+Steps 3 and 4 read the environment with flags-2-env overrides already applied, so `--otel-config-file` beats an exported `ORES_OTEL_CONFIG_DIR`, while an application that passes `cwd` in code keeps control of discovery. A missing file resolves library defaults. `tests/fixtures/ores-otel-config-lookup.json` pins this order for all three SDKs.
+
+## Parsing rules shared by every loader
+
+The TOML readers are deliberately stricter than general TOML libraries, and the shared fixtures pin each rule:
+
+- a table header may appear only once (`[common.logging]` twice fails; `[a.b]` followed by `[a]` is allowed);
+- integer keys (`version`, `sample_interval_ms`, `min_free_bytes`, `queue_depth_warning`) reject float spellings such as `5000.0`, while ratio and histogram-boundary keys accept integers;
+- literal, multi-line, and unescaped-quote strings, inline tables, arrays of tables, dotted keys, dates, leading zeros, and mixed or nested arrays fail;
+- string settings are trimmed, but `metrics.filesystem.paths` entries are only checked to be non-blank and are kept verbatim;
+- in comma-separated environment arrays an empty entry (`/a,,/b`) fails, while `ORES_OTEL_PROPAGATORS` ignores empty entries.
+
 ## Security
 
 Do not put credentials, tokens, cookies, authorization headers, passwords, API keys, private keys, or arbitrary headers in `.ores-otel.toml`. Unknown and secret-shaped keys are rejected. Exporter endpoints are referenced using `endpoint_env`; `resolveOresOtelExporterEndpoint()` reads the endpoint value at runtime without persisting it in the tracked config object.
@@ -74,9 +96,14 @@ import {
   resolveOresOtelExporterEndpoint,
 } from '@oresoftware/next-loggers/config';
 
-const { config } = await loadOresOtelConfig({ role: 'server' });
+const { config } = await loadOresOtelConfig({
+  role: 'server',
+  flagOverrides, // the ORES_OTEL_* map flags-2-env produced from argv
+});
 const endpoint = resolveOresOtelExporterEndpoint(config);
 ```
+
+`oresOtelConfigToJson(config)` renders the snake_case resolved shape the parity fixtures compare, and `oresOtelConfigFilePath()` exposes the lookup order as a pure function. Resolved configs are deeply frozen; explicit `overrides` are validated exactly like a file layer.
 
 `createLoggerFromOresOtelConfig()` applies the resolved logging policy to next-loggers. OpenTelemetry providers remain application-owned: the resolved tracing/exporter settings are inputs to the application's provider setup rather than a hidden global provider installed by this package.
 
@@ -150,4 +177,12 @@ Providers stay application-owned. The SDKs sample resources and hand OpenTelemet
 | `nodejs.eventloop.delay.{p50,p99,max}` | gauge | `s` |
 | `nodejs.eventloop.utilization` | gauge | `1` |
 
-TypeScript: `@oresoftware/next-loggers/apm` (`startOresOtelApm`, `sampleProcessMemory`, `sampleFilesystem`, `createLatencyRecorder`). Rust: `next_loggers::apm::resource_metric_points` and `LatencyHistogramSnapshot::metric_points` (the `apm` feature enables live sampling).
+TypeScript: `@oresoftware/next-loggers/apm`.
+
+- **Wiring:** `startOresOtelApm({ meter, config })` registers the enabled instruments, samples `metrics.filesystem.paths` every `metrics.process.sample_interval_ms`, and returns a handle with `latency`, `refreshFilesystem()`, and an idempotent `stop()`. `createLatencyRecorder(meter, config)` gives `record` / `time` / `timeAsync`.
+- **Pure helpers:** `oresOtelResourceThresholds`, `evaluateDiskPressure`, `evaluateSaturation`, `createLatencyHistogramSnapshot`, `recordLatency`.
+- **Samplers:** `sampleProcessMemory`, `sampleFilesystem`.
+- **Meter typing:** the meter is structural, so an `@opentelemetry/api` `Meter` works without this package depending on it.
+- **Node limits:** Node exposes no portable virtual-memory, thread-count, or open-fd reading, so the TypeScript SDK does not emit `process.memory.virtual`, `process.thread.count`, or `process.open_file_descriptor.count`.
+
+ Rust: `next_loggers::apm::resource_metric_points` and `LatencyHistogramSnapshot::metric_points` (the `apm` feature enables live sampling).
