@@ -334,16 +334,13 @@ function resolveLimits(limits?: SerializeLimits): ResolvedLimits {
   return limits ? { ...DEFAULT_SERIALIZE_LIMITS, ...limits } : DEFAULT_SERIALIZE_LIMITS;
 }
 
-/** Appends a marker element when a collection was cut short, so truncation is visible. */
+/** The serialized items plus, when the collection was cut short, a marker so truncation is visible. */
 function capCollection(
   serialized: SerializedValue[],
   total: number,
   limit: number,
 ): SerializedValue[] {
-  if (total > limit) {
-    serialized.push(`[+${total - limit} more of ${total}]`);
-  }
-  return serialized;
+  return total > limit ? [...serialized, `[+${total - limit} more of ${total}]`] : serialized;
 }
 
 function truncateString(value: string, limit: number): string {
@@ -558,6 +555,11 @@ function toMessagePart(value: unknown, serializer: (value: unknown) => Serialize
   }
 }
 
+// HOT-PATH (imperative by design): FNV-1a over every character of a serialized
+// record, run once per error-tracked record and per event hash code. A reduce
+// over `Array.from(value)` would allocate one array element per character of a
+// possibly 20 KB payload for no gain; the running hash is a single local number
+// that never escapes this function, and callers receive an immutable string.
 function hashString(value: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -629,17 +631,20 @@ export class HttpTransport implements LogTransport {
     }
   }
 
+  /** Posts to each endpoint in turn; the error of the last failed attempt is rethrown. */
   async write(record: LogRecord): Promise<void> {
-    let lastError: unknown;
-    for (const endpoint of this.endpoints) {
+    const attempt = async (endpoints: readonly string[], lastError: unknown): Promise<void> => {
+      const [endpoint, ...rest] = endpoints;
+      if (endpoint === undefined) {
+        throw lastError;
+      }
       try {
         await this.post(endpoint, record);
-        return;
       } catch (error) {
-        lastError = error;
+        return attempt(rest, error);
       }
-    }
-    throw lastError;
+    };
+    return attempt(this.endpoints, undefined);
   }
 
   flushOnExit(records: readonly LogRecord[]): void {
@@ -701,15 +706,10 @@ function createErrorTrackingTransport(tracking: ErrorTrackingOptions): LogTransp
         return;
       }
       if (seenHashes.size >= MAX_HASHES) {
-        // Evict the oldest half (Sets iterate in insertion order).
-        let index = 0;
-        for (const existing of seenHashes) {
-          if (index >= MAX_HASHES / 2) {
-            break;
-          }
-          seenHashes.delete(existing);
-          index += 1;
-        }
+        // Evict the oldest half (Sets iterate in insertion order). The Set is
+        // the one stateful store here; the eviction list is computed first.
+        const oldest = Array.from(seenHashes).slice(0, MAX_HASHES / 2);
+        oldest.forEach((existing) => seenHashes.delete(existing));
       }
       seenHashes.add(hash);
       try {
@@ -723,11 +723,17 @@ function createErrorTrackingTransport(tracking: ErrorTrackingOptions): LogTransp
   };
 }
 
-function assertHttpUrl(url: string, label: string): void {
-  let parsed: URL;
+function parseUrl(url: string): URL | undefined {
   try {
-    parsed = new URL(url);
+    return new URL(url);
   } catch {
+    return undefined;
+  }
+}
+
+function assertHttpUrl(url: string, label: string): void {
+  const parsed = parseUrl(url);
+  if (!parsed) {
     throw new TypeError(`${label} must be a valid URL, got: ${url}`);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
@@ -1057,8 +1063,12 @@ export class LogEvent {
     this.values = values;
   }
 
+  // The event is the stateful holder for a pending record. Each builder step
+  // below replaces a field with a new value (spread/concat) rather than editing
+  // the collection it currently holds, so a value handed in by the caller is
+  // never written to and a value handed out is never changed afterwards.
   addFields(fields: LogFields): this {
-    Object.assign(this.fields, fields);
+    this.fields = { ...this.fields, ...fields };
     return this;
   }
 
@@ -1123,27 +1133,27 @@ export class LogEvent {
   }
 
   addContext(value: LogArgument): this {
-    this.context.push(value);
+    this.context = [...this.context, value];
     return this;
   }
 
   addMeta(value: LogArgument): this {
-    this.meta.push(value);
+    this.meta = [...this.meta, value];
     return this;
   }
 
   addLoggedInUserInfo(user: LogUser): this {
-    Object.assign(this.loggedInUser, user);
+    this.loggedInUser = { ...this.loggedInUser, ...user };
     return this;
   }
 
   addLoggedInUserId(id: string): this {
-    this.loggedInUser.id = id;
+    this.loggedInUser = { ...this.loggedInUser, id };
     return this;
   }
 
   addUserInfo(user: LogUser): this {
-    this.users.push(user);
+    this.users = [...this.users, user];
     return this;
   }
 
@@ -1157,11 +1167,12 @@ export class LogEvent {
   captureStackTrace(message = 'next-loggers stack trace'): this {
     const stack = new Error(message).stack;
     if (stack) {
-      this.stackTrace.push(
+      this.stackTrace = [
+        ...this.stackTrace,
         ...stack
           .split('\n')
           .filter((line) => line && !/node_modules[\\/](@oresoftware[\\/])?next-loggers/.test(line)),
-      );
+      ];
     }
     return this;
   }
@@ -1251,6 +1262,24 @@ export class LogEvent {
   }
 }
 
+/**
+ * The initial transport list for a logger: explicit transports first, then one
+ * transport per configured destination, built as a single new array.
+ */
+function buildTransports(options: LoggerOptions): LogTransport[] {
+  const explicit = options.transports
+    ? Array.isArray(options.transports)
+      ? options.transports
+      : [options.transports]
+    : [];
+  return [
+    ...explicit,
+    ...(options.http ? [new HttpTransport(options.http)] : []),
+    ...(options.supabase ? [new SupabaseRealtimeTransport(options.supabase)] : []),
+    ...(options.errorTracking ? [createErrorTrackingTransport(options.errorTracking)] : []),
+  ];
+}
+
 export class BaseLogger<TEvent extends LogEvent = LogEvent> {
   readonly runtime: LoggerRuntime;
   readonly appName: string;
@@ -1274,20 +1303,7 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
     this.maxLevel = normalizeLevel(options.maxLevel);
     this.fields = { ...options.fields };
     this.currentUser = { ...options.loggedInUser };
-    this.transports = options.transports
-      ? Array.isArray(options.transports)
-        ? [...options.transports]
-        : [options.transports]
-      : [];
-    if (options.http) {
-      this.transports.push(new HttpTransport(options.http));
-    }
-    if (options.supabase) {
-      this.transports.push(new SupabaseRealtimeTransport(options.supabase));
-    }
-    if (options.errorTracking) {
-      this.transports.push(createErrorTrackingTransport(options.errorTracking));
-    }
+    this.transports = buildTransports(options);
   }
 
   now(): Date {
@@ -1530,17 +1546,18 @@ export class BaseLogger<TEvent extends LogEvent = LogEvent> {
           await transport.write(record);
         }),
       );
-      for (let index = 0; index < results.length; index += 1) {
-        const result = results[index];
-        if (result?.status === 'rejected') {
-          const transport = this.transports[index];
-          if (transport) {
-            if (this.options.onTransportError) {
-              this.options.onTransportError(result.reason, transport, record);
-            } else if (this.options.console !== false) {
-              console.error(`[next-loggers] ${transport.name || 'transport'} failed`, result.reason);
-            }
-          }
+      // Pair each rejection with its transport first; reporting is the only effect.
+      const failures = results.flatMap((result, index) => {
+        const transport = this.transports[index];
+        return result.status === 'rejected' && transport
+          ? [{ reason: result.reason, transport }]
+          : [];
+      });
+      for (const { reason, transport } of failures) {
+        if (this.options.onTransportError) {
+          this.options.onTransportError(reason, transport, record);
+        } else if (this.options.console !== false) {
+          console.error(`[next-loggers] ${transport.name || 'transport'} failed`, reason);
         }
       }
     })();

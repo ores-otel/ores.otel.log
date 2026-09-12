@@ -41,32 +41,24 @@ func (value RequestContext) EffectiveLoggedInUserID() string {
 	return value.UserID
 }
 
+// requestContextFields is the correlation field map for one request: the
+// schema marker plus every identifier that is set, built as one new value.
 func requestContextFields(value RequestContext) map[string]any {
-	fields := map[string]any{
-		"request.context.schema": RequestContextSchema,
-	}
-	putRequestString(fields, "request.id", value.RequestID)
-	putRequestString(fields, "user.id", value.EffectiveLoggedInUserID())
-	putRequestString(fields, "tenant.id", value.TenantID)
-	putRequestString(fields, "session.id", value.SessionID)
-	putRequestString(fields, "correlation.id", value.CorrelationID)
-	putRequestString(fields, "request.parent_id", value.ParentRequestID)
-	putRequestString(fields, "operation.name", value.Operation)
-	putRequestString(fields, "service.name", value.ServiceName)
-	putRequestString(fields, "request.locale", value.Locale)
-	if value.StartedAtUnixMS > 0 {
-		fields["request.started_at_unix_ms"] = value.StartedAtUnixMS
-	}
-	if value.DeadlineUnixMS > 0 {
-		fields["request.deadline_unix_ms"] = value.DeadlineUnixMS
-	}
-	return fields
-}
-
-func putRequestString(fields map[string]any, key, value string) {
-	if value != "" {
-		fields[key] = value
-	}
+	userID := value.EffectiveLoggedInUserID()
+	return mapOf(
+		kv[string, any]("request.context.schema", RequestContextSchema),
+		kvWhen[string, any](value.RequestID != "", "request.id", value.RequestID),
+		kvWhen[string, any](userID != "", "user.id", userID),
+		kvWhen[string, any](value.TenantID != "", "tenant.id", value.TenantID),
+		kvWhen[string, any](value.SessionID != "", "session.id", value.SessionID),
+		kvWhen[string, any](value.CorrelationID != "", "correlation.id", value.CorrelationID),
+		kvWhen[string, any](value.ParentRequestID != "", "request.parent_id", value.ParentRequestID),
+		kvWhen[string, any](value.Operation != "", "operation.name", value.Operation),
+		kvWhen[string, any](value.ServiceName != "", "service.name", value.ServiceName),
+		kvWhen[string, any](value.Locale != "", "request.locale", value.Locale),
+		kvWhen[string, any](value.StartedAtUnixMS > 0, "request.started_at_unix_ms", value.StartedAtUnixMS),
+		kvWhen[string, any](value.DeadlineUnixMS > 0, "request.deadline_unix_ms", value.DeadlineUnixMS),
+	)
 }
 
 // LogContextForRequest converts the middleware-facing request contract into

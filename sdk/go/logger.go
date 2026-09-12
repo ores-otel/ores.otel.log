@@ -191,25 +191,28 @@ func (transport *OpenTelemetryTransport) Write(record LogRecord) error {
 	if transport == nil || transport.Emit == nil {
 		return errors.New("nextloggers: OpenTelemetry emitter is required")
 	}
-	attributes := map[string]any{
-		"service.name":        record.AppName,
-		"next_logger.schema":  record.Schema,
-		"next_logger.runtime": record.Runtime,
-		"log.record.uid":      record.ID,
-	}
-	if record.TraceID != "" {
-		attributes["trace.id"] = record.TraceID
-	}
-	for key, value := range record.Fields {
-		attributes["next_logger.field."+key] = value
-	}
 	return transport.Emit(OpenTelemetryLogRecord{
 		Body:           record.Message,
 		SeverityText:   string(record.Level),
 		SeverityNumber: record.Level.OTELSeverityNumber(),
 		Timestamp:      record.Timestamp,
-		Attributes:     attributes,
+		Attributes:     otelAttributes(record),
 	})
+}
+
+// otelAttributes is the attribute map for one record, built from its parts:
+// the fixed identity attributes, the optional trace id, then every record
+// field under the `next_logger.field.` prefix.
+func otelAttributes(record LogRecord) map[string]any {
+	identity := mapOf(
+		kv[string, any]("service.name", record.AppName),
+		kv[string, any]("next_logger.schema", record.Schema),
+		kv[string, any]("next_logger.runtime", record.Runtime),
+		kv[string, any]("log.record.uid", record.ID),
+		kvWhen[string, any](record.TraceID != "", "trace.id", record.TraceID),
+	)
+	fields := mapKeys(record.Fields, func(key string) string { return "next_logger.field." + key })
+	return mergeMaps(identity, fields)
 }
 
 func (transport *OpenTelemetryTransport) IsOpenTelemetry() bool { return true }
@@ -307,50 +310,79 @@ func (logger *Logger) snapshot() loggerSnapshot {
 	}
 }
 
+// currentRuntimeFields evaluates the runtime-field hook, if any, into a fresh map.
+func (snapshot loggerSnapshot) currentRuntimeFields() map[string]any {
+	if snapshot.runtimeFields == nil {
+		return nil
+	}
+	return cloneContextMap(snapshot.runtimeFields())
+}
+
 func (logger *Logger) transportSnapshot() []Transport {
 	logger.mu.Lock()
 	defer logger.mu.Unlock()
 	return append([]Transport(nil), logger.Transports...)
 }
 
+func defaultClock() string {
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
+}
+
+// withDefaults returns a new Options value with every unset field filled in.
+// The receiver is a value and is never edited.
+func (options Options) withDefaults() Options {
+	maxLevel := options.MaxLevel
+	if _, ok := levelIndex[maxLevel]; !ok {
+		maxLevel = Info
+	}
+	idFactory := options.IDFactory
+	if idFactory == nil {
+		idFactory = randomID
+	}
+	clock := options.Clock
+	if clock == nil {
+		clock = defaultClock
+	}
+	output := options.Output
+	if output == nil {
+		output = os.Stdout
+	}
+	return Options{
+		AppName:      orDefault(options.AppName, "app"),
+		Name:         options.Name,
+		Runtime:      orDefault(options.Runtime, "go"),
+		MaxLevel:     maxLevel,
+		Fields:       options.Fields,
+		LoggedInUser: options.LoggedInUser,
+		Transports:   options.Transports,
+		Console:      options.Console,
+		OtelEnabled:  options.OtelEnabled,
+		Output:       output,
+		IDFactory:    idFactory,
+		Clock:        clock,
+	}
+}
+
+// otelDefault resolves the tri-state OtelEnabled option; nil means enabled.
+func (options Options) otelDefault() bool {
+	return options.OtelEnabled == nil || *options.OtelEnabled
+}
+
 func NewLogger(options Options) *Logger {
-	if options.AppName == "" {
-		options.AppName = "app"
-	}
-	if options.Runtime == "" {
-		options.Runtime = "go"
-	}
-	if _, ok := levelIndex[options.MaxLevel]; !ok {
-		options.MaxLevel = Info
-	}
-	if options.Output == nil {
-		options.Output = os.Stdout
-	}
-	if options.IDFactory == nil {
-		options.IDFactory = randomID
-	}
-	if options.Clock == nil {
-		options.Clock = func() string {
-			return time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
-		}
-	}
-	otelEnabled := true
-	if options.OtelEnabled != nil {
-		otelEnabled = *options.OtelEnabled
-	}
+	resolved := options.withDefaults()
 	return &Logger{
-		AppName:       options.AppName,
-		Name:          options.Name,
-		Runtime:       options.Runtime,
-		MaxLevel:      options.MaxLevel,
-		Fields:        cloneContextMap(options.Fields),
-		CurrentUser:   cloneContextMap(options.LoggedInUser),
-		Transports:    append([]Transport(nil), options.Transports...),
-		Console:       options.Console,
-		OtelEnabled:   otelEnabled,
-		Output:        options.Output,
-		IDFactory:     options.IDFactory,
-		Clock:         options.Clock,
+		AppName:       resolved.AppName,
+		Name:          resolved.Name,
+		Runtime:       resolved.Runtime,
+		MaxLevel:      resolved.MaxLevel,
+		Fields:        cloneContextMap(resolved.Fields),
+		CurrentUser:   cloneContextMap(resolved.LoggedInUser),
+		Transports:    append([]Transport(nil), resolved.Transports...),
+		Console:       resolved.Console,
+		OtelEnabled:   resolved.otelDefault(),
+		Output:        resolved.Output,
+		IDFactory:     resolved.IDFactory,
+		Clock:         resolved.Clock,
 		RuntimeFields: func() map[string]any { return nil },
 		unsent:        make(map[*Event]struct{}),
 	}
@@ -461,29 +493,23 @@ func (logger *Logger) Warn(values ...any) *Event  { return logger.newEvent(Warn,
 func (logger *Logger) Error(values ...any) *Event { return logger.newEvent(Error, values) }
 func (logger *Logger) Fatal(values ...any) *Event { return logger.newEvent(Fatal, values) }
 
+// AddFields swaps the logger's field map for a new merged one under the lock.
+// The logger is the stateful holder; the map it held is never written to, so a
+// snapshot taken by an in-flight ToRecord stays consistent.
 func (logger *Logger) AddFields(fields map[string]any) *Logger {
 	snapshot := cloneContextMap(fields)
 	logger.mu.Lock()
 	defer logger.mu.Unlock()
-	if logger.Fields == nil {
-		logger.Fields = make(map[string]any, len(snapshot))
-	}
-	for key, value := range snapshot {
-		logger.Fields[key] = value
-	}
+	logger.Fields = mergeMaps(logger.Fields, snapshot)
 	return logger
 }
 
+// SetCurrentUser swaps the logger's user map for a new merged one; see AddFields.
 func (logger *Logger) SetCurrentUser(user map[string]any) *Logger {
 	snapshot := cloneContextMap(user)
 	logger.mu.Lock()
 	defer logger.mu.Unlock()
-	if logger.CurrentUser == nil {
-		logger.CurrentUser = make(map[string]any, len(snapshot))
-	}
-	for key, value := range snapshot {
-		logger.CurrentUser[key] = value
-	}
+	logger.CurrentUser = mergeMaps(logger.CurrentUser, snapshot)
 	return logger
 }
 
@@ -503,13 +529,7 @@ func (event *Event) mutate(update func()) *Event {
 
 func (event *Event) AddFields(fields map[string]any) *Event {
 	return event.mutate(func() {
-		snapshot := cloneContextMap(fields)
-		if event.Fields == nil {
-			event.Fields = make(map[string]any, len(snapshot))
-		}
-		for key, value := range snapshot {
-			event.Fields[key] = value
-		}
+		event.Fields = mergeMaps(event.Fields, cloneContextMap(fields))
 	})
 }
 
@@ -597,16 +617,11 @@ func (event *Event) AddRoutineID(routineID string) *Event {
 }
 
 func (event *Event) AddTags(tags ...string) *Event {
-	values := make([]string, 0, len(tags))
-	for _, tag := range tags {
-		if value := strings.TrimSpace(tag); value != "" {
-			values = append(values, value)
-		}
-	}
+	values := filterSlice(mapSlice(tags, strings.TrimSpace), func(value string) bool {
+		return value != ""
+	})
 	return event.mutate(func() {
-		for _, value := range values {
-			event.Tags = appendUnique(event.Tags, value)
-		}
+		event.Tags = appendAllUnique(event.Tags, values...)
 	})
 }
 
@@ -624,22 +639,13 @@ func (event *Event) AddMeta(value any) *Event {
 
 func (event *Event) AddLoggedInUserInfo(user map[string]any) *Event {
 	return event.mutate(func() {
-		snapshot := cloneContextMap(user)
-		if event.LoggedInUser == nil {
-			event.LoggedInUser = make(map[string]any, len(snapshot))
-		}
-		for key, value := range snapshot {
-			event.LoggedInUser[key] = value
-		}
+		event.LoggedInUser = mergeMaps(event.LoggedInUser, cloneContextMap(user))
 	})
 }
 
 func (event *Event) AddLoggedInUserID(id string) *Event {
 	return event.mutate(func() {
-		if event.LoggedInUser == nil {
-			event.LoggedInUser = make(map[string]any, 1)
-		}
-		event.LoggedInUser["id"] = id
+		event.LoggedInUser = mergeMaps(event.LoggedInUser, map[string]any{"id": id})
 	})
 }
 
@@ -655,31 +661,23 @@ func (event *Event) ToRecord() LogRecord {
 	if event.record != nil {
 		return cloneLogRecord(*event.record)
 	}
-	logger := event.Logger.snapshot()
-	fields := logger.fields
-	for key, value := range event.Fields {
-		fields[key] = value
+	record := event.buildRecord(event.Logger.snapshot())
+	event.record = &record
+	return cloneLogRecord(record)
+}
+
+// buildRecord assembles the immutable record for an event from the logger
+// snapshot and the event's own state. Merge precedence, lowest to highest:
+// logger fields < event fields < runtime fields. It reads the event but writes
+// nothing; the caller holds the event lock.
+func (event *Event) buildRecord(logger loggerSnapshot) LogRecord {
+	fields := mergeMaps(mergeMaps(logger.fields, event.Fields), logger.currentRuntimeFields())
+	user := normalizeObject(mergeMaps(logger.currentUser, event.LoggedInUser))
+	isError := func(value any) bool {
+		_, ok := value.(error)
+		return ok
 	}
-	if logger.runtimeFields != nil {
-		for key, value := range cloneContextMap(logger.runtimeFields()) {
-			fields[key] = value
-		}
-	}
-	user := logger.currentUser
-	for key, value := range event.LoggedInUser {
-		user[key] = value
-	}
-	values := make([]any, 0, len(event.Values))
-	errorsFound := make([]any, 0)
-	parts := make([]string, 0, len(event.Values))
-	for _, value := range event.Values {
-		values = append(values, normalizeValue(value))
-		parts = append(parts, messagePart(value))
-		if _, ok := value.(error); ok {
-			errorsFound = append(errorsFound, normalizeValue(value))
-		}
-	}
-	record := LogRecord{
+	return LogRecord{
 		Schema:       Schema,
 		ID:           logger.idFactory(),
 		Timestamp:    logger.clock(),
@@ -687,34 +685,20 @@ func (event *Event) ToRecord() LogRecord {
 		Runtime:      logger.runtime,
 		AppName:      logger.appName,
 		Name:         logger.name,
-		Message:      strings.Join(parts, " "),
-		Values:       values,
+		Message:      strings.Join(mapSlice(event.Values, messagePart), " "),
+		Values:       mapSlice(event.Values, normalizeValue),
 		Fields:       normalizeObject(fields),
-		LoggedInUser: normalizeObject(user),
-		Users:        make([]map[string]any, 0, len(event.Users)),
+		LoggedInUser: nilWhenEmpty(user),
+		Users:        mapSlice(event.Users, normalizeObject),
 		TraceID:      event.TraceID,
 		TraceIDs:     append([]string(nil), event.TraceIDs...),
 		RoutineID:    event.RoutineID,
 		Tags:         append([]string(nil), event.Tags...),
-		Context:      make([]any, 0, len(event.Context)),
-		Meta:         make([]any, 0, len(event.Meta)),
-		Errors:       errorsFound,
+		Context:      mapSlice(event.Context, normalizeValue),
+		Meta:         mapSlice(event.Meta, normalizeValue),
+		Errors:       mapSlice(filterSlice(event.Values, isError), normalizeValue),
 		StackTrace:   append([]string(nil), event.StackTrace...),
 	}
-	if len(record.LoggedInUser) == 0 {
-		record.LoggedInUser = nil
-	}
-	for _, value := range event.Users {
-		record.Users = append(record.Users, normalizeObject(value))
-	}
-	for _, value := range event.Context {
-		record.Context = append(record.Context, normalizeValue(value))
-	}
-	for _, value := range event.Meta {
-		record.Meta = append(record.Meta, normalizeValue(value))
-	}
-	event.record = &record
-	return cloneLogRecord(record)
 }
 
 func (event *Event) Send() error {
@@ -748,16 +732,14 @@ func (logger *Logger) emit(event *Event, store bool) error {
 	if !store {
 		return nil
 	}
-	var failures []error
-	for _, transport := range state.transports {
-		if marker, ok := transport.(openTelemetryTransport); ok && marker.IsOpenTelemetry() && !event.IsOtelEnabled(state.otelEnabled) {
-			continue
-		}
-		if err := transport.Write(cloneLogRecord(record)); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	return errors.Join(failures...)
+	routed := filterSlice(state.transports, func(transport Transport) bool {
+		marker, ok := transport.(openTelemetryTransport)
+		return !(ok && marker.IsOpenTelemetry() && !event.IsOtelEnabled(state.otelEnabled))
+	})
+	// Every transport receives its own record copy; errors.Join drops the nils.
+	return errors.Join(mapSlice(routed, func(transport Transport) error {
+		return transport.Write(cloneLogRecord(record))
+	})...)
 }
 
 // runBounded keeps a transport that ignores cancellation from wedging exit.
@@ -833,20 +815,14 @@ func (logger *Logger) FlushContext(ctx context.Context, sendUnsent bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var failures []error
+	sent := []error(nil)
 	if sendUnsent {
-		for _, event := range logger.pendingEvents() {
-			if err := event.Send(); err != nil {
-				failures = append(failures, err)
-			}
-		}
+		sent = mapSlice(logger.pendingEvents(), (*Event).Send)
 	}
-	for _, transport := range logger.transportSnapshot() {
-		if err := flushTransport(ctx, transport); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	return errors.Join(failures...)
+	flushed := mapSlice(logger.transportSnapshot(), func(transport Transport) error {
+		return flushTransport(ctx, transport)
+	})
+	return errors.Join(concat(sent, flushed)...)
 }
 
 func (logger *Logger) FlushOnExit() error {
@@ -857,24 +833,25 @@ func (logger *Logger) FlushOnExitContext(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	events := logger.pendingEvents()
-	recovered := make([]LogRecord, 0, len(events))
-	var failures []error
-	for _, event := range events {
-		if err := event.Send(); err != nil {
-			failures = append(failures, err)
-		}
-		recovered = append(recovered, event.ToRecord())
-	}
-	for _, transport := range logger.transportSnapshot() {
-		if err := flushTransportOnExit(ctx, transport, recovered); err != nil {
-			failures = append(failures, err)
-		}
-	}
-	if err := logger.FlushContext(ctx, false); err != nil {
-		failures = append(failures, err)
-	}
-	return errors.Join(failures...)
+	// Each pending event is sent and then materialized, in order, so record
+	// ids and timestamps are issued in the same sequence as before.
+	outcomes := mapSlice(logger.pendingEvents(), func(event *Event) exitOutcome {
+		err := event.Send()
+		return exitOutcome{record: event.ToRecord(), err: err}
+	})
+	recovered := mapSlice(outcomes, func(outcome exitOutcome) LogRecord { return outcome.record })
+	sent := mapSlice(outcomes, func(outcome exitOutcome) error { return outcome.err })
+	exited := mapSlice(logger.transportSnapshot(), func(transport Transport) error {
+		return flushTransportOnExit(ctx, transport, recovered)
+	})
+	flushed := []error{logger.FlushContext(ctx, false)}
+	return errors.Join(concat(concat(sent, exited), flushed)...)
+}
+
+// exitOutcome pairs one drained event's delivery result with its record.
+type exitOutcome struct {
+	record LogRecord
+	err    error
 }
 
 // Close is bounded by DefaultFlushDeadline so an application that exits without
@@ -899,16 +876,11 @@ func (logger *Logger) CloseContext(ctx context.Context) error {
 		logger.closed = true
 		logger.mu.Unlock()
 
-		var failures []error
-		if err := logger.FlushOnExitContext(ctx); err != nil {
-			failures = append(failures, err)
-		}
-		for _, transport := range logger.transportSnapshot() {
-			if err := closeTransport(ctx, transport); err != nil {
-				failures = append(failures, err)
-			}
-		}
-		logger.closeErr = errors.Join(failures...)
+		flushed := []error{logger.FlushOnExitContext(ctx)}
+		closed := mapSlice(logger.transportSnapshot(), func(transport Transport) error {
+			return closeTransport(ctx, transport)
+		})
+		logger.closeErr = errors.Join(concat(flushed, closed)...)
 	})
 	return logger.closeErr
 }

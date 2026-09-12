@@ -83,29 +83,43 @@ pub fn with_context<T>(context: TraceContext, callback: impl FnOnce() -> T) -> T
     callback()
 }
 
+/// The event fields contributed by a trace context: its own fields, then the
+/// OTEL span attributes that are present, assembled as one new map (later
+/// entries win on a key collision, as successive inserts did).
+fn context_fields(context: &TraceContext) -> JsonObject {
+    let span_fields = [
+        (!context.span_id.is_empty()).then(|| {
+            (
+                "otel.span_id".to_string(),
+                Value::String(context.span_id.clone()),
+            )
+        }),
+        Some(("otel.trace_flags".to_string(), json!(context.trace_flags))),
+        (!context.trace_state.is_empty()).then(|| {
+            (
+                "otel.trace_state".to_string(),
+                Value::String(context.trace_state.clone()),
+            )
+        }),
+        (!context.baggage.is_empty()).then(|| {
+            let baggage: JsonObject = context
+                .baggage
+                .iter()
+                .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                .collect();
+            ("otel.baggage".to_string(), Value::Object(baggage))
+        }),
+    ];
+    context
+        .fields
+        .clone()
+        .into_iter()
+        .chain(span_fields.into_iter().flatten())
+        .collect()
+}
+
 pub fn apply_context(event: Event, context: &TraceContext) -> Event {
-    let mut fields = context.fields.clone();
-    if !context.span_id.is_empty() {
-        fields.insert(
-            "otel.span_id".into(),
-            Value::String(context.span_id.clone()),
-        );
-    }
-    fields.insert("otel.trace_flags".into(), json!(context.trace_flags));
-    if !context.trace_state.is_empty() {
-        fields.insert(
-            "otel.trace_state".into(),
-            Value::String(context.trace_state.clone()),
-        );
-    }
-    if !context.baggage.is_empty() {
-        let mut baggage = JsonObject::new();
-        for (key, value) in &context.baggage {
-            baggage.insert(key.clone(), Value::String(value.clone()));
-        }
-        fields.insert("otel.baggage".into(), Value::Object(baggage));
-    }
-    let event = event.add_fields(fields);
+    let event = event.add_fields(context_fields(context));
     let event = if context.trace_id.is_empty() {
         event
     } else {
@@ -390,9 +404,6 @@ fn report_bridge_failure(
     operation: &str,
     error: &impl Display,
 ) {
-    let mut fields = JsonObject::new();
-    fields.insert("otel.bridge_operation".into(), json!(operation));
-    fields.insert("otel.span_name".into(), json!(name));
     send_safely(
         LoggerContextExt::warn_context(
             logger,
@@ -404,19 +415,22 @@ fn report_bridge_failure(
                 json!(error.to_string()),
             ],
         )
-        .add_fields(fields)
+        .add_fields(JsonObject::from_iter([
+            ("otel.bridge_operation".into(), json!(operation)),
+            ("otel.span_name".into(), json!(name)),
+        ]))
         .add_tags(["otel-span", "otel-bridge-error"]),
     );
 }
 
 fn span_fields(name: &str, phase: &str, duration_ms: Option<f64>) -> JsonObject {
-    let mut fields = JsonObject::new();
-    fields.insert("otel.span_name".into(), json!(name));
-    fields.insert("otel.span_phase".into(), json!(phase));
-    if let Some(value) = duration_ms {
-        fields.insert("otel.duration_ms".into(), json!(value));
-    }
-    fields
+    [
+        ("otel.span_name".to_string(), json!(name)),
+        ("otel.span_phase".to_string(), json!(phase)),
+    ]
+    .into_iter()
+    .chain(duration_ms.map(|value| ("otel.duration_ms".to_string(), json!(value))))
+    .collect()
 }
 
 fn send_safely(event: Event) {
