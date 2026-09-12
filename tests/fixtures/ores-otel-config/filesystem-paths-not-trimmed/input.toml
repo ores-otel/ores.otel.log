@@ -1,0 +1,3 @@
+version = 1
+[common.metrics.filesystem]
+paths = [" /data ", "/data"]

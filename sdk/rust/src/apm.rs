@@ -11,6 +11,18 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+#[path = "apm_metrics.rs"]
+mod metrics;
+
+pub use metrics::{
+    emit_latency_histogram, emit_resource_metrics, resource_metric_points, HistogramPoint,
+    LatencyKind, MetricKind, MetricPoint, MetricSink, ATTR_CPU_MODE, ATTR_FILESYSTEM_MOUNTPOINT,
+    ATTR_FILESYSTEM_STATE, ATTR_LATENCY_KIND, ATTR_PRESSURE_KIND, ATTR_PRESSURE_TARGET,
+    METRIC_FILESYSTEM_USAGE, METRIC_FILESYSTEM_UTILIZATION, METRIC_LATENCY,
+    METRIC_PROCESS_CPU_TIME, METRIC_PROCESS_MEMORY_USAGE, METRIC_PROCESS_MEMORY_VIRTUAL,
+    METRIC_PROCESS_OPEN_FILE_DESCRIPTORS, METRIC_PROCESS_THREAD_COUNT, METRIC_RESOURCE_PRESSURE,
+};
+
 /// A sampled view of process resource usage.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProcessSnapshot {
@@ -306,10 +318,126 @@ pub fn sample_process() -> Result<ProcessSnapshot, ApmError> {
     Ok(snapshot)
 }
 
-#[cfg(not(all(target_os = "linux", feature = "apm")))]
+/// macOS sampler: `proc_pidinfo(PROC_PIDTASKINFO)` for resident/virtual memory
+/// and thread count, `getrusage(RUSAGE_SELF)` for CPU time (already in
+/// seconds, unlike Mach absolute-time task counters), and
+/// `proc_pidinfo(PROC_PIDLISTFDS)` for open descriptors.
+#[cfg(all(target_os = "macos", feature = "apm"))]
+pub fn sample_process() -> Result<ProcessSnapshot, ApmError> {
+    let pid = libc::c_int::try_from(std::process::id())
+        .map_err(|_| ApmError::InvalidProcessData("process id does not fit c_int".to_owned()))?;
+    let task = macos_task_info(pid)?;
+    let (user_seconds, system_seconds) = macos_rusage_cpu_seconds()?;
+    Ok(ProcessSnapshot {
+        rss_bytes: Some(task.pti_resident_size),
+        virtual_memory_bytes: Some(task.pti_virtual_size),
+        cpu_user_seconds: Some(user_seconds),
+        cpu_system_seconds: Some(system_seconds),
+        thread_count: u64::try_from(task.pti_threadnum).ok(),
+        open_file_descriptors: Some(macos_open_file_descriptors(pid)?),
+    })
+}
+
+#[cfg(all(target_os = "macos", feature = "apm"))]
+fn macos_task_info(pid: libc::c_int) -> Result<libc::proc_taskinfo, ApmError> {
+    use std::mem::{size_of, MaybeUninit};
+
+    let size = size_of::<libc::proc_taskinfo>();
+    let size_c = libc::c_int::try_from(size)
+        .map_err(|_| ApmError::InvalidProcessData("proc_taskinfo size overflow".to_owned()))?;
+    let mut raw = MaybeUninit::<libc::proc_taskinfo>::uninit();
+    // SAFETY: `raw` is writable storage of exactly `size_c` bytes for one
+    // proc_taskinfo, which is what PROC_PIDTASKINFO fills.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTASKINFO,
+            0,
+            raw.as_mut_ptr().cast::<libc::c_void>(),
+            size_c,
+        )
+    };
+    if written <= 0 {
+        return Err(ApmError::Io(std::io::Error::last_os_error()));
+    }
+    if written != size_c {
+        return Err(ApmError::InvalidProcessData(
+            "proc_pidinfo returned a truncated task info".to_owned(),
+        ));
+    }
+    // SAFETY: the kernel reported writing the full structure above.
+    Ok(unsafe { raw.assume_init() })
+}
+
+#[cfg(all(target_os = "macos", feature = "apm"))]
+fn macos_rusage_cpu_seconds() -> Result<(f64, f64), ApmError> {
+    use std::mem::MaybeUninit;
+
+    let mut raw = MaybeUninit::<libc::rusage>::uninit();
+    // SAFETY: `raw` points to valid writable storage for one rusage value.
+    let status = unsafe { libc::getrusage(libc::RUSAGE_SELF, raw.as_mut_ptr()) };
+    if status != 0 {
+        return Err(ApmError::Io(std::io::Error::last_os_error()));
+    }
+    // SAFETY: a zero getrusage return initialized the output object above.
+    let usage = unsafe { raw.assume_init() };
+    let seconds = |time: libc::timeval| time.tv_sec as f64 + f64::from(time.tv_usec) / 1e6;
+    Ok((seconds(usage.ru_utime), seconds(usage.ru_stime)))
+}
+
+#[cfg(all(target_os = "macos", feature = "apm"))]
+fn macos_open_file_descriptors(pid: libc::c_int) -> Result<u64, ApmError> {
+    use std::mem::size_of;
+
+    let entry = size_of::<libc::proc_fdinfo>();
+    // SAFETY: a null buffer with zero size asks only for the required size.
+    let needed =
+        unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDLISTFDS, 0, std::ptr::null_mut(), 0) };
+    if needed <= 0 {
+        return Err(ApmError::Io(std::io::Error::last_os_error()));
+    }
+    // Headroom for descriptors opened between the two calls.
+    let capacity = usize::try_from(needed).unwrap_or(0) / entry + 32;
+    let buffer = vec![
+        libc::proc_fdinfo {
+            proc_fd: 0,
+            proc_fdtype: 0,
+        };
+        capacity
+    ];
+    let bytes = libc::c_int::try_from(capacity * entry)
+        .map_err(|_| ApmError::InvalidProcessData("fd buffer size overflow".to_owned()))?;
+    // HOT-PATH (imperative by design): the kernel writes descriptor entries
+    // into a caller-provided buffer, so a fresh value per entry is impossible;
+    // the mutation is confined to this local vector and callers receive only
+    // the immutable count.
+    let mut buffer = buffer;
+    // SAFETY: `buffer` holds `capacity` initialized entries, exactly `bytes`
+    // bytes of writable storage.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDLISTFDS,
+            0,
+            buffer.as_mut_ptr().cast::<libc::c_void>(),
+            bytes,
+        )
+    };
+    if written < 0 {
+        return Err(ApmError::Io(std::io::Error::last_os_error()));
+    }
+    u64::try_from(usize::try_from(written).unwrap_or(0) / entry).map_err(|_| {
+        ApmError::InvalidProcessData("open file descriptor count does not fit u64".to_owned())
+    })
+}
+
+#[cfg(not(any(
+    all(target_os = "linux", feature = "apm"),
+    all(target_os = "macos", feature = "apm")
+)))]
 pub fn sample_process() -> Result<ProcessSnapshot, ApmError> {
     Err(ApmError::Unsupported(
-        "process sampling currently requires Linux and the `apm` feature",
+        "process sampling currently requires Linux or macOS and the `apm` feature",
     ))
 }
 
@@ -577,6 +705,22 @@ mod tests {
         assert!(snapshot
             .open_file_descriptors
             .is_some_and(|value| value > 0));
+    }
+
+    #[cfg(all(target_os = "macos", feature = "apm"))]
+    #[test]
+    fn live_macos_process_sampler_reports_memory_cpu_threads_and_fds() {
+        let snapshot = sample_process().expect("sample current process");
+        assert!(snapshot.rss_bytes.is_some_and(|value| value > 0));
+        assert!(snapshot.virtual_memory_bytes.is_some_and(|value| value > 0));
+        assert!(snapshot.thread_count.is_some_and(|value| value > 0));
+        assert!(snapshot.cpu_user_seconds.is_some_and(|value| value >= 0.0));
+        assert!(snapshot
+            .cpu_system_seconds
+            .is_some_and(|value| value >= 0.0));
+        assert!(snapshot
+            .open_file_descriptors
+            .is_some_and(|value| value >= 3));
     }
 
     #[cfg(all(unix, feature = "apm"))]
