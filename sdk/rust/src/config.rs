@@ -477,6 +477,9 @@ struct ReaderState {
     root: TomlTable,
     current: Vec<String>,
     pending: Option<PendingArray>,
+    /// Paths of explicit `[table]` headers. Each may appear once; a table
+    /// created implicitly by `[a.b]` may still be defined once as `[a]`.
+    defined: BTreeSet<Vec<String>>,
 }
 
 fn read_line(
@@ -488,6 +491,7 @@ fn read_line(
         root,
         current,
         pending,
+        defined,
     } = state;
     let content = strip_comment(line).trim();
 
@@ -505,6 +509,7 @@ fn read_line(
                     depth,
                     ..pending
                 }),
+                defined,
             });
         }
         let value = parse_value(&raw, pending.line)?;
@@ -513,6 +518,7 @@ fn read_line(
             root,
             current,
             pending: None,
+            defined,
         });
     }
 
@@ -521,6 +527,7 @@ fn read_line(
             root,
             current,
             pending: None,
+            defined,
         });
     }
     if content.starts_with("[[") {
@@ -534,11 +541,20 @@ fn read_line(
             .strip_suffix(']')
             .ok_or_else(|| toml_error(line_number, "unterminated table header"))?;
         let path = split_table_path(inner.trim(), line_number)?;
+        if defined.contains(&path) {
+            return Err(toml_error(
+                line_number,
+                format!("table [{}] is defined more than once", path.join(".")),
+            ));
+        }
         let root = ensure_table(root, &path, line_number)?;
+        let mut defined = defined;
+        defined.insert(path.clone());
         return Ok(ReaderState {
             root,
             current: path,
             pending: None,
+            defined,
         });
     }
 
@@ -564,6 +580,7 @@ fn read_line(
                 depth,
                 line: line_number,
             }),
+            defined,
         });
     }
     let value = parse_value(raw, line_number)?;
@@ -572,6 +589,7 @@ fn read_line(
         root,
         current,
         pending: None,
+        defined,
     })
 }
 
@@ -579,7 +597,8 @@ fn read_line(
 /// headers), bare/quoted keys, basic strings with `\n \t \r \" \\` escapes,
 /// integers, floats, booleans, comments, and homogeneous single- or
 /// multi-line arrays of strings or numbers. Inline tables, arrays of tables,
-/// duplicate keys, mixed-type arrays, and anything else fail.
+/// duplicate keys, table headers defined more than once, mixed-type arrays,
+/// and anything else fail.
 pub fn parse_toml(input: &str) -> Result<TomlTable, OresOtelConfigError> {
     let finished = input
         .split('\n')
@@ -1058,14 +1077,6 @@ fn validate_propagators(
     Ok(propagators)
 }
 
-fn integral_in_range(value: f64, minimum: u64, maximum: u64) -> Option<u64> {
-    (value.is_finite()
-        && value.fract() == 0.0
-        && value >= minimum as f64
-        && value <= maximum as f64)
-        .then_some(value as u64)
-}
-
 // ---------------------------------------------------------------------------
 // Strict contract parser
 // ---------------------------------------------------------------------------
@@ -1246,9 +1257,12 @@ impl<'a> TableReader<'a> {
                 .filter(|value| (minimum..=maximum).contains(value))
                 .map(Some)
                 .ok_or_else(out_of_range),
-            Some(TomlValue::Float(value)) => integral_in_range(*value, minimum, maximum)
-                .map(Some)
-                .ok_or_else(out_of_range),
+            // Shared parity rule: integer keys reject float spellings such as
+            // `5000.0` even when the value is integral.
+            Some(TomlValue::Float(_)) => Err(invalid(format!(
+                "{} must be an integer, not a float literal",
+                self.label(key)
+            ))),
             Some(_) => Err(invalid(format!("{} must be an integer", self.label(key)))),
         }
     }
@@ -1503,10 +1517,11 @@ fn parse_layer(table: &TomlTable, path: String) -> Result<OresOtelFileLayer, Ore
 pub fn parse_ores_otel_toml(input: &str) -> Result<OresOtelFileConfig, OresOtelConfigError> {
     let root = parse_toml(input)?;
     let reader = TableReader::new(&root, "root", ROOT_KEYS)?;
-    let version_ok = root
-        .get("version")
-        .and_then(TomlValue::as_number)
-        .is_some_and(|version| (version - f64::from(ORES_OTEL_CONFIG_VERSION)).abs() == 0.0);
+    // `version = 1.0` is a float literal and fails like every other integer key.
+    let version_ok = matches!(
+        root.get("version"),
+        Some(TomlValue::Integer(version)) if *version == i64::from(ORES_OTEL_CONFIG_VERSION)
+    );
     if !version_ok {
         return Err(invalid(format!(
             "root.version must equal {ORES_OTEL_CONFIG_VERSION}"
@@ -1589,13 +1604,12 @@ fn env_integer(
 ) -> Result<Option<u64>, OresOtelConfigError> {
     env.get(name)
         .map(|raw| {
-            let text = js_trim(raw);
-            text.parse::<u64>()
+            // Shared parity rule: integer variables accept digits only, so
+            // `5000.0` and `12.5` both fail (TypeScript and Dart agree).
+            js_trim(raw)
+                .parse::<u64>()
                 .ok()
                 .filter(|value| (minimum..=maximum).contains(value))
-                .or_else(|| {
-                    parse_env_f64(text).and_then(|value| integral_in_range(value, minimum, maximum))
-                })
                 .ok_or_else(|| {
                     env_error(format!(
                         "{name} must be an integer between {minimum} and {maximum}"
@@ -2276,9 +2290,10 @@ pub fn resolve_exporter_endpoint(
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LoadOptions {
     pub resolve: ResolveOptions,
-    /// Directory containing `.ores-otel.toml`; outranks `ORES_OTEL_CONFIG_DIR`.
+    /// Directory containing `.ores-otel.toml`; outranks `ORES_OTEL_CONFIG_FILE`
+    /// and `ORES_OTEL_CONFIG_DIR`. See [`ores_otel_config_file_path`].
     pub cwd: Option<PathBuf>,
-    /// Explicit file path; outranks `ORES_OTEL_CONFIG_FILE` and directories.
+    /// Explicit file path; outranks every other lookup input.
     pub file_path: Option<PathBuf>,
 }
 
@@ -2300,33 +2315,58 @@ pub struct LoadedOresOtelConfig {
     pub file_path: Option<PathBuf>,
 }
 
-/// Chooses the file: `file_path` > `ORES_OTEL_CONFIG_FILE` > (`cwd` >
-/// `ORES_OTEL_CONFIG_DIR` > process cwd) joined with the basename.
+/// Picks the config file path. Precedence: `file_path`, `cwd`,
+/// `ORES_OTEL_CONFIG_FILE`, `ORES_OTEL_CONFIG_DIR`, then `current_directory`.
+///
+/// Blank values are skipped, values are trimmed, and trailing directory
+/// separators are stripped. `env` must already include flag overrides (see
+/// [`ResolveOptions::effective_env`]). Non-UTF-8 argument paths are treated as
+/// absent. `tests/fixtures/ores-otel-config-lookup.json` pins this order for
+/// the TypeScript, Dart, and Rust SDKs.
+#[must_use]
+pub fn ores_otel_config_file_path(
+    file_path: Option<&std::path::Path>,
+    cwd: Option<&std::path::Path>,
+    env: &OresOtelEnv,
+    current_directory: &std::path::Path,
+) -> PathBuf {
+    fn non_blank(value: Option<&str>) -> Option<&str> {
+        value.map(js_trim).filter(|value| !value.is_empty())
+    }
+    fn in_directory(directory: &str) -> PathBuf {
+        PathBuf::from(format!(
+            "{}/{ORES_OTEL_CONFIG_BASENAME}",
+            directory.trim_end_matches(['/', '\\'])
+        ))
+    }
+    let env_value = |name: &str| non_blank(env.get(name).map(String::as_str));
+    non_blank(file_path.and_then(std::path::Path::to_str))
+        .map(PathBuf::from)
+        .or_else(|| non_blank(cwd.and_then(std::path::Path::to_str)).map(in_directory))
+        .or_else(|| env_value(ENV_CONFIG_FILE).map(PathBuf::from))
+        .unwrap_or_else(|| {
+            in_directory(
+                env_value(ENV_CONFIG_DIR)
+                    .or_else(|| current_directory.to_str())
+                    .unwrap_or("."),
+            )
+        })
+}
+
 fn config_file_path(
     options: &LoadOptions,
     env: &OresOtelEnv,
 ) -> Result<PathBuf, OresOtelConfigError> {
-    let from_env = |name: &str| {
-        env.get(name)
-            .map(|value| js_trim(value))
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    };
-    if let Some(path) = options
-        .file_path
-        .clone()
-        .or_else(|| from_env(ENV_CONFIG_FILE))
-    {
-        return Ok(path);
-    }
-    let root = match options.cwd.clone().or_else(|| from_env(ENV_CONFIG_DIR)) {
-        Some(root) => root,
-        None => std::env::current_dir().map_err(|source| OresOtelConfigError::Io {
-            path: PathBuf::from("."),
-            source,
-        })?,
-    };
-    Ok(root.join(ORES_OTEL_CONFIG_BASENAME))
+    let current = std::env::current_dir().map_err(|source| OresOtelConfigError::Io {
+        path: PathBuf::from("."),
+        source,
+    })?;
+    Ok(ores_otel_config_file_path(
+        options.file_path.as_deref(),
+        options.cwd.as_deref(),
+        env,
+        &current,
+    ))
 }
 
 /// Reads `.ores-otel.toml` when present (a missing file resolves defaults, as
@@ -2426,7 +2466,9 @@ mod tests {
         assert_eq!(toml_err_line("a = { b = 1 }"), 1);
         assert_eq!(toml_err_line("[[items]]"), 1);
         assert_eq!(toml_err_line("a = 1\na = 2"), 2);
-        assert_eq!(toml_err_line("[t]\na = 1\n[t]\na = 2"), 4);
+        // The repeated header itself fails (shared parity rule), before the
+        // duplicate key on line 4 is reached.
+        assert_eq!(toml_err_line("[t]\na = 1\n[t]\na = 2"), 3);
         assert_eq!(toml_err_line("a = [1, \"x\"]"), 1);
         assert_eq!(toml_err_line("a = [true]"), 1);
         assert_eq!(toml_err_line("a = [\n1,\n2"), 1);
@@ -2445,9 +2487,16 @@ mod tests {
     #[test]
     fn parse_accepts_full_metrics_layer() {
         let parsed = parse_ores_otel_toml(
-            "version = 1\n[server.metrics]\nexemplars = true\n[server.metrics.process]\nsample_interval_ms = 5000.0\nheap_bytes = false\n[server.metrics.filesystem]\npaths = [\"/\", \"/data\"]\nmin_free_bytes = 0\nmin_inode_free_ratio = 0.05\n[server.metrics.latency]\nhistogram_boundaries_ms = [1, 2.5]\n[server.metrics.runtime]\ngc_pause_ms = false\n[server.metrics.saturation]\ncpu_ratio_warning = 1\nqueue_depth_warning = 10\n",
+            "version = 1\n[server.metrics]\nexemplars = true\n[server.metrics.process]\nsample_interval_ms = 5000\nheap_bytes = false\n[server.metrics.filesystem]\npaths = [\"/\", \"/data\"]\nmin_free_bytes = 0\nmin_inode_free_ratio = 0.05\n[server.metrics.latency]\nhistogram_boundaries_ms = [1, 2.5]\n[server.metrics.runtime]\ngc_pause_ms = false\n[server.metrics.saturation]\ncpu_ratio_warning = 1\nqueue_depth_warning = 10\n",
         )
         .expect("valid config");
+        assert!(
+            parse_ores_otel_toml(
+                "version = 1\n[server.metrics.process]\nsample_interval_ms = 5000.0\n"
+            )
+            .is_err(),
+            "integer keys reject float spellings"
+        );
         let metrics = parsed
             .server
             .and_then(|layer| layer.metrics)

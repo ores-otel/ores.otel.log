@@ -185,4 +185,4 @@ TypeScript: `@oresoftware/next-loggers/apm`.
 - **Meter typing:** the meter is structural, so an `@opentelemetry/api` `Meter` works without this package depending on it.
 - **Node limits:** Node exposes no portable virtual-memory, thread-count, or open-fd reading, so the TypeScript SDK does not emit `process.memory.virtual`, `process.thread.count`, or `process.open_file_descriptor.count`.
 
- Rust: `next_loggers::apm::resource_metric_points` and `LatencyHistogramSnapshot::metric_points` (the `apm` feature enables live sampling).
+ Rust: `next_loggers::apm::resource_metric_points` and `LatencyHistogramSnapshot::metric_point` (one histogram point per latency kind; the `apm` feature enables live sampling). The Rust loader exposes the lookup order as `next_loggers::config::ores_otel_config_file_path`.

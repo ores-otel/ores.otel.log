@@ -3,14 +3,16 @@
 //! and compared to the shared expected JSON (numbers compare numerically).
 
 use next_loggers::config::{
-    parse_ores_otel_toml, parse_toml, resolve_ores_otel_config, OresOtelConfigError,
-    ResolveOptions, ResolvedOresOtelConfig, RuntimeRole, TomlValue, ORES_OTEL_ENV_VARS,
+    ores_otel_config_file_path, parse_ores_otel_toml, parse_toml, resolve_ores_otel_config,
+    OresOtelConfigError, ResolveOptions, ResolvedOresOtelConfig, RuntimeRole, TomlValue,
+    ORES_OTEL_ENV_VARS,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-const MINIMUM_CASES: usize = 14;
+const MINIMUM_CASES: usize = 18;
+const MINIMUM_LOOKUP_CASES: usize = 9;
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -138,6 +140,63 @@ fn every_ores_otel_config_fixture_matches() {
         "fixture mismatches:\n{}",
         failures.join("\n")
     );
+}
+
+/// `tests/fixtures/ores-otel-config-lookup.json`: the file-lookup order shared
+/// with the TypeScript and Dart loaders.
+#[test]
+fn every_ores_otel_config_lookup_case_matches() {
+    let corpus: Value = serde_json::from_str(&read(
+        &repo_root().join("tests/fixtures/ores-otel-config-lookup.json"),
+    ))
+    .expect("lookup corpus is JSON");
+    let cases = corpus["cases"].as_array().expect("cases array");
+    assert!(
+        cases.len() >= MINIMUM_LOOKUP_CASES,
+        "expected at least {MINIMUM_LOOKUP_CASES} lookup cases, found {}",
+        cases.len()
+    );
+    let optional_path = |case: &Value, field: &str| case[field].as_str().map(PathBuf::from);
+    let failures = cases
+        .iter()
+        .filter_map(|case| {
+            let env = string_map(case, "env")
+                .into_iter()
+                .chain(string_map(case, "flag_overrides"))
+                .collect::<BTreeMap<_, _>>();
+            let actual = ores_otel_config_file_path(
+                optional_path(case, "file_path").as_deref(),
+                optional_path(case, "cwd").as_deref(),
+                &env,
+                Path::new(
+                    case["current_directory"]
+                        .as_str()
+                        .expect("current_directory"),
+                ),
+            );
+            let expected = case["expected"].as_str().expect("expected");
+            (actual != Path::new(expected)).then(|| {
+                format!(
+                    "{}: {} != {expected}",
+                    case["name"].as_str().unwrap_or("?"),
+                    actual.display()
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "lookup mismatches:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
+fn table_headers_may_appear_once_but_implicit_parents_may_be_defined() {
+    assert!(parse_toml("[a]\nx = 1\n[a]\ny = 2\n").is_err());
+    assert!(parse_toml("[a.b]\nx = 1\n[a.b]\ny = 2\n").is_err());
+    assert!(parse_toml("[a.b]\nx = 1\n[a]\ny = 2\n").is_ok());
+    assert!(parse_ores_otel_toml("version = 1.0\n").is_err());
 }
 
 #[test]
