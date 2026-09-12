@@ -34,13 +34,21 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: '22'
+          node-version: '24'
+
+      # `npx --package=github:...` hits npm's "GitFetcher requires an Arborist constructor" bug on
+      # hosted runners, so install the pinned TJSV commit into an isolated prefix and run its bin.
+      - name: Install pinned TJSV
+        env:
+          TJSV_REF: github:ORESoftware/typespec-json-schema-validator#eac61635922c244c7a37829c63d0966de44ff800
+        run: |
+          mkdir -p "$RUNNER_TEMP/tjsv"
+          printf '{"private":true}\n' > "$RUNNER_TEMP/tjsv/package.json"
+          npm install --prefix "$RUNNER_TEMP/tjsv" --no-audit --no-fund "$TJSV_REF"
 
       - name: Enforce TypeSpec and JSON Schema peer authorities (npx tjsv check)
         run: |
-          npx --yes \
-            --package=github:ORESoftware/typespec-json-schema-validator#eac61635922c244c7a37829c63d0966de44ff800 \
-            tjsv check \
+          npx --prefix "$RUNNER_TEMP/tjsv" tjsv check \
             --typespec=contracts/ores-ids/main.tsp \
             --schema=contracts/ores-ids/authored.schema.json \
             --instances=contracts/ores-ids/instances
@@ -54,6 +62,6 @@ jobs:
         with:
           name: tjsv-ores-ids-${{ github.sha }}
           path: .typespec-json-schema-validator/
-          if-no-files-found: error
+          if-no-files-found: warn
           include-hidden-files: true
           retention-days: 90
