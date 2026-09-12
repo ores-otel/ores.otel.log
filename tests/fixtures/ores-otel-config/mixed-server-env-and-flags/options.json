@@ -1,0 +1,1 @@
+{"role":"server","env":{"ORES_OTEL_LOG_LEVEL":"debug","ORES_OTEL_METRICS_MIN_FREE_RATIO":"0.2"},"flag_overrides":{"ORES_OTEL_LOG_LEVEL":"warn","ORES_OTEL_METRICS_SAMPLE_INTERVAL_MS":"2000"}}
