@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -72,12 +73,30 @@ test('browser-safe internal diagnostics cannot pull in backend or cloud runtimes
   assert.doesNotMatch(backendSource, /@aws-sdk|@google-cloud|@azure\//);
 });
 
-test('the built Node tarball contains canonical contract artifacts', async () => {
+test('the built Node tarball contains canonical contract artifacts', async (t) => {
+  // npm 10 can run the root prepare hook even with --ignore-scripts, rewriting
+  // dist while other test processes import it. Pack an isolated release snapshot
+  // using the script-free staged manifest; CI only needs the root build artifact.
+  const manifest = await readJson(join(repositoryRoot, 'sdk/nodejs/package.json'));
+  assert.equal(manifest.scripts, undefined, 'the release manifest must not run lifecycle hooks');
+  const stagingRoot = await mkdtemp(join(tmpdir(), 'next-loggers-pack-'));
+  t.after(() => rm(stagingRoot, { recursive: true, force: true }));
+  for (const path of manifest.files) {
+    const destination = join(stagingRoot, path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(repositoryRoot, path), destination, { recursive: true });
+  }
+  await writeFile(join(stagingRoot, 'package.json'), JSON.stringify(manifest));
+  const runtimePaths = ['dist/base-logger.js', 'dist/context-shared.js', 'dist/cli/main.js'];
+  const runtimeMtimes = async () => Promise.all(runtimePaths.map(async (path) =>
+    (await stat(join(repositoryRoot, path), { bigint: true })).mtimeNs));
+  const before = await runtimeMtimes();
   const { stdout } = await execFileAsync(
     'npm',
     ['pack', '.', '--dry-run', '--json', '--ignore-scripts'],
-    { cwd: repositoryRoot, maxBuffer: 20 * 1024 * 1024 },
+    { cwd: stagingRoot, maxBuffer: 20 * 1024 * 1024 },
   );
+  assert.deepEqual(await runtimeMtimes(), before, 'packing must not rewrite runtimes used by parallel tests');
   const [pack] = JSON.parse(stdout);
   const packedPaths = new Set(pack.files.map(({ path }) => path));
 
