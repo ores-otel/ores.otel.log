@@ -87,7 +87,8 @@ pub fn evaluate_resource_snapshot(
 ) -> ResourceHealth {
     let mut pressures = Vec::new();
 
-    if let (Some(observed), Some(threshold)) = (snapshot.process.rss_bytes, thresholds.max_rss_bytes)
+    if let (Some(observed), Some(threshold)) =
+        (snapshot.process.rss_bytes, thresholds.max_rss_bytes)
     {
         if observed > threshold {
             pressures.push(ResourcePressure {
@@ -267,8 +268,12 @@ impl fmt::Display for ApmError {
             Self::InvalidProcessData(message) => {
                 write!(formatter, "APM process data is invalid: {message}")
             }
-            Self::InvalidHistogram(message) => write!(formatter, "invalid latency histogram: {message}"),
-            Self::Unsupported(message) => write!(formatter, "APM sampler is unsupported: {message}"),
+            Self::InvalidHistogram(message) => {
+                write!(formatter, "invalid latency histogram: {message}")
+            }
+            Self::Unsupported(message) => {
+                write!(formatter, "APM sampler is unsupported: {message}")
+            }
         }
     }
 }
@@ -453,9 +458,8 @@ fn clock_ticks_per_second() -> Result<u64, ApmError> {
     if ticks <= 0 {
         return Err(ApmError::Io(std::io::Error::last_os_error()));
     }
-    u64::try_from(ticks).map_err(|_| {
-        ApmError::InvalidProcessData("clock tick rate does not fit u64".to_owned())
-    })
+    u64::try_from(ticks)
+        .map_err(|_| ApmError::InvalidProcessData("clock tick rate does not fit u64".to_owned()))
 }
 
 #[cfg(all(target_os = "linux", feature = "apm"))]
@@ -468,10 +472,12 @@ fn count_open_file_descriptors() -> Result<u64, ApmError> {
     })
 }
 
+#[cfg(all(unix, feature = "apm"))]
 fn bounded_u64(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
+#[cfg(all(unix, feature = "apm"))]
 fn ratio(part: u64, whole: u64) -> Option<f64> {
     (whole != 0).then(|| part as f64 / whole as f64)
 }
@@ -488,11 +494,9 @@ mod tests {
 
     #[test]
     fn histogram_rejects_non_monotonic_boundaries() {
-        let error = LatencyHistogramConfig::new(vec![
-            Duration::from_millis(10),
-            Duration::from_millis(5),
-        ])
-        .expect_err("descending boundaries must fail");
+        let error =
+            LatencyHistogramConfig::new(vec![Duration::from_millis(10), Duration::from_millis(5)])
+                .expect_err("descending boundaries must fail");
         assert!(error.to_string().contains("strictly increasing"));
     }
 
@@ -570,7 +574,9 @@ mod tests {
         assert!(snapshot.rss_bytes.is_some_and(|value| value > 0));
         assert!(snapshot.virtual_memory_bytes.is_some_and(|value| value > 0));
         assert!(snapshot.thread_count.is_some_and(|value| value > 0));
-        assert!(snapshot.open_file_descriptors.is_some_and(|value| value > 0));
+        assert!(snapshot
+            .open_file_descriptors
+            .is_some_and(|value| value > 0));
     }
 
     #[cfg(all(unix, feature = "apm"))]

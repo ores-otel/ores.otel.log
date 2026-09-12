@@ -49,9 +49,8 @@ pub fn beam_error_is_pinned_to_websocket_message_and_does_not_escape_test() {
       },
     )
 
-  let assert Error(
-    boundary.BoundaryFailure(kind, _, failure_context, code),
-  ) = result
+  let assert Error(boundary.BoundaryFailure(kind, _, failure_context, code)) =
+    result
   kind |> should.equal(boundary.Panic)
   failure_context.request_id |> should.equal("request-websocket")
   code |> should.equal("request_boundary_failed")
@@ -110,9 +109,8 @@ pub fn invalid_transport_scope_is_rejected_without_running_callback_test() {
     boundary.run(context("request-invalid"), invalid, fn() {
       panic as "invalid boundary callback ran"
     })
-  let assert Error(
-    boundary.BoundaryFailure(kind, _, failure_context, code),
-  ) = result
+  let assert Error(boundary.BoundaryFailure(kind, _, failure_context, code)) =
+    result
   kind |> should.equal(boundary.Exception)
   failure_context.request_id |> should.equal("request-invalid")
   code |> should.equal("invalid_http_scope")

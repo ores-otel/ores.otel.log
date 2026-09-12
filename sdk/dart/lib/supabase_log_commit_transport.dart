@@ -5,9 +5,7 @@ import 'dart:math';
 
 typedef SupabaseLogTicketProvider = Future<String> Function();
 typedef CommitSocketConnector = Future<CommitSocket> Function(
-  Uri endpoint,
-  Map<String, String> headers,
-);
+    Uri endpoint, Map<String, String> headers);
 
 abstract interface class CommitSocket {
   Stream<Object?> get messages;
@@ -126,10 +124,7 @@ final class SupabaseLogCommitTransport {
   Future<void> sendBatch(List<SupabaseLogEnvelope> envelopes) {
     final immutable = List<SupabaseLogEnvelope>.unmodifiable(envelopes);
     final result = _tail.then<void>((_) => _sendAll(immutable));
-    _tail = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace __) {},
-    );
+    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
   }
 
@@ -170,8 +165,6 @@ final class SupabaseLogCommitTransport {
     List<SupabaseLogEnvelope> events, {
     required String batchId,
   }) async {
-    Object? lastError;
-
     for (var attempt = 0; attempt <= options.maxRetries; attempt += 1) {
       CommitSocket? socket;
       try {
@@ -184,18 +177,15 @@ final class SupabaseLogCommitTransport {
           );
         }
 
-        socket = await _connector(
-          options.endpoint,
-          <String, String>{'Authorization': 'Bearer $ticket'},
-        ).timeout(options.connectTimeout);
+        socket =
+            await _connect(<String, String>{'Authorization': 'Bearer $ticket'});
 
         socket.send(
           jsonEncode(<String, Object?>{
             'type': 'next_log_batch_v1',
             'batchId': batchId,
-            'events': events
-                .map((event) => event.toJson())
-                .toList(growable: false),
+            'events':
+                events.map((event) => event.toJson()).toList(growable: false),
           }),
         );
 
@@ -207,23 +197,41 @@ final class SupabaseLogCommitTransport {
             .timeout(options.ackTimeout);
 
         _validateAck(ack, events);
-        await socket.close();
         return;
-      } on Object catch (error) {
-        lastError = error;
-        if (socket != null) {
-          await socket.close();
-        }
+      } on Object {
         if (attempt >= options.maxRetries) {
           break;
         }
-        await Future<void>.delayed(_retryDelay(attempt));
+      } finally {
+        if (socket != null) {
+          await _closeSocket(socket);
+        }
       }
+      await Future<void>.delayed(_retryDelay(attempt));
     }
 
     throw SupabaseLogCommitException(
-      'Collector did not durably acknowledge batch $batchId: $lastError',
+      'Collector did not durably acknowledge batch $batchId.',
     );
+  }
+
+  Future<CommitSocket> _connect(Map<String, String> headers) {
+    final connection = _connector(options.endpoint, headers);
+    return connection.timeout(options.connectTimeout, onTimeout: () {
+      // Future.timeout does not cancel connection establishment. Retain ownership
+      // of a late socket and consume late failures without exposing ticket data.
+      unawaited(connection.then<void>(_closeSocket,
+          onError: (Object _, StackTrace __) {}));
+      throw TimeoutException('Collector connection timed out.');
+    });
+  }
+
+  static Future<void> _closeSocket(CommitSocket socket) async {
+    try {
+      await socket.close();
+    } on Object {
+      // Cleanup must not replace a durable ACK or expose connector diagnostics.
+    }
   }
 
   static Map<String, Object?> _decodeMessage(Object? raw) {
@@ -275,11 +283,13 @@ final class SupabaseLogCommitTransport {
   }
 
   String _newBatchId() {
-    final time =
-        DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(36);
-    final random = List<int>.generate(16, (_) => _random.nextInt(256))
-        .map((value) => value.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final time = DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(
+          36,
+        );
+    final random = List<int>.generate(
+      16,
+      (_) => _random.nextInt(256),
+    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
     return 'nlb_$time$random';
   }
 
@@ -292,17 +302,17 @@ final class SupabaseLogCommitTransport {
     Uri endpoint,
     Map<String, String> headers,
   ) async {
-    final socket = await WebSocket.connect(
+    return _IoCommitSocket(await WebSocket.connect(
       endpoint.toString(),
       headers: headers,
-    );
-    socket.pingInterval = const Duration(seconds: 20);
-    return _IoCommitSocket(socket);
+    ));
   }
 }
 
 final class _IoCommitSocket implements CommitSocket {
-  const _IoCommitSocket(this._socket);
+  _IoCommitSocket(this._socket) {
+    _socket.pingInterval = const Duration(seconds: 20);
+  }
 
   final WebSocket _socket;
 

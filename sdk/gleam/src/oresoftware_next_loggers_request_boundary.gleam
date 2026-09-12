@@ -154,16 +154,18 @@ pub fn run(
         Some(parent) -> ambient.merge(parent, request_log_context)
         None -> request_log_context
       }
-      case ffi_run_protected(
-        log_context,
-        transport,
-        scope,
-        normalized.phase,
-        option_string(normalized.connection_id),
-        option_string(normalized.message_id),
-        option_string(normalized.operation),
-        callback,
-      ) {
+      case
+        ffi_run_protected(
+          log_context,
+          transport,
+          scope,
+          normalized.phase,
+          option_string(normalized.connection_id),
+          option_string(normalized.message_id),
+          option_string(normalized.operation),
+          callback,
+        )
+      {
         Ok(value) -> Ok(value)
         Error(kind) ->
           Error(BoundaryFailure(
@@ -184,13 +186,14 @@ fn normalize(
   case phase == "" || string.length(phase) > 128 {
     True -> Error("invalid_phase")
     False -> {
-      let normalized = RequestBoundary(
-        ..boundary,
-        phase: phase,
-        operation: normalize_optional(boundary.operation),
-        connection_id: normalize_optional(boundary.connection_id),
-        message_id: normalize_optional(boundary.message_id),
-      )
+      let normalized =
+        RequestBoundary(
+          ..boundary,
+          phase: phase,
+          operation: normalize_optional(boundary.operation),
+          connection_id: normalize_optional(boundary.connection_id),
+          message_id: normalize_optional(boundary.message_id),
+        )
       case normalized.transport, normalized.scope {
         Http, Request ->
           case normalized.connection_id, normalized.message_id {

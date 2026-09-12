@@ -133,12 +133,8 @@ impl RequestBoundary {
             256,
             false,
         )?;
-        self.message_id = bounded_text(
-            "messageId",
-            self.message_id.unwrap_or_default(),
-            256,
-            false,
-        )?;
+        self.message_id =
+            bounded_text("messageId", self.message_id.unwrap_or_default(), 256, false)?;
 
         match (self.transport, self.scope) {
             (RequestTransport::Http, RequestScope::Request) => {
@@ -264,8 +260,7 @@ impl<C: fmt::Debug> fmt::Debug for RequestBoundaryFailure<C> {
     }
 }
 
-pub type RequestBoundaryResult<T, E> =
-    Result<T, RequestBoundaryFailure<RequestBoundaryCause<E>>>;
+pub type RequestBoundaryResult<T, E> = Result<T, RequestBoundaryFailure<RequestBoundaryCause<E>>>;
 
 fn observed_at_unix_ms() -> u64 {
     SystemTime::now()
@@ -323,6 +318,10 @@ where
 /// Catches errors and unwinding panics from exactly one logical HTTP, TCP, or
 /// WebSocket operation. The canonical poll-local logger context is active while
 /// the operation and reporter run; no process-global panic hook is installed.
+// The public result owns the complete request diagnostic on the failure path.
+// Boxing it here would change RequestBoundaryResult and callers that destructure
+// its error; keep that compatibility decision separate from workspace linting.
+#[allow(clippy::result_large_err)]
 pub async fn run_with_classified_request_boundary<T, E, F, Classify, Report>(
     request_context: RequestContext,
     boundary: RequestBoundary,
@@ -383,6 +382,8 @@ where
     .await
 }
 
+// Preserve the same owned public diagnostic as the classified entry point.
+#[allow(clippy::result_large_err)]
 pub async fn run_with_request_boundary<T, E, F, Report>(
     request_context: RequestContext,
     boundary: RequestBoundary,
