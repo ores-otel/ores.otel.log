@@ -6,15 +6,29 @@ on:
   workflow_dispatch:
   # Add `push:` here once this repo's lint debt is paid down.
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ores-lint-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out exact pull-request revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
 
       - name: Detect project types
         id: detect
+        shell: bash
         run: |
+          set -euo pipefail
           { [ -f package.json ] || git ls-files '*.js' '*.mjs' '*.cjs' '*.ts' '*.tsx' | grep -q .; } \
             && echo "js=true" >> "$GITHUB_OUTPUT" || echo "js=false" >> "$GITHUB_OUTPUT"
           { [ -f Cargo.toml ] || git ls-files '*.rs' | grep -q .; } \
@@ -26,29 +40,44 @@ jobs:
 
       # Node is the runner for ESLint and for the cross-language require-send
       # scanner, so it is installed whenever any supported language is present.
-      - uses: actions/setup-node@v4
+      - name: Set up pinned Node runtime
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         if: steps.detect.outputs.js == 'true' || steps.detect.outputs.rs == 'true' || steps.detect.outputs.dart == 'true' || steps.detect.outputs.gleam == 'true'
         with:
-          node-version: '22'
+          node-version: 22.20.0
 
-      # ESLint is a global tool here, not a repo dependency - so this job never
-      # runs `npm install` and never needs the repo's node_modules.
-      - name: Install eslint globally
+      # CI versions are declared once in required-tools.json. The compatibility
+      # ranges remain broad for local/fleet installs, while CI is reproducible.
+      - name: Install exact lint hosts
         if: steps.detect.outputs.js == 'true'
-        run: npm i -g eslint typescript-eslint
+        shell: bash
+        run: |
+          set -euo pipefail
+          ESLINT_VERSION="$(node -p "require('./.ores-lint/required-tools.json').eslint.ciVersion")"
+          TYPESCRIPT_ESLINT_VERSION="$(node -p "require('./.ores-lint/required-tools.json')['typescript-eslint'].ciVersion")"
+          npm i -g --ignore-scripts --no-audit --no-fund \
+            "eslint@${ESLINT_VERSION}" \
+            "typescript-eslint@${TYPESCRIPT_ESLINT_VERSION}"
+          test "$(eslint --version)" = "v${ESLINT_VERSION}"
+          actual_typescript_eslint="$({ node -e 'console.log(require(process.argv[1]).version)' "$(npm root -g)/typescript-eslint/package.json"; })"
+          test "$actual_typescript_eslint" = "$TYPESCRIPT_ESLINT_VERSION"
 
       - name: Install clippy
         if: steps.detect.outputs.rs == 'true'
-        run: rustup component add clippy || true
+        run: rustup component add clippy
 
       # Dart/Gleam SDKs are optional. When absent, dart.sh / gleam.sh skip
       # with an actionable message; require-send.mjs still runs via Node.
-      - uses: dart-lang/setup-dart@v1
+      - name: Set up pinned Dart runtime
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1
         if: steps.detect.outputs.dart == 'true'
         continue-on-error: true
 
       - name: Run ores-lint
-        run: sh .ores-lint/lint.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh .ores-lint/lint.sh
         env:
           # Warn-only. Set to 1 here to make lint findings fail this repo's CI.
           ORES_LINT_STRICT: '0'
