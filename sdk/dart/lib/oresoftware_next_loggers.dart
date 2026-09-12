@@ -5,6 +5,9 @@
 /// transport, and durable Supabase WebSocket ingest are exported as explicit
 /// capabilities of the cross-runtime telemetry contract.
 export 'next_loggers.dart';
+export 'ores_otel_apm.dart';
+export 'ores_otel_config.dart';
+export 'ores_otel_config_io.dart';
 export 'shutdown.dart';
 export 'supabase_realtime_transport.dart';
 export 'supabase_websocket_ingest.dart';
