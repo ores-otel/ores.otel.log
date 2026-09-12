@@ -1,0 +1,59 @@
+name: TJSV ores-trace/ores-routine identifier authority convergence
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/ores-ids/**'
+      - 'tests/ores-ids-contract.test.mjs'
+      - '.github/workflows/tjsv-ores-ids.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/ores-ids/**'
+      - 'tests/ores-ids-contract.test.mjs'
+      - '.github/workflows/tjsv-ores-ids.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tjsv-ores-ids-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  peer-authority-convergence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact repository head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22'
+
+      - name: Enforce TypeSpec and JSON Schema peer authorities (npx tjsv check)
+        run: |
+          npx --yes \
+            --package=github:ORESoftware/typespec-json-schema-validator#eac61635922c244c7a37829c63d0966de44ff800 \
+            tjsv check \
+            --typespec=contracts/ores-ids/main.tsp \
+            --schema=contracts/ores-ids/authored.schema.json \
+            --instances=contracts/ores-ids/instances
+
+      - name: Corpus and pattern parity test
+        run: node --test tests/ores-ids-contract.test.mjs
+
+      - name: Retain deterministic TJSV evidence
+        if: always()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: tjsv-ores-ids-${{ github.sha }}
+          path: .typespec-json-schema-validator/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 90
