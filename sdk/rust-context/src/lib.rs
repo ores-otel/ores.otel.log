@@ -37,53 +37,67 @@ pub struct LogContext {
     pub meta: Vec<Value>,
 }
 
-fn push_unique(values: &mut Vec<String>, candidate: String) {
+/// `values` with `candidate` appended when it is non-blank and not already
+/// present. The list moves through the call and comes back as a new value.
+fn with_unique(values: Vec<String>, candidate: String) -> Vec<String> {
     let candidate = candidate.trim().to_string();
-    if !candidate.is_empty() && !values.contains(&candidate) {
-        values.push(candidate);
+    if candidate.is_empty() || values.contains(&candidate) {
+        values
+    } else {
+        values.into_iter().chain([candidate]).collect()
     }
+}
+
+/// Every element of `candidates` folded into `values` with [`with_unique`],
+/// preserving first-seen order.
+fn with_all_unique(
+    values: Vec<String>,
+    candidates: impl IntoIterator<Item = String>,
+) -> Vec<String> {
+    candidates.into_iter().fold(values, with_unique)
 }
 
 impl LogContext {
     /// Merge semantics match the TypeScript async-local store: objects merge,
     /// lists append, trace/tag identifiers are de-duplicated, and present
     /// scalar values replace their parent value.
-    pub fn merged(mut self, patch: Self) -> Self {
-        if let Some(trace_id) = self.trace_id.clone() {
-            push_unique(&mut self.trace_ids, trace_id);
+    ///
+    /// Both inputs are consumed and a new context is built from their parts;
+    /// no field of either is edited in place.
+    pub fn merged(self, patch: Self) -> Self {
+        // Trace ids accumulate in this order: the parent's primary id, the
+        // patch's primary id, then the patch's list.
+        let trace_ids = with_all_unique(
+            self.trace_ids,
+            self.trace_id
+                .clone()
+                .into_iter()
+                .chain(patch.trace_id.clone())
+                .chain(patch.trace_ids),
+        );
+        let trace_id = patch
+            .trace_id
+            .or(self.trace_id)
+            .or_else(|| trace_ids.first().cloned());
+        Self {
+            logged_in_user: self
+                .logged_in_user
+                .into_iter()
+                .chain(patch.logged_in_user)
+                .collect(),
+            users: self.users.into_iter().chain(patch.users).collect(),
+            fields: self.fields.into_iter().chain(patch.fields).collect(),
+            trace_id,
+            trace_ids,
+            span_id: patch.span_id.or(self.span_id),
+            trace_flags: patch.trace_flags.or(self.trace_flags),
+            trace_state: patch.trace_state.or(self.trace_state),
+            baggage: self.baggage.into_iter().chain(patch.baggage).collect(),
+            routine_id: patch.routine_id.or(self.routine_id),
+            tags: with_all_unique(self.tags, patch.tags),
+            context: self.context.into_iter().chain(patch.context).collect(),
+            meta: self.meta.into_iter().chain(patch.meta).collect(),
         }
-        self.logged_in_user.extend(patch.logged_in_user);
-        self.users.extend(patch.users);
-        self.fields.extend(patch.fields);
-        if let Some(trace_id) = patch.trace_id {
-            push_unique(&mut self.trace_ids, trace_id.clone());
-            self.trace_id = Some(trace_id);
-        }
-        for trace_id in patch.trace_ids {
-            push_unique(&mut self.trace_ids, trace_id);
-        }
-        if self.trace_id.is_none() {
-            self.trace_id = self.trace_ids.first().cloned();
-        }
-        if patch.span_id.is_some() {
-            self.span_id = patch.span_id;
-        }
-        if patch.trace_flags.is_some() {
-            self.trace_flags = patch.trace_flags;
-        }
-        if patch.trace_state.is_some() {
-            self.trace_state = patch.trace_state;
-        }
-        self.baggage.extend(patch.baggage);
-        if patch.routine_id.is_some() {
-            self.routine_id = patch.routine_id;
-        }
-        for tag in patch.tags {
-            push_unique(&mut self.tags, tag);
-        }
-        self.context.extend(patch.context);
-        self.meta.extend(patch.meta);
-        self
     }
 }
 
@@ -231,51 +245,71 @@ pub fn current_logged_in_user() -> Option<JsonObject> {
         .and_then(|context| (!context.logged_in_user.is_empty()).then_some(context.logged_in_user))
 }
 
-pub fn apply_context(event: Event, context: &LogContext) -> Event {
-    let mut fields = context.fields.clone();
-    if let Some(span_id) = &context.span_id {
-        fields.insert("otel.span_id".into(), Value::String(span_id.clone()));
-    }
-    if let Some(trace_flags) = context.trace_flags {
-        fields.insert("otel.trace_flags".into(), json!(trace_flags));
-    }
-    if let Some(trace_state) = &context.trace_state {
-        fields.insert(
-            "otel.trace_state".into(),
-            Value::String(trace_state.clone()),
-        );
-    }
-    if !context.baggage.is_empty() {
-        fields.insert(
-            "otel.baggage".into(),
-            Value::Object(context.baggage.clone()),
-        );
-    }
+/// The event fields contributed by a context: its own fields plus the OTEL span
+/// attributes that are present, assembled as one new map.
+fn context_fields(context: &LogContext) -> JsonObject {
+    let span_fields = [
+        context
+            .span_id
+            .as_ref()
+            .map(|span_id| ("otel.span_id".to_string(), Value::String(span_id.clone()))),
+        context
+            .trace_flags
+            .map(|trace_flags| ("otel.trace_flags".to_string(), json!(trace_flags))),
+        context.trace_state.as_ref().map(|trace_state| {
+            (
+                "otel.trace_state".to_string(),
+                Value::String(trace_state.clone()),
+            )
+        }),
+        (!context.baggage.is_empty()).then(|| {
+            (
+                "otel.baggage".to_string(),
+                Value::Object(context.baggage.clone()),
+            )
+        }),
+    ];
+    context
+        .fields
+        .clone()
+        .into_iter()
+        .chain(span_fields.into_iter().flatten())
+        .collect()
+}
 
-    let mut event = event.add_fields(fields);
-    if !context.logged_in_user.is_empty() {
-        event = event.add_logged_in_user_info(context.logged_in_user.clone());
-    }
-    for user in &context.users {
-        event = event.add_user_info(user.clone());
-    }
-    if let Some(trace_id) = &context.trace_id {
-        event = event.add_trace(trace_id.clone(), true);
-    }
-    for trace_id in &context.trace_ids {
-        event = event.add_trace(trace_id.clone(), false);
-    }
-    if let Some(routine_id) = &context.routine_id {
-        event = event.add_routine_id(routine_id.clone());
-    }
-    event = event.add_tags(context.tags.clone());
-    for value in &context.context {
-        event = event.add_context(value.clone());
-    }
-    for value in &context.meta {
-        event = event.add_meta(value.clone());
-    }
-    event
+/// Apply `context` to `event` as a pipeline of builder steps. Every step takes
+/// the event by value and returns it, so the enrichment reads as one expression
+/// in the exact order the record contract expects.
+pub fn apply_context(event: Event, context: &LogContext) -> Event {
+    let event = event.add_fields(context_fields(context));
+    let event = if context.logged_in_user.is_empty() {
+        event
+    } else {
+        event.add_logged_in_user_info(context.logged_in_user.clone())
+    };
+    let event = context
+        .users
+        .iter()
+        .cloned()
+        .fold(event, Event::add_user_info);
+    let event = match &context.trace_id {
+        Some(trace_id) => event.add_trace(trace_id.clone(), true),
+        None => event,
+    };
+    let event = context.trace_ids.iter().fold(event, |event, trace_id| {
+        event.add_trace(trace_id.clone(), false)
+    });
+    let event = match &context.routine_id {
+        Some(routine_id) => event.add_routine_id(routine_id.clone()),
+        None => event,
+    };
+    let event = event.add_tags(context.tags.clone());
+    let event = context
+        .context
+        .iter()
+        .cloned()
+        .fold(event, Event::add_context);
+    context.meta.iter().cloned().fold(event, Event::add_meta)
 }
 
 pub trait LoggerContextExt {
@@ -396,36 +430,91 @@ impl ShutdownState {
         self.signal_count
     }
 
-    pub fn trigger(&mut self, _cause: ShutdownCause) -> ShutdownAction {
-        self.signal_count = self.signal_count.saturating_add(1);
+    /// Pure transition for a shutdown signal: the state that follows and the
+    /// action it requests. The receiver is consumed; nothing is edited in place.
+    #[must_use]
+    pub fn triggered(self, _cause: ShutdownCause) -> (Self, ShutdownAction) {
+        let signal_count = self.signal_count.saturating_add(1);
         match self.phase {
-            ShutdownPhase::Running => {
-                self.phase = ShutdownPhase::Draining;
-                ShutdownAction::BeginGraceful
-            }
-            ShutdownPhase::Draining => {
-                self.phase = ShutdownPhase::Forced;
-                ShutdownAction::Force
-            }
-            ShutdownPhase::Forced | ShutdownPhase::Closed => ShutdownAction::Ignore,
+            ShutdownPhase::Running => (
+                Self {
+                    phase: ShutdownPhase::Draining,
+                    signal_count,
+                    ..self
+                },
+                ShutdownAction::BeginGraceful,
+            ),
+            ShutdownPhase::Draining => (
+                Self {
+                    phase: ShutdownPhase::Forced,
+                    signal_count,
+                    ..self
+                },
+                ShutdownAction::Force,
+            ),
+            ShutdownPhase::Forced | ShutdownPhase::Closed => (
+                Self {
+                    signal_count,
+                    ..self
+                },
+                ShutdownAction::Ignore,
+            ),
         }
     }
 
-    pub fn mark_closed(&mut self) -> bool {
+    /// Pure transition for a completed graceful drain: the state that follows
+    /// and whether the close was accepted.
+    #[must_use]
+    pub fn closed(self) -> (Self, bool) {
         if self.phase != ShutdownPhase::Draining {
-            return false;
+            return (self, false);
         }
-        self.phase = ShutdownPhase::Closed;
-        true
+        (
+            Self {
+                phase: ShutdownPhase::Closed,
+                ..self
+            },
+            true,
+        )
     }
 
-    pub fn force_timeout(&mut self) -> ShutdownAction {
+    /// Pure transition for an expired drain budget.
+    #[must_use]
+    pub fn timed_out(self) -> (Self, ShutdownAction) {
         if self.phase == ShutdownPhase::Draining {
-            self.phase = ShutdownPhase::Forced;
-            ShutdownAction::Force
+            (
+                Self {
+                    phase: ShutdownPhase::Forced,
+                    ..self
+                },
+                ShutdownAction::Force,
+            )
         } else {
-            ShutdownAction::Ignore
+            (self, ShutdownAction::Ignore)
         }
+    }
+
+    /// In-place form of [`Self::triggered`], kept for callers that hold the
+    /// machine in a `Mutex`/`Cell`: this type is the stateful holder and only
+    /// swaps the value it holds.
+    pub fn trigger(&mut self, cause: ShutdownCause) -> ShutdownAction {
+        let (next, action) = self.clone().triggered(cause);
+        *self = next;
+        action
+    }
+
+    /// In-place form of [`Self::closed`].
+    pub fn mark_closed(&mut self) -> bool {
+        let (next, accepted) = self.clone().closed();
+        *self = next;
+        accepted
+    }
+
+    /// In-place form of [`Self::timed_out`].
+    pub fn force_timeout(&mut self) -> ShutdownAction {
+        let (next, action) = self.clone().timed_out();
+        *self = next;
+        action
     }
 }
 

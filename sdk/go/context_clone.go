@@ -15,6 +15,13 @@ type contextCloneVisit struct {
 	capacity int
 }
 
+// HOT-PATH (imperative by design): the reflective deep clone runs on every
+// LogContextFrom/WithLogContext call, i.e. per request and per context-aware
+// log call. The visit state is shared by every level of the recursion so cycles
+// and shared references resolve to one copy; returning a fresh state per node
+// would rebuild the seen-map or copy the counter at each of up to 10,000
+// nodes. The state is allocated inside cloneContextAny and never escapes it;
+// callers receive a detached value graph.
 type contextCloneState struct {
 	seen  map[contextCloneVisit]reflect.Value
 	nodes int

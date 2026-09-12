@@ -56,14 +56,19 @@ fn unique_strings(values: impl IntoIterator<Item = String>) -> Vec<String> {
 }
 
 impl LogContext {
-    pub fn normalized(mut self) -> Self {
-        self.trace_id = clean(self.trace_id, 256);
-        self.span_id = clean(self.span_id, 256);
-        self.trace_state = clean(self.trace_state, 512);
-        self.routine_id = clean(self.routine_id, 256);
-        self.trace_ids = unique_strings(self.trace_ids.into_iter().chain(self.trace_id.clone()));
-        self.tags = unique_strings(self.tags);
-        self
+    /// A new context with every identifier trimmed, bounded and de-duplicated.
+    /// Untouched fields move through struct-update syntax.
+    pub fn normalized(self) -> Self {
+        let trace_id = clean(self.trace_id, 256);
+        Self {
+            trace_ids: unique_strings(self.trace_ids.into_iter().chain(trace_id.clone())),
+            trace_id,
+            span_id: clean(self.span_id, 256),
+            trace_state: clean(self.trace_state, 512),
+            routine_id: clean(self.routine_id, 256),
+            tags: unique_strings(self.tags),
+            ..self
+        }
     }
 }
 
@@ -288,14 +293,13 @@ pub fn apply_log_context(event: Event, context: &LogContext) -> Event {
             )
         }),
     ];
-    let fields =
-        span_fields
-            .into_iter()
-            .flatten()
-            .fold(context.fields, |mut fields, (key, value)| {
-                fields.insert(key, value);
-                fields
-            });
+    // Span attributes are appended after the context fields so they win on a
+    // key collision, as successive inserts did.
+    let fields: JsonObject = context
+        .fields
+        .into_iter()
+        .chain(span_fields.into_iter().flatten())
+        .collect();
     let event = event.add_fields(fields);
     let event = if context.logged_in_user.is_empty() {
         event

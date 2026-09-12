@@ -145,6 +145,54 @@ function isUnsupportedTypeScriptError(error: unknown): boolean {
   return code === 'ERR_UNKNOWN_FILE_EXTENSION' || code === 'ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING';
 }
 
+type ConfigModule = { default?: NextLoggerConfig; config?: NextLoggerConfig };
+
+/** Imports one candidate config module; `undefined` means the file does not exist. */
+async function importConfigModule(candidate: string): Promise<ConfigModule | undefined> {
+  try {
+    return (await import(/* webpackIgnore: true */ toFileUrl(candidate))) as ConfigModule;
+  } catch (error) {
+    if (isMissingModuleError(error, candidate)) {
+      return undefined;
+    }
+    if (isUnsupportedTypeScriptError(error)) {
+      throw new Error(
+        `${candidate} exists but this runtime cannot import TypeScript directly. ` +
+          'Use Node >= 22.18 (native type stripping), Bun, or Deno — or rename the config to .next-logger.mjs.',
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * The options exported by the first config file that exists under `root`, and
+ * its path; empty options and a null path when none does. Candidates are tried
+ * in CONFIG_BASENAMES order and the result is returned, never accumulated.
+ */
+async function loadConfigFile(
+  root: string,
+  env: ConfigEnv,
+): Promise<{ options: LoggerOptions; filePath: string | null }> {
+  for (const basename of CONFIG_BASENAMES) {
+    const candidate = `${root}/${basename}`;
+    const moduleNamespace = await importConfigModule(candidate);
+    if (moduleNamespace === undefined) {
+      continue;
+    }
+    const exported = moduleNamespace.default ?? moduleNamespace.config;
+    if (exported === undefined) {
+      throw new Error(`${candidate} must default-export LoggerOptions or a function returning them`);
+    }
+    return {
+      options: typeof exported === 'function' ? await exported(env) : exported,
+      filePath: candidate,
+    };
+  }
+  return { options: {}, filePath: null };
+}
+
 /**
  * Loads `.next-logger.ts` (or .mts/.mjs/.js) from the project root and merges
  * NEXT_LOGGER_* env overrides on top. TypeScript configs load natively on
@@ -157,38 +205,7 @@ export async function loadNextLoggerConfig(
   const env = loadOptions.env ?? process.env;
   const root = (loadOptions.cwd ?? env.NEXT_LOGGER_CONFIG_DIR ?? process.cwd()).replace(/\/$/, '');
 
-  let fileOptions: LoggerOptions = {};
-  let filePath: string | null = null;
-  for (const basename of CONFIG_BASENAMES) {
-    const candidate = `${root}/${basename}`;
-    let moduleNamespace: { default?: NextLoggerConfig; config?: NextLoggerConfig };
-    try {
-      moduleNamespace = (await import(/* webpackIgnore: true */ toFileUrl(candidate))) as {
-        default?: NextLoggerConfig;
-        config?: NextLoggerConfig;
-      };
-    } catch (error) {
-      if (isMissingModuleError(error, candidate)) {
-        continue;
-      }
-      if (isUnsupportedTypeScriptError(error)) {
-        throw new Error(
-          `${candidate} exists but this runtime cannot import TypeScript directly. ` +
-            'Use Node >= 22.18 (native type stripping), Bun, or Deno — or rename the config to .next-logger.mjs.',
-          { cause: error },
-        );
-      }
-      throw error;
-    }
-    const exported = moduleNamespace.default ?? moduleNamespace.config;
-    if (exported === undefined) {
-      throw new Error(`${candidate} must default-export LoggerOptions or a function returning them`);
-    }
-    fileOptions = typeof exported === 'function' ? await exported(env) : exported;
-    filePath = candidate;
-    break;
-  }
-
+  const { options: fileOptions, filePath } = await loadConfigFile(root, env);
   const envOptions = envToLoggerOptions(env);
   return {
     options: {
