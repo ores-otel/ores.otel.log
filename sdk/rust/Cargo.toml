@@ -18,7 +18,9 @@ name = "next_loggers"
 path = "src/lib.rs"
 
 [features]
-# Opt in explicitly: ordinary SDK consumers do not build a container launcher.
+# Opt in explicitly: ordinary SDK consumers do not build OS resource samplers or
+# the container launcher unless they need those effects.
+apm = ["dep:libc"]
 launcher = ["dep:libc"]
 
 [[bin]]
@@ -37,6 +39,6 @@ serde_json = "=1.0.151"
 time = { version = "=0.3.54", features = ["formatting"] }
 
 [target.'cfg(unix)'.dependencies]
-# Reuse the workspace's existing locked libc; no new version resolution.
-# Direct execve avoids execvp's implicit shell fallback on executable text.
+# Reuse the workspace's existing locked libc for the explicitly selected
+# launcher/APM OS effect boundaries; no new version resolution.
 libc = { version = "=0.2.189", optional = true }
