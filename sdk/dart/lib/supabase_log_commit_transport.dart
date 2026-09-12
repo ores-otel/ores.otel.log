@@ -5,9 +5,7 @@ import 'dart:math';
 
 typedef SupabaseLogTicketProvider = Future<String> Function();
 typedef CommitSocketConnector = Future<CommitSocket> Function(
-  Uri endpoint,
-  Map<String, String> headers,
-);
+    Uri endpoint, Map<String, String> headers);
 
 abstract interface class CommitSocket {
   Stream<Object?> get messages;
@@ -126,10 +124,7 @@ final class SupabaseLogCommitTransport {
   Future<void> sendBatch(List<SupabaseLogEnvelope> envelopes) {
     final immutable = List<SupabaseLogEnvelope>.unmodifiable(envelopes);
     final result = _tail.then<void>((_) => _sendAll(immutable));
-    _tail = result.then<void>(
-      (_) {},
-      onError: (Object _, StackTrace __) {},
-    );
+    _tail = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
     return result;
   }
 
@@ -184,18 +179,16 @@ final class SupabaseLogCommitTransport {
           );
         }
 
-        socket = await _connector(
-          options.endpoint,
-          <String, String>{'Authorization': 'Bearer $ticket'},
-        ).timeout(options.connectTimeout);
+        socket = await _connector(options.endpoint, <String, String>{
+          'Authorization': 'Bearer $ticket',
+        }).timeout(options.connectTimeout);
 
         socket.send(
           jsonEncode(<String, Object?>{
             'type': 'next_log_batch_v1',
             'batchId': batchId,
-            'events': events
-                .map((event) => event.toJson())
-                .toList(growable: false),
+            'events':
+                events.map((event) => event.toJson()).toList(growable: false),
           }),
         );
 
@@ -275,11 +268,13 @@ final class SupabaseLogCommitTransport {
   }
 
   String _newBatchId() {
-    final time =
-        DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(36);
-    final random = List<int>.generate(16, (_) => _random.nextInt(256))
-        .map((value) => value.toRadixString(16).padLeft(2, '0'))
-        .join();
+    final time = DateTime.now().toUtc().microsecondsSinceEpoch.toRadixString(
+          36,
+        );
+    final random = List<int>.generate(
+      16,
+      (_) => _random.nextInt(256),
+    ).map((value) => value.toRadixString(16).padLeft(2, '0')).join();
     return 'nlb_$time$random';
   }
 

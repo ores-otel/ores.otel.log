@@ -70,10 +70,10 @@ async fn interleaved_protocol_failures_keep_their_own_request_context() {
                 },
                 move |failure| {
                     assert_eq!(current_request_id(), Some(format!("request-{slot}")));
-                    reports
-                        .lock()
-                        .expect("report lock")
-                        .push((failure.context.request_id.clone(), failure.boundary.transport));
+                    reports.lock().expect("report lock").push((
+                        failure.context.request_id.clone(),
+                        failure.boundary.transport,
+                    ));
                 },
             )
             .await;
@@ -123,7 +123,10 @@ async fn operation_and_reporter_panics_are_contained_by_the_request_boundary() {
     assert_eq!(failure.context.request_id, "request-60");
     match failure.cause {
         RequestBoundaryCause::Panic(payload) => {
-            assert_eq!(payload.downcast_ref::<&'static str>(), Some(&"handler panic"));
+            assert_eq!(
+                payload.downcast_ref::<&'static str>(),
+                Some(&"handler panic")
+            );
         }
         other => panic!("unexpected cause: {other:?}"),
     }

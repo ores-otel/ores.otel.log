@@ -133,12 +133,8 @@ impl RequestBoundary {
             256,
             false,
         )?;
-        self.message_id = bounded_text(
-            "messageId",
-            self.message_id.unwrap_or_default(),
-            256,
-            false,
-        )?;
+        self.message_id =
+            bounded_text("messageId", self.message_id.unwrap_or_default(), 256, false)?;
 
         match (self.transport, self.scope) {
             (RequestTransport::Http, RequestScope::Request) => {
@@ -264,8 +260,7 @@ impl<C: fmt::Debug> fmt::Debug for RequestBoundaryFailure<C> {
     }
 }
 
-pub type RequestBoundaryResult<T, E> =
-    Result<T, RequestBoundaryFailure<RequestBoundaryCause<E>>>;
+pub type RequestBoundaryResult<T, E> = Result<T, RequestBoundaryFailure<RequestBoundaryCause<E>>>;
 
 fn observed_at_unix_ms() -> u64 {
     SystemTime::now()
