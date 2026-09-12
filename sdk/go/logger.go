@@ -271,6 +271,48 @@ type Logger struct {
 	closeErr  error
 }
 
+type loggerSnapshot struct {
+	appName       string
+	name          string
+	runtime       string
+	maxLevel      Level
+	fields        map[string]any
+	currentUser   map[string]any
+	transports    []Transport
+	console       bool
+	otelEnabled   bool
+	output        io.Writer
+	idFactory     func() string
+	clock         func() string
+	runtimeFields func() map[string]any
+}
+
+func (logger *Logger) snapshot() loggerSnapshot {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	return loggerSnapshot{
+		appName:       logger.AppName,
+		name:          logger.Name,
+		runtime:       logger.Runtime,
+		maxLevel:      logger.MaxLevel,
+		fields:        cloneContextMap(logger.Fields),
+		currentUser:   cloneContextMap(logger.CurrentUser),
+		transports:    append([]Transport(nil), logger.Transports...),
+		console:       logger.Console,
+		otelEnabled:   logger.OtelEnabled,
+		output:        logger.Output,
+		idFactory:     logger.IDFactory,
+		clock:         logger.Clock,
+		runtimeFields: logger.RuntimeFields,
+	}
+}
+
+func (logger *Logger) transportSnapshot() []Transport {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
+	return append([]Transport(nil), logger.Transports...)
+}
+
 func NewLogger(options Options) *Logger {
 	if options.AppName == "" {
 		options.AppName = "app"
@@ -301,8 +343,8 @@ func NewLogger(options Options) *Logger {
 		Name:          options.Name,
 		Runtime:       options.Runtime,
 		MaxLevel:      options.MaxLevel,
-		Fields:        cloneMap(options.Fields),
-		CurrentUser:   cloneMap(options.LoggedInUser),
+		Fields:        cloneContextMap(options.Fields),
+		CurrentUser:   cloneContextMap(options.LoggedInUser),
 		Transports:    append([]Transport(nil), options.Transports...),
 		Console:       options.Console,
 		OtelEnabled:   otelEnabled,
@@ -403,7 +445,7 @@ func (logger *Logger) newEvent(level Level, values []any) *Event {
 	event := &Event{
 		Logger:       logger,
 		Level:        level,
-		Values:       append([]any(nil), values...),
+		Values:       cloneContextSlice(values),
 		Fields:       map[string]any{},
 		LoggedInUser: map[string]any{},
 	}
@@ -420,33 +462,62 @@ func (logger *Logger) Error(values ...any) *Event { return logger.newEvent(Error
 func (logger *Logger) Fatal(values ...any) *Event { return logger.newEvent(Fatal, values) }
 
 func (logger *Logger) AddFields(fields map[string]any) *Logger {
+	snapshot := cloneContextMap(fields)
 	logger.mu.Lock()
 	defer logger.mu.Unlock()
-	for key, value := range fields {
+	if logger.Fields == nil {
+		logger.Fields = make(map[string]any, len(snapshot))
+	}
+	for key, value := range snapshot {
 		logger.Fields[key] = value
 	}
 	return logger
 }
 
 func (logger *Logger) SetCurrentUser(user map[string]any) *Logger {
+	snapshot := cloneContextMap(user)
 	logger.mu.Lock()
 	defer logger.mu.Unlock()
-	for key, value := range user {
+	if logger.CurrentUser == nil {
+		logger.CurrentUser = make(map[string]any, len(snapshot))
+	}
+	for key, value := range snapshot {
 		logger.CurrentUser[key] = value
 	}
 	return logger
 }
 
-func (event *Event) AddFields(fields map[string]any) *Event {
-	for key, value := range fields {
-		event.Fields[key] = value
+// mutate serializes builder methods, invalidates a pre-send materialization,
+// and makes Send the terminal state. Late builder calls remain source-compatible
+// no-ops instead of racing an in-flight or already-delivered record.
+func (event *Event) mutate(update func()) *Event {
+	event.mu.Lock()
+	defer event.mu.Unlock()
+	if event.sent {
+		return event
 	}
+	update()
+	event.record = nil
 	return event
 }
 
+func (event *Event) AddFields(fields map[string]any) *Event {
+	return event.mutate(func() {
+		snapshot := cloneContextMap(fields)
+		if event.Fields == nil {
+			event.Fields = make(map[string]any, len(snapshot))
+		}
+		for key, value := range snapshot {
+			event.Fields[key] = value
+		}
+	})
+}
+
 func (event *Event) WithOtel(enabled bool) *Event {
-	event.OtelEnabled = &enabled
-	return event
+	return event.mutate(func() {
+		value := enabled
+		event.OtelEnabled = &value
+	})
 }
 
 func (event *Event) WithOTel(enabled bool) *Event { return event.WithOtel(enabled) }
@@ -456,13 +527,16 @@ func (event *Event) NotOtel() *Event              { return event.WithOtel(false)
 func (event *Event) NotOTel() *Event              { return event.NotOtel() }
 
 func (event *Event) ResetOtel() *Event {
-	event.OtelEnabled = nil
-	return event
+	return event.mutate(func() {
+		event.OtelEnabled = nil
+	})
 }
 
 func (event *Event) ResetOTel() *Event { return event.ResetOtel() }
 
 func (event *Event) IsOtelEnabled(fallback bool) bool {
+	event.mu.Lock()
+	defer event.mu.Unlock()
 	if event.OtelEnabled == nil {
 		return fallback
 	}
@@ -472,6 +546,8 @@ func (event *Event) IsOtelEnabled(fallback bool) bool {
 func (event *Event) IsOTelEnabled(fallback bool) bool { return event.IsOtelEnabled(fallback) }
 
 func (logger *Logger) UseOtel() *Logger {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
 	logger.OtelEnabled = true
 	return logger
 }
@@ -479,6 +555,8 @@ func (logger *Logger) UseOtel() *Logger {
 func (logger *Logger) UseOTel() *Logger { return logger.UseOtel() }
 
 func (logger *Logger) NotOtel() *Logger {
+	logger.mu.Lock()
+	defer logger.mu.Unlock()
 	logger.OtelEnabled = false
 	return logger
 }
@@ -499,11 +577,13 @@ func (event *Event) AddTrace(traceID string, makeFirst ...bool) *Event {
 	if value == "" {
 		return event
 	}
-	if event.TraceID == "" || (len(makeFirst) > 0 && makeFirst[0]) {
-		event.TraceID = value
-	}
-	event.TraceIDs = appendUnique(event.TraceIDs, value)
-	return event
+	primary := len(makeFirst) > 0 && makeFirst[0]
+	return event.mutate(func() {
+		if event.TraceID == "" || primary {
+			event.TraceID = value
+		}
+		event.TraceIDs = appendUnique(event.TraceIDs, value)
+	})
 }
 
 func (event *Event) AddTraceID(traceID string, makeFirst ...bool) *Event {
@@ -511,44 +591,62 @@ func (event *Event) AddTraceID(traceID string, makeFirst ...bool) *Event {
 }
 
 func (event *Event) AddRoutineID(routineID string) *Event {
-	event.RoutineID = routineID
-	return event
+	return event.mutate(func() {
+		event.RoutineID = routineID
+	})
 }
 
 func (event *Event) AddTags(tags ...string) *Event {
+	values := make([]string, 0, len(tags))
 	for _, tag := range tags {
 		if value := strings.TrimSpace(tag); value != "" {
-			event.Tags = appendUnique(event.Tags, value)
+			values = append(values, value)
 		}
 	}
-	return event
+	return event.mutate(func() {
+		for _, value := range values {
+			event.Tags = appendUnique(event.Tags, value)
+		}
+	})
 }
 
 func (event *Event) AddContext(value any) *Event {
-	event.Context = append(event.Context, value)
-	return event
+	return event.mutate(func() {
+		event.Context = append(event.Context, cloneContextAny(value))
+	})
 }
 
 func (event *Event) AddMeta(value any) *Event {
-	event.Meta = append(event.Meta, value)
-	return event
+	return event.mutate(func() {
+		event.Meta = append(event.Meta, cloneContextAny(value))
+	})
 }
 
 func (event *Event) AddLoggedInUserInfo(user map[string]any) *Event {
-	for key, value := range user {
-		event.LoggedInUser[key] = value
-	}
-	return event
+	return event.mutate(func() {
+		snapshot := cloneContextMap(user)
+		if event.LoggedInUser == nil {
+			event.LoggedInUser = make(map[string]any, len(snapshot))
+		}
+		for key, value := range snapshot {
+			event.LoggedInUser[key] = value
+		}
+	})
 }
 
 func (event *Event) AddLoggedInUserID(id string) *Event {
-	event.LoggedInUser["id"] = id
-	return event
+	return event.mutate(func() {
+		if event.LoggedInUser == nil {
+			event.LoggedInUser = make(map[string]any, 1)
+		}
+		event.LoggedInUser["id"] = id
+	})
 }
 
 func (event *Event) AddUserInfo(user map[string]any) *Event {
-	event.Users = append(event.Users, cloneMap(user))
-	return event
+	return event.mutate(func() {
+		event.Users = append(event.Users, cloneContextMap(user))
+	})
 }
 
 func (event *Event) ToRecord() LogRecord {
@@ -557,16 +655,17 @@ func (event *Event) ToRecord() LogRecord {
 	if event.record != nil {
 		return cloneLogRecord(*event.record)
 	}
-	fields := cloneMap(event.Logger.Fields)
+	logger := event.Logger.snapshot()
+	fields := logger.fields
 	for key, value := range event.Fields {
 		fields[key] = value
 	}
-	if event.Logger.RuntimeFields != nil {
-		for key, value := range event.Logger.RuntimeFields() {
+	if logger.runtimeFields != nil {
+		for key, value := range cloneContextMap(logger.runtimeFields()) {
 			fields[key] = value
 		}
 	}
-	user := cloneMap(event.Logger.CurrentUser)
+	user := logger.currentUser
 	for key, value := range event.LoggedInUser {
 		user[key] = value
 	}
@@ -582,12 +681,12 @@ func (event *Event) ToRecord() LogRecord {
 	}
 	record := LogRecord{
 		Schema:       Schema,
-		ID:           event.Logger.IDFactory(),
-		Timestamp:    event.Logger.Clock(),
+		ID:           logger.idFactory(),
+		Timestamp:    logger.clock(),
 		Level:        event.Level,
-		Runtime:      event.Logger.Runtime,
-		AppName:      event.Logger.AppName,
-		Name:         event.Logger.Name,
+		Runtime:      logger.runtime,
+		AppName:      logger.appName,
+		Name:         logger.name,
 		Message:      strings.Join(parts, " "),
 		Values:       values,
 		Fields:       normalizeObject(fields),
@@ -637,20 +736,21 @@ func (logger *Logger) emit(event *Event, store bool) error {
 	logger.mu.Lock()
 	delete(logger.unsent, event)
 	logger.mu.Unlock()
-	if levelIndex[event.Level] < levelIndex[logger.MaxLevel] {
+	state := logger.snapshot()
+	if levelIndex[event.Level] < levelIndex[state.maxLevel] {
 		return nil
 	}
 	record := event.ToRecord()
-	if logger.Console {
-		fmt.Fprintf(logger.Output, "[%s] [%s] [%s] %s\n",
+	if state.console {
+		fmt.Fprintf(state.output, "[%s] [%s] [%s] %s\n",
 			record.Timestamp, record.Level, record.AppName, record.Message)
 	}
 	if !store {
 		return nil
 	}
 	var failures []error
-	for _, transport := range logger.Transports {
-		if marker, ok := transport.(openTelemetryTransport); ok && marker.IsOpenTelemetry() && !event.IsOtelEnabled(logger.OtelEnabled) {
+	for _, transport := range state.transports {
+		if marker, ok := transport.(openTelemetryTransport); ok && marker.IsOpenTelemetry() && !event.IsOtelEnabled(state.otelEnabled) {
 			continue
 		}
 		if err := transport.Write(cloneLogRecord(record)); err != nil {
@@ -741,7 +841,7 @@ func (logger *Logger) FlushContext(ctx context.Context, sendUnsent bool) error {
 			}
 		}
 	}
-	for _, transport := range logger.Transports {
+	for _, transport := range logger.transportSnapshot() {
 		if err := flushTransport(ctx, transport); err != nil {
 			failures = append(failures, err)
 		}
@@ -766,7 +866,7 @@ func (logger *Logger) FlushOnExitContext(ctx context.Context) error {
 		}
 		recovered = append(recovered, event.ToRecord())
 	}
-	for _, transport := range logger.Transports {
+	for _, transport := range logger.transportSnapshot() {
 		if err := flushTransportOnExit(ctx, transport, recovered); err != nil {
 			failures = append(failures, err)
 		}
@@ -803,7 +903,7 @@ func (logger *Logger) CloseContext(ctx context.Context) error {
 		if err := logger.FlushOnExitContext(ctx); err != nil {
 			failures = append(failures, err)
 		}
-		for _, transport := range logger.Transports {
+		for _, transport := range logger.transportSnapshot() {
 			if err := closeTransport(ctx, transport); err != nil {
 				failures = append(failures, err)
 			}
