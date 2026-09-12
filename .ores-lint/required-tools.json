@@ -1,15 +1,17 @@
 {
-  "_comment": "Tool versions ores-lint expects. These are DECLARATIONS, not dependencies - nothing here is ever installed into a repo's node_modules. Install them once, globally. The rollout script mirrors this block into each package.json under the `oresLint` key so the requirement travels with the repo.",
+  "_comment": "Tool versions ores-lint expects. These are DECLARATIONS, not dependencies - nothing here is ever installed into a repo's node_modules. Install them once, globally. The rollout script mirrors this block into each package.json under the `oresLint` key so the requirement travels with the repo. ciVersion is the exact reviewable version used by GitHub Actions; range remains the compatibility contract for local and fleet installs.",
   "eslint": {
     "minMajor": 9,
     "range": ">=9",
-    "install": "npm i -g eslint",
+    "ciVersion": "10.7.0",
+    "install": "npm i -g eslint@10.7.0",
     "why": "flat config (eslint.config.mjs) requires ESLint 9 or newer"
   },
   "typescript-eslint": {
     "minMajor": 8,
     "range": ">=8",
-    "install": "npm i -g typescript-eslint",
+    "ciVersion": "8.70.0",
+    "install": "npm i -g typescript-eslint@8.70.0",
     "why": "optional; without it .ts/.tsx files are skipped rather than linted"
   },
   "clippy": {
