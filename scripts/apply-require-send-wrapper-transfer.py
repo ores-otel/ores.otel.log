@@ -10,12 +10,27 @@ ROOT = Path(__file__).resolve().parents[1]
 def replace_once(path: str, old: str, new: str) -> None:
     target = ROOT / path
     text = target.read_text(encoding="utf-8")
-    if new in text:
-        return
     count = text.count(old)
-    if count != 1:
-        raise RuntimeError(f"{path}: expected one source fragment, found {count}")
-    target.write_text(text.replace(old, new, 1), encoding="utf-8")
+    if count == 1:
+        target.write_text(text.replace(old, new, 1), encoding="utf-8")
+        return
+    if count == 0 and new in text:
+        return
+    raise RuntimeError(f"{path}: expected one source fragment, found {count}")
+
+
+def remove_exactly(path: str, fragment: str, expected_count: int) -> None:
+    target = ROOT / path
+    text = target.read_text(encoding="utf-8")
+    count = text.count(fragment)
+    if count == expected_count:
+        target.write_text(text.replace(fragment, ""), encoding="utf-8")
+        return
+    if count == 0:
+        return
+    raise RuntimeError(
+        f"{path}: expected {expected_count} removable fragments or zero after repair, found {count}"
+    )
 
 
 replace_once(
@@ -130,14 +145,11 @@ replace_once(
 """,
 )
 
-for _ in range(2):
-    replace_once(
-        "tests/supabase-realtime-portability.test.mjs",
-        """  // eslint-disable-next-line no-undef
-  delete globalThis.atob;
+remove_exactly(
+    "tests/supabase-realtime-portability.test.mjs",
+    """  // eslint-disable-next-line no-undef
 """,
-        """  delete globalThis.atob;
-""",
-    )
+    2,
+)
 
 print("require-send wrapper transfer hardening applied")
