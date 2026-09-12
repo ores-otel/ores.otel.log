@@ -1,0 +1,41 @@
+name: ORES trace marker contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  ores-trace-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify static ORES trace markers
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const cp = require('node:child_process');
+          const path = require('node:path');
+          const sourceExts = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
+          const ignored = /(^|\/)(node_modules|dist|build|coverage|vendor|generated)(\/|$)/;
+          const files = cp.execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean).filter((file) => sourceExts.has(path.extname(file)) && !ignored.test(file));
+          const failures = [];
+          for (const file of files) {
+            const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+            lines.forEach((line, index) => {
+              const lineNo = index + 1;
+              if (line.includes('dd-trace-')) failures.push(`${file}:${lineNo}: legacy dd-trace-* marker; use ores-trace-*`);
+              const staticCall = line.match(/\.(addTrace(?:Id)?)\(\s*(['"`])([^'"`]+)\2/);
+              if (staticCall && !/^ores-trace-[A-Za-z0-9_-]{12,64}$/.test(staticCall[3])) failures.push(`${file}:${lineNo}: literal ${staticCall[1]}() id must match ores-trace-[A-Za-z0-9_-]{12,64}`);
+              if (/\b(?:const|let|var)\s+\w*trace\w*\s*=\s*(['"`])ores-trace-[^'"`]+\1/i.test(line)) failures.push(`${file}:${lineNo}: static ores-trace-* ids belong inline in addTrace()/addTraceId(), not trace variables`);
+              const routine = line.match(/\bconst\s+routineId\s*=\s*(['"`])([^'"`]+)\1/);
+              if (routine && !/^ores-routine-[A-Za-z0-9_-]{12,64}$/.test(routine[2])) failures.push(`${file}:${lineNo}: routineId must match ores-routine-[A-Za-z0-9_-]{12,64}`);
+            });
+          }
+          if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
+          console.log(`checked ${files.length} JS/TS source files for ORES trace marker conventions`);
+          NODE
