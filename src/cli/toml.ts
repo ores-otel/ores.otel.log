@@ -3,8 +3,9 @@
  *
  * Deliberately NOT a general TOML parser. It supports exactly what the
  * flags-2-env format needs — tables, bare/quoted keys, basic strings,
- * integers, floats, booleans, and single-line arrays of strings — and throws
- * on anything else.
+ * integers, floats, booleans, and homogeneous (single- or multi-line) arrays
+ * of strings or numbers, which `.ores-otel.toml` histogram boundaries need —
+ * and throws on anything else.
  *
  * Failing closed is the entire value here. The upstream C parser silently
  * ignores unknown sections and unknown keys, so `alias =` instead of
@@ -12,7 +13,7 @@
  * drift test pass while the contract quietly rotted.
  */
 
-export type TomlValue = string | number | boolean | string[] | TomlTable;
+export type TomlValue = string | number | boolean | string[] | number[] | TomlTable;
 export interface TomlTable {
   [key: string]: TomlValue;
 }
@@ -107,7 +108,34 @@ function bracketDepth(line: string): number {
   return depth;
 }
 
-function parseArray(raw: string, lineNumber: number): string[] {
+const INTEGER = /^[+-]?\d+$/;
+const FLOAT = /^[+-]?(\d+\.\d+|\d+[eE][+-]?\d+|\d+\.\d+[eE][+-]?\d+)$/;
+
+function parseArrayItem(item: string, lineNumber: number): string | number {
+  if (item.startsWith('"')) {
+    return parseString(item, lineNumber);
+  }
+  if (INTEGER.test(item)) {
+    return Number.parseInt(item, 10);
+  }
+  if (FLOAT.test(item)) {
+    return Number.parseFloat(item);
+  }
+  throw new TomlError(`arrays may contain only strings or numbers, got ${item}`, lineNumber);
+}
+
+function parseArray(raw: string, lineNumber: number): string[] | number[] {
+  const values = splitArrayItems(raw).map((item) => parseArrayItem(item, lineNumber));
+  if (values.every((value): value is string => typeof value === 'string')) {
+    return values;
+  }
+  if (values.every((value): value is number => typeof value === 'number')) {
+    return values;
+  }
+  throw new TomlError('arrays must not mix strings and numbers', lineNumber);
+}
+
+function splitArrayItems(raw: string): string[] {
   const body = raw.slice(1, -1).trim();
   if (body === '') {
     return [];
@@ -136,7 +164,7 @@ function parseArray(raw: string, lineNumber: number): string[] {
   if (current.trim() !== '') {
     items.push(current.trim());
   }
-  return items.map((item) => parseString(item, lineNumber));
+  return items;
 }
 
 function parseValue(raw: string, lineNumber: number): TomlValue {
