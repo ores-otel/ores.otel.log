@@ -54,6 +54,14 @@ fn startup_logger() -> Logger {
     )
 }
 
+/// `fields` plus the `event.name` attribute, as a new map.
+fn with_event(fields: JsonObject, event_name: &str) -> JsonObject {
+    fields
+        .into_iter()
+        .chain([("event.name".into(), json!(event_name))])
+        .collect()
+}
+
 fn command_fields(argv: &[OsString]) -> JsonObject {
     JsonObject::from_iter([
         ("process.pid".into(), json!(std::process::id())),
@@ -86,11 +94,9 @@ pub fn run(argv: Vec<OsString>) -> ExitCode {
         return ExitCode::from(64);
     }
 
-    let mut fields = command_fields(&argv);
-    fields.insert("event.name".into(), json!("process.exec.attempt"));
     let _ = logger
         .info(vec![json!("command is")])
-        .add_fields(fields)
+        .add_fields(with_event(command_fields(&argv), "process.exec.attempt"))
         .send();
     // exec does not run destructors. Explicitly finish synchronous logging first.
     let _ = logger.flush(false);
@@ -100,11 +106,14 @@ pub fn run(argv: Vec<OsString>) -> ExitCode {
     let failure = exec::replace(&argv);
     let error = failure.error;
     if failure.can_log {
-        let mut fields = command_fields(&argv);
-        fields.insert("event.name".into(), json!("process.exec.failed"));
-        fields.insert("error.kind".into(), json!(format!("{:?}", error.kind())));
-        fields.insert("error.os_code".into(), json!(error.raw_os_error()));
         // Avoid error strings that might embed raw command arguments in the future.
+        let fields: JsonObject = with_event(command_fields(&argv), "process.exec.failed")
+            .into_iter()
+            .chain([
+                ("error.kind".into(), json!(format!("{:?}", error.kind()))),
+                ("error.os_code".into(), json!(error.raw_os_error())),
+            ])
+            .collect();
         let _ = logger
             .error(vec![json!("cannot execute command")])
             .add_fields(fields)

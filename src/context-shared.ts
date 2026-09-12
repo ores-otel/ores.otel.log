@@ -90,6 +90,13 @@ export function getGlobalAsyncLocalStorage(): AsyncLocalStorageConstructor | und
 const MAX_CONTEXT_CLONE_DEPTH = 128;
 const MAX_CONTEXT_CLONE_NODES = 10_000;
 
+// HOT-PATH (imperative by design): the recursive context snapshot runs on every
+// context read and write (per request, per log call with ambient context). The
+// visit state is shared by every level of the recursion so cycles and shared
+// references resolve to the same copy; threading an immutable state through
+// each return would rebuild the seen-map or the counter per node. The state is
+// created inside `cloneContextValue` and never escapes it; callers receive a
+// detached value graph.
 interface ContextCloneState {
   readonly seen: WeakMap<object, object>;
   nodes: number;
@@ -138,6 +145,21 @@ function cloneArrayBufferLike(value: ArrayBufferLike): ArrayBufferLike {
   const copy = new ArrayBuffer(value.byteLength);
   new Uint8Array(copy).set(new Uint8Array(value));
   return copy;
+}
+
+function cloneArrayBufferView(value: ArrayBufferView, buffer: ArrayBufferLike): ArrayBufferView {
+  if (value instanceof DataView) {
+    return new DataView(buffer, value.byteOffset, value.byteLength);
+  }
+  const source = value as Exclude<ArrayBufferView, DataView> & {
+    readonly length: number;
+  };
+  const Constructor = source.constructor as new (
+    buffer: ArrayBufferLike,
+    byteOffset?: number,
+    length?: number,
+  ) => ArrayBufferView;
+  return new Constructor(buffer, source.byteOffset, source.length);
 }
 
 function cloneContextValueInternal(
@@ -214,20 +236,7 @@ function cloneContextValueInternal(
       state,
       depth + 1,
     ) as ArrayBufferLike;
-    let copy: ArrayBufferView;
-    if (value instanceof DataView) {
-      copy = new DataView(clonedBuffer, value.byteOffset, value.byteLength);
-    } else {
-      const source = value as Exclude<ArrayBufferView, DataView> & {
-        readonly length: number;
-      };
-      const Constructor = source.constructor as new (
-        buffer: ArrayBufferLike,
-        byteOffset?: number,
-        length?: number,
-      ) => ArrayBufferView;
-      copy = new Constructor(clonedBuffer, source.byteOffset, source.length);
-    }
+    const copy = cloneArrayBufferView(value, clonedBuffer);
     state.seen.set(object, copy as object);
     return copy;
   }
@@ -283,44 +292,57 @@ export function cloneLogContext(context: LogContext): LogContext {
 }
 
 /**
- * Merge a caller-owned patch into an already-owned active frame. The patch is
- * recursively snapshotted before any of its values become observable.
+ * The keys a caller-owned patch changes when merged over `current`, as a new
+ * partial frame: objects merge, lists append, trace ids and tags de-duplicate
+ * in first-seen order, and present scalars replace their parent value. Neither
+ * argument is written to; the patch is recursively snapshotted before any of
+ * its values become observable.
+ */
+function logContextChanges(current: LogContext, patch: LogContext): Partial<LogContext> {
+  const ownedPatch = cloneLogContext(patch);
+  const existingTraces = current.traceIds ?? (current.traceId ? [current.traceId] : []);
+  // The primary trace id is folded in first, then the patch list, so order and
+  // de-duplication match successive updates.
+  const withPrimary = ownedPatch.traceId
+    ? Array.from(new Set([...existingTraces, ownedPatch.traceId]))
+    : undefined;
+  const traceIds =
+    ownedPatch.traceIds && ownedPatch.traceIds.length > 0
+      ? Array.from(
+          new Set([...(withPrimary ?? current.traceIds ?? existingTraces), ...ownedPatch.traceIds]),
+        )
+      : withPrimary;
+  return {
+    ...(ownedPatch.loggedInUser
+      ? { loggedInUser: { ...(current.loggedInUser ?? {}), ...ownedPatch.loggedInUser } }
+      : {}),
+    ...(ownedPatch.users && ownedPatch.users.length > 0
+      ? { users: [...(current.users ?? []), ...ownedPatch.users] }
+      : {}),
+    ...(ownedPatch.fields ? { fields: { ...(current.fields ?? {}), ...ownedPatch.fields } } : {}),
+    ...(ownedPatch.traceId ? { traceId: ownedPatch.traceId } : {}),
+    ...(traceIds ? { traceIds } : {}),
+    ...(ownedPatch.routineId ? { routineId: ownedPatch.routineId } : {}),
+    ...(ownedPatch.tags && ownedPatch.tags.length > 0
+      ? { tags: Array.from(new Set([...(current.tags ?? []), ...ownedPatch.tags])) }
+      : {}),
+  };
+}
+
+/** The frame that results from merging `patch` over `current`, as a new object. */
+export function mergedLogContext(current: LogContext, patch: LogContext): LogContext {
+  return { ...current, ...logContextChanges(current, patch) };
+}
+
+/**
+ * Merge a caller-owned patch into the already-owned *active* frame. This is the
+ * one in-place write in this module: an AsyncLocalStorage frame cannot be
+ * swapped for a new object without re-entering `run`, so `updateLogContext`
+ * must edit the frame the store already holds. The changed keys are computed
+ * as a value first; only their assignment is an effect.
  */
 export function mergeLogContext(current: LogContext, patch: LogContext): void {
-  const ownedPatch = cloneLogContext(patch);
-  if (ownedPatch.loggedInUser) {
-    current.loggedInUser = {
-      ...(current.loggedInUser ?? {}),
-      ...ownedPatch.loggedInUser,
-    };
-  }
-  if (ownedPatch.users && ownedPatch.users.length > 0) {
-    current.users = [...(current.users ?? []), ...ownedPatch.users];
-  }
-  if (ownedPatch.fields) {
-    current.fields = { ...(current.fields ?? {}), ...ownedPatch.fields };
-  }
-  const existingTraces =
-    current.traceIds ?? (current.traceId ? [current.traceId] : []);
-  if (ownedPatch.traceId) {
-    current.traceId = ownedPatch.traceId;
-    current.traceIds = Array.from(
-      new Set([...existingTraces, ownedPatch.traceId]),
-    );
-  }
-  if (ownedPatch.traceIds && ownedPatch.traceIds.length > 0) {
-    current.traceIds = Array.from(
-      new Set([...(current.traceIds ?? existingTraces), ...ownedPatch.traceIds]),
-    );
-  }
-  if (ownedPatch.routineId) {
-    current.routineId = ownedPatch.routineId;
-  }
-  if (ownedPatch.tags && ownedPatch.tags.length > 0) {
-    current.tags = Array.from(
-      new Set([...(current.tags ?? []), ...ownedPatch.tags]),
-    );
-  }
+  Object.assign(current, logContextChanges(current, patch));
 }
 
 function nonEmptyString(value: unknown): string | undefined {
@@ -394,10 +416,9 @@ export function createLogContextApi(
     runWithMergedLogContext: (patch, callback) => {
       const current = logContextStorage.getStore();
       const next =
-        current === undefined ? cloneLogContext(patch) : cloneLogContext(current);
-      if (current !== undefined) {
-        mergeLogContext(next, patch);
-      }
+        current === undefined
+          ? cloneLogContext(patch)
+          : mergedLogContext(cloneLogContext(current), patch);
       return logContextStorage.run(next, callback);
     },
     getLogContext: () => {

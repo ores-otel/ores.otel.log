@@ -1,0 +1,345 @@
+name: Apply Java context handoff hardening
+
+on:
+  push:
+    branches:
+      - hardening/java-context-handoff-20260911
+    paths:
+      - .github/workflows/apply-java-context-handoff.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact branch head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Verify exact candidate identity
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Set up Java 21 runtime
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Apply exact snapshot and handoff repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java')
+          text = path.read_text()
+          old_import = '''import java.util.LinkedHashMap;
+          import java.util.LinkedHashSet;
+          import java.util.List;
+'''
+          new_import = '''import java.util.IdentityHashMap;
+          import java.util.LinkedHashMap;
+          import java.util.LinkedHashSet;
+          import java.util.List;
+'''
+          if text.count(old_import) != 1:
+              raise SystemExit('Java imports drifted')
+          text = text.replace(old_import, new_import, 1)
+
+          scope_marker = '''  public static TraceContext currentContext() {
+              Deque<TraceContext> stack = CONTEXT.get();
+              return stack.isEmpty() ? null : stack.peek();
+            }
+
+          public static final class Scope implements AutoCloseable {
+'''
+          scope_replacement = '''  public static TraceContext currentContext() {
+              Deque<TraceContext> stack = CONTEXT.get();
+              return stack.isEmpty() ? null : stack.peek();
+            }
+
+            /** Immutable carrier captured for an executor, virtual thread, or callback. */
+            public static TraceContext captureContext() {
+              return currentContext();
+            }
+
+            /** Re-enter the captured frame explicitly; ordinary executor submission inherits nothing. */
+            public static <T> java.util.concurrent.Callable<T> wrapContext(
+                java.util.concurrent.Callable<T> callback) {
+              Objects.requireNonNull(callback, "callback");
+              TraceContext captured = captureContext();
+              return () -> {
+                if (captured == null) return callback.call();
+                try (Scope ignored = withContext(captured)) {
+                  return callback.call();
+                }
+              };
+            }
+
+            /** Runnable variant for thread builders and Executor.execute. */
+            public static Runnable wrapContext(Runnable callback) {
+              Objects.requireNonNull(callback, "callback");
+              TraceContext captured = captureContext();
+              return () -> {
+                if (captured == null) {
+                  callback.run();
+                  return;
+                }
+                try (Scope ignored = withContext(captured)) {
+                  callback.run();
+                }
+              };
+            }
+
+          public static final class Scope implements AutoCloseable {
+'''
+          if text.count(scope_marker) != 1:
+              raise SystemExit('Java context scope marker drifted')
+          text = text.replace(scope_marker, scope_replacement, 1)
+
+          old_copy = '''  private static <K, V> Map<K, V> immutableCopy(Map<K, V> value) {
+              return value == null || value.isEmpty() ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(value));
+            }
+
+            private static <K, V> Map<K, V> mutableCopy(Map<K, V> value) {
+'''
+          new_copy = '''  private static final int MAX_CONTEXT_SNAPSHOT_DEPTH = 128;
+            private static final int MAX_CONTEXT_SNAPSHOT_NODES = 10_000;
+
+            private static Object snapshotContextValue(
+                Object value,
+                IdentityHashMap<Object, Boolean> active,
+                int depth,
+                int[] nodes) {
+              if (value == null || value instanceof String || value instanceof Number
+                  || value instanceof Boolean || value instanceof Character || value instanceof Enum<?>) {
+                return value;
+              }
+              if (depth > MAX_CONTEXT_SNAPSHOT_DEPTH) {
+                throw new IllegalArgumentException("context snapshot exceeds maximum depth");
+              }
+              if (value instanceof Map<?, ?> map) {
+                if (active.put(value, Boolean.TRUE) != null) {
+                  throw new IllegalArgumentException("cyclic Java context collections are not supported");
+                }
+                nodes[0] += 1;
+                if (nodes[0] > MAX_CONTEXT_SNAPSHOT_NODES) {
+                  throw new IllegalArgumentException("context snapshot exceeds maximum node count");
+                }
+                try {
+                  Map<Object, Object> copy = new LinkedHashMap<>();
+                  for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    copy.put(
+                        snapshotContextValue(entry.getKey(), active, depth + 1, nodes),
+                        snapshotContextValue(entry.getValue(), active, depth + 1, nodes));
+                  }
+                  return Collections.unmodifiableMap(copy);
+                } finally {
+                  active.remove(value);
+                }
+              }
+              if (value instanceof Collection<?> collection) {
+                if (active.put(value, Boolean.TRUE) != null) {
+                  throw new IllegalArgumentException("cyclic Java context collections are not supported");
+                }
+                nodes[0] += 1;
+                if (nodes[0] > MAX_CONTEXT_SNAPSHOT_NODES) {
+                  throw new IllegalArgumentException("context snapshot exceeds maximum node count");
+                }
+                try {
+                  List<Object> copy = new ArrayList<>(collection.size());
+                  for (Object item : collection) {
+                    copy.add(snapshotContextValue(item, active, depth + 1, nodes));
+                  }
+                  return Collections.unmodifiableList(copy);
+                } finally {
+                  active.remove(value);
+                }
+              }
+              // Application objects are explicit opaque handles; never invoke
+              // serialization hooks or reflective getters during admission.
+              return value;
+            }
+
+            @SuppressWarnings("unchecked")
+            private static <K, V> Map<K, V> immutableCopy(Map<K, V> value) {
+              if (value == null || value.isEmpty()) return Map.of();
+              return (Map<K, V>) snapshotContextValue(
+                  value,
+                  new IdentityHashMap<>(),
+                  0,
+                  new int[] {0});
+            }
+
+            private static <K, V> Map<K, V> mutableCopy(Map<K, V> value) {
+'''
+          if text.count(old_copy) != 1:
+              raise SystemExit('Java immutableCopy fragment drifted')
+          text = text.replace(old_copy, new_copy, 1)
+          path.write_text(text)
+
+          test_path = Path('sdk/java/src/test/java/com/oresoftware/nextloggers/NextLoggersContextHandoffTest.java')
+          test_path.write_text(r'''package com.oresoftware.nextloggers;
+
+          import java.util.ArrayList;
+          import java.util.LinkedHashMap;
+          import java.util.List;
+          import java.util.Map;
+          import java.util.concurrent.ExecutorService;
+          import java.util.concurrent.Executors;
+          import java.util.concurrent.Future;
+
+          public final class NextLoggersContextHandoffTest {
+            public static void main(String[] args) throws Exception {
+              nestedCollectionsAreOwnedAndImmutable();
+              executorHandoffIsExplicitAndRestores();
+              reusedPoolNeverLeaksBetweenTenants();
+              virtualThreadHandoffIsExplicitWhenAvailable();
+              cyclicCollectionsFailClosed();
+            }
+
+            @SuppressWarnings("unchecked")
+            private static void nestedCollectionsAreOwnedAndImmutable() {
+              Map<String, Object> tenant = new LinkedHashMap<>();
+              tenant.put("id", "tenant-a");
+              List<Object> regions = new ArrayList<>();
+              regions.add("west");
+              tenant.put("regions", regions);
+              Map<String, Object> fields = new LinkedHashMap<>();
+              fields.put("tenant", tenant);
+
+              NextLoggers.TraceContext context = new NextLoggers.TraceContext(
+                  "trace-a", "span-a", 1, "", Map.of(), fields, List.of("request"));
+              tenant.put("id", "attacker");
+              regions.add("east");
+
+              Map<String, Object> observedTenant =
+                  (Map<String, Object>) context.fields().get("tenant");
+              assert observedTenant.get("id").equals("tenant-a");
+              assert observedTenant.get("regions").equals(List.of("west"));
+              assertThrows(UnsupportedOperationException.class,
+                  () -> observedTenant.put("id", "mutated"));
+              assertThrows(UnsupportedOperationException.class,
+                  () -> ((List<Object>) observedTenant.get("regions")).add("mutated"));
+            }
+
+            private static void executorHandoffIsExplicitAndRestores() throws Exception {
+              ExecutorService executor = Executors.newSingleThreadExecutor();
+              try {
+                Future<String> wrapped;
+                try (NextLoggers.Scope ignored = NextLoggers.withContext(
+                    new NextLoggers.TraceContext("captured", "span", 1))) {
+                  wrapped = executor.submit(NextLoggers.wrapContext(
+                      (java.util.concurrent.Callable<String>) () ->
+                          NextLoggers.currentContext().traceId()));
+                }
+                assert wrapped.get().equals("captured");
+                assert executor.submit(() -> NextLoggers.currentContext() == null).get();
+                assert NextLoggers.currentContext() == null;
+              } finally {
+                executor.shutdownNow();
+              }
+            }
+
+            private static void reusedPoolNeverLeaksBetweenTenants() throws Exception {
+              ExecutorService executor = Executors.newFixedThreadPool(4);
+              try {
+                List<Future<String>> futures = new ArrayList<>();
+                for (int index = 0; index < 256; index++) {
+                  String tenant = "tenant-" + index;
+                  try (NextLoggers.Scope ignored = NextLoggers.withContext(
+                      new NextLoggers.TraceContext(tenant, "span-" + index, 1))) {
+                    futures.add(executor.submit(NextLoggers.wrapContext(
+                        (java.util.concurrent.Callable<String>) () ->
+                            NextLoggers.currentContext().traceId())));
+                  }
+                }
+                for (int index = 0; index < futures.size(); index++) {
+                  assert futures.get(index).get().equals("tenant-" + index);
+                }
+                for (int index = 0; index < 32; index++) {
+                  assert executor.submit(() -> NextLoggers.currentContext() == null).get();
+                }
+              } finally {
+                executor.shutdownNow();
+              }
+            }
+
+            private static void virtualThreadHandoffIsExplicitWhenAvailable() throws Exception {
+              java.lang.reflect.Method factory;
+              try {
+                factory = Executors.class.getMethod("newVirtualThreadPerTaskExecutor");
+              } catch (NoSuchMethodException unavailableOnJava17) {
+                return;
+              }
+              ExecutorService executor = (ExecutorService) factory.invoke(null);
+              try {
+                Future<String> wrapped;
+                try (NextLoggers.Scope ignored = NextLoggers.withContext(
+                    new NextLoggers.TraceContext("virtual", "span-v", 1))) {
+                  wrapped = executor.submit(NextLoggers.wrapContext(
+                      (java.util.concurrent.Callable<String>) () ->
+                          NextLoggers.currentContext().traceId()));
+                }
+                assert wrapped.get().equals("virtual");
+                assert executor.submit(() -> NextLoggers.currentContext() == null).get();
+              } finally {
+                executor.shutdownNow();
+              }
+            }
+
+            private static void cyclicCollectionsFailClosed() {
+              Map<String, Object> cycle = new LinkedHashMap<>();
+              cycle.put("self", cycle);
+              IllegalArgumentException error = assertThrows(
+                  IllegalArgumentException.class,
+                  () -> new NextLoggers.TraceContext(
+                      "cycle", "span", 1, "", Map.of(), cycle, List.of()));
+              assert error.getMessage().contains("cyclic");
+            }
+
+            private static <T extends Throwable> T assertThrows(
+                Class<T> type, ThrowingRunnable action) {
+              try {
+                action.run();
+              } catch (Throwable error) {
+                if (type.isInstance(error)) return type.cast(error);
+                throw new AssertionError("unexpected exception type", error);
+              }
+              throw new AssertionError("expected " + type.getName());
+            }
+
+            @FunctionalInterface
+            private interface ThrowingRunnable {
+              void run() throws Exception;
+            }
+          }
+          ''')
+
+          test_sh = Path('sdk/java/test.sh')
+          text = test_sh.read_text()
+          marker = 'java -ea -cp "$out" com.oresoftware.nextloggers.NextLoggersAdversarialTest\n'
+          replacement = marker + 'java -ea -cp "$out" com.oresoftware.nextloggers.NextLoggersContextHandoffTest\n'
+          if text.count(marker) != 1:
+              raise SystemExit('Java test runner marker drifted')
+          test_sh.write_text(text.replace(marker, replacement, 1))
+          PY
+      - name: Compile Java 17 surface and run on Java 21
+        run: bash sdk/java/test.sh
+      - name: Commit only validated Java product changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            sdk/java/src/main/java/com/oresoftware/nextloggers/NextLoggers.java \
+            sdk/java/src/test/java/com/oresoftware/nextloggers/NextLoggersContextHandoffTest.java \
+            sdk/java/test.sh
+          git diff --cached --check
+          git commit -m "fix(java): snapshot context and require explicit executor handoff"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

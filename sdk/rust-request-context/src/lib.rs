@@ -51,42 +51,53 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
+    /// The correlation fields this request contributes to a log record: the
+    /// schema marker, every non-blank string identifier, then the numeric
+    /// timestamps that are set. Built as one new map from optional entries.
+    fn log_fields(&self) -> JsonObject {
+        let strings = [
+            ("request.id", Some(&self.request_id)),
+            ("user.id", self.logged_in_user_id.as_ref()),
+            ("tenant.id", self.tenant_id.as_ref()),
+            ("session.id", self.session_id.as_ref()),
+            ("correlation.id", self.correlation_id.as_ref()),
+            ("request.parent_id", self.parent_request_id.as_ref()),
+            ("operation.name", self.operation.as_ref()),
+            ("service.name", self.service_name.as_ref()),
+            ("request.locale", self.locale.as_ref()),
+        ];
+        let numbers = [
+            ("request.started_at_unix_ms", self.started_at_unix_ms),
+            ("request.deadline_unix_ms", self.deadline_unix_ms),
+        ];
+        std::iter::once((
+            "request.context.schema".to_string(),
+            Value::String(REQUEST_CONTEXT_SCHEMA.into()),
+        ))
+        .chain(
+            strings
+                .into_iter()
+                .filter_map(|(key, value)| string_entry(key, value)),
+        )
+        .chain(
+            numbers
+                .into_iter()
+                .filter_map(|(key, value)| value.map(|value| (key.to_string(), json!(value)))),
+        )
+        .collect()
+    }
+
     /// Project this request into the one canonical logger context carrier.
     pub fn to_log_context(&self) -> LogContext {
-        let mut fields: JsonObject = Default::default();
-        fields.insert(
-            "request.context.schema".into(),
-            Value::String(REQUEST_CONTEXT_SCHEMA.into()),
-        );
-        put_string(&mut fields, "request.id", Some(&self.request_id));
-        put_string(&mut fields, "user.id", self.logged_in_user_id.as_ref());
-        put_string(&mut fields, "tenant.id", self.tenant_id.as_ref());
-        put_string(&mut fields, "session.id", self.session_id.as_ref());
-        put_string(&mut fields, "correlation.id", self.correlation_id.as_ref());
-        put_string(
-            &mut fields,
-            "request.parent_id",
-            self.parent_request_id.as_ref(),
-        );
-        put_string(&mut fields, "operation.name", self.operation.as_ref());
-        put_string(&mut fields, "service.name", self.service_name.as_ref());
-        put_string(&mut fields, "request.locale", self.locale.as_ref());
-        if let Some(value) = self.started_at_unix_ms {
-            fields.insert("request.started_at_unix_ms".into(), json!(value));
-        }
-        if let Some(value) = self.deadline_unix_ms {
-            fields.insert("request.deadline_unix_ms".into(), json!(value));
-        }
-
-        let mut logged_in_user: JsonObject = Default::default();
-        if let Some(user_id) = normalized(self.logged_in_user_id.as_deref()) {
-            logged_in_user.insert("id".into(), Value::String(user_id.to_string()));
-        }
+        let logged_in_user: JsonObject = normalized(self.logged_in_user_id.as_deref())
+            .map(|user_id| ("id".to_string(), Value::String(user_id.to_string())))
+            .into_iter()
+            .collect();
 
         let trace_ids = self.trace_id.iter().cloned().collect();
         LogContext {
             logged_in_user,
-            fields,
+            fields: self.log_fields(),
             trace_id: self.trace_id.clone(),
             trace_ids,
             span_id: self.span_id.clone(),
@@ -137,10 +148,10 @@ fn normalized(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-fn put_string(fields: &mut JsonObject, key: &str, value: Option<&String>) {
-    if let Some(value) = normalized(value.map(String::as_str)) {
-        fields.insert(key.into(), Value::String(value.to_string()));
-    }
+/// One optional field entry: present only when `value` is a non-blank string.
+fn string_entry(key: &str, value: Option<&String>) -> Option<(String, Value)> {
+    normalized(value.map(String::as_str))
+        .map(|value| (key.to_string(), Value::String(value.to_string())))
 }
 
 fn field_str<'a>(fields: &'a JsonObject, key: &str) -> Option<&'a str> {

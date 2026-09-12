@@ -160,35 +160,48 @@ impl Transport for OpenTelemetryTransport {
     }
 
     fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
-        let mut attributes = JsonObject::from_iter([
-            (
-                "service.name".into(),
-                Value::String(record.app_name.clone()),
-            ),
-            (
-                "next_logger.schema".into(),
-                Value::String(record.schema.clone()),
-            ),
-            (
-                "next_logger.runtime".into(),
-                Value::String(record.runtime.clone()),
-            ),
-            ("log.record.uid".into(), Value::String(record.id.clone())),
-        ]);
-        if let Some(trace_id) = &record.trace_id {
-            attributes.insert("trace.id".into(), Value::String(trace_id.clone()));
-        }
-        for (key, value) in &record.fields {
-            attributes.insert(format!("next_logger.field.{key}"), value.clone());
-        }
         (self.emit)(OpenTelemetryLogRecord {
             body: record.message.clone(),
             severity_text: format!("{:?}", record.level).to_uppercase(),
             severity_number: record.level.otel_severity_number(),
             timestamp: record.timestamp.clone(),
-            attributes,
+            attributes: otel_attributes(record),
         })
     }
+}
+
+/// The OpenTelemetry attribute map for a record, assembled from its parts:
+/// the fixed identity attributes, the optional trace id, then every record
+/// field under the `next_logger.field.` prefix (later entries win on a key
+/// collision, exactly as successive inserts did).
+fn otel_attributes(record: &LogRecord) -> JsonObject {
+    let identity = [
+        (
+            "service.name".to_string(),
+            Value::String(record.app_name.clone()),
+        ),
+        (
+            "next_logger.schema".to_string(),
+            Value::String(record.schema.clone()),
+        ),
+        (
+            "next_logger.runtime".to_string(),
+            Value::String(record.runtime.clone()),
+        ),
+        (
+            "log.record.uid".to_string(),
+            Value::String(record.id.clone()),
+        ),
+    ];
+    let trace = record
+        .trace_id
+        .as_ref()
+        .map(|trace_id| ("trace.id".to_string(), Value::String(trace_id.clone())));
+    let fields = record
+        .fields
+        .iter()
+        .map(|(key, value)| (format!("next_logger.field.{key}"), value.clone()));
+    identity.into_iter().chain(trace).chain(fields).collect()
 }
 
 /// Adapter for an application-owned authenticated Supabase sender.
@@ -327,9 +340,14 @@ impl Default for Options {
 }
 
 impl Options {
-    pub fn with_transport<T: Transport + 'static>(mut self, transport: Arc<T>) -> Self {
-        self.transports.push(transport);
-        self
+    /// Return new options with `transport` appended; the receiver is consumed,
+    /// never edited in place.
+    pub fn with_transport<T: Transport + 'static>(self, transport: Arc<T>) -> Self {
+        let transport: Arc<dyn Transport> = transport;
+        Self {
+            transports: self.transports.into_iter().chain([transport]).collect(),
+            ..self
+        }
     }
 }
 
@@ -554,38 +572,40 @@ impl Logger {
         if store {
             let default_otel = self.inner.otel_enabled.load(Ordering::Acquire);
             let event_otel = event.is_otel_enabled(default_otel)?;
-            for transport in &self.inner.transports {
-                if transport.is_open_telemetry() && !event_otel {
-                    continue;
-                }
-                transport.write(&record)?;
-            }
+            self.inner
+                .transports
+                .iter()
+                .filter(|transport| event_otel || !transport.is_open_telemetry())
+                .try_for_each(|transport| transport.write(&record))?;
         }
         Ok(Some(record))
     }
 
     pub fn flush(&self, send_unsent: bool) -> Result<(), LoggerError> {
         if send_unsent {
-            for event in self.unsent_events()? {
-                event.send()?;
-            }
+            self.unsent_events()?
+                .iter()
+                .try_for_each(|event| event.send().map(|_| ()))?;
         }
-        for transport in &self.inner.transports {
-            transport.flush()?;
-        }
-        Ok(())
+        self.inner
+            .transports
+            .iter()
+            .try_for_each(|transport| transport.flush())
     }
 
     pub fn flush_on_exit(&self) -> Result<(), LoggerError> {
-        let mut recovered = Vec::new();
-        for event in self.unsent_events()? {
-            if let Some(record) = event.send()? {
-                recovered.push(record);
-            }
-        }
-        for transport in &self.inner.transports {
-            transport.flush_on_exit(&recovered)?;
-        }
+        // Sending is lazy and stops at the first error, exactly like the
+        // early-returning loop it replaces; events that were filtered by level
+        // (`Ok(None)`) contribute nothing to the recovered records.
+        let recovered = self
+            .unsent_events()?
+            .iter()
+            .filter_map(|event| event.send().transpose())
+            .collect::<Result<Vec<_>, _>>()?;
+        self.inner
+            .transports
+            .iter()
+            .try_for_each(|transport| transport.flush_on_exit(&recovered))?;
         self.flush(false)
     }
 
@@ -594,9 +614,10 @@ impl Logger {
             return Ok(());
         }
         self.flush_on_exit()?;
-        for transport in &self.inner.transports {
-            transport.close()?;
-        }
+        self.inner
+            .transports
+            .iter()
+            .try_for_each(|transport| transport.close())?;
         self.inner.closed.store(true, Ordering::Release);
         Ok(())
     }
@@ -668,12 +689,22 @@ pub struct Event {
     state: Arc<Mutex<EventState>>,
 }
 
-fn push_unique(values: &mut Vec<String>, value: String) {
-    if !values.contains(&value) {
-        values.push(value);
+/// `values` with `value` appended unless it is already present. Ownership
+/// moves through the call, so the list is a new value and no `&mut` is needed.
+fn with_unique(values: Vec<String>, value: String) -> Vec<String> {
+    if values.contains(&value) {
+        values
+    } else {
+        values.into_iter().chain([value]).collect()
     }
 }
 
+// `EventState` lives behind an `Arc<Mutex<_>>` because the logger's unsent
+// registry shares it with every clone of the `Event` handle: it is the one
+// stateful holder for a pending event. Builder methods below therefore swap
+// whole field values under the lock (`mem::take` out, new value in) instead of
+// editing the lists element by element; the record that leaves `to_record` is
+// an immutable `LogRecord` value.
 impl Event {
     pub fn add_fields(self, fields: JsonObject) -> Self {
         self.state
@@ -726,7 +757,7 @@ impl Event {
         if state.trace_id.is_none() || make_first {
             state.trace_id = Some(value.clone());
         }
-        push_unique(&mut state.trace_ids, value);
+        state.trace_ids = with_unique(std::mem::take(&mut state.trace_ids), value);
         drop(state);
         self
     }
@@ -745,13 +776,12 @@ impl Event {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
+        let cleaned = tags
+            .into_iter()
+            .map(|tag| tag.into().trim().to_string())
+            .filter(|value| !value.is_empty());
         let mut state = self.state.lock().expect("event state poisoned");
-        for tag in tags {
-            let value = tag.into().trim().to_string();
-            if !value.is_empty() {
-                push_unique(&mut state.tags, value);
-            }
-        }
+        state.tags = cleaned.fold(std::mem::take(&mut state.tags), with_unique);
         drop(state);
         self
     }
@@ -827,22 +857,28 @@ impl Event {
         if let Some(record) = &state.record {
             return Ok(record.clone());
         }
-        let mut fields = self
+        // Logger-level maps are snapshotted under their own locks and merged
+        // with the event-level maps into new values; event entries win.
+        let fields: JsonObject = self
             .logger
             .inner
             .fields
             .lock()
             .map_err(|error| LoggerError(error.to_string()))?
-            .clone();
-        fields.extend(state.fields.clone());
-        let mut user = self
+            .clone()
+            .into_iter()
+            .chain(state.fields.clone())
+            .collect();
+        let user: JsonObject = self
             .logger
             .inner
             .current_user
             .lock()
             .map_err(|error| LoggerError(error.to_string()))?
-            .clone();
-        user.extend(state.logged_in_user.clone());
+            .clone()
+            .into_iter()
+            .chain(state.logged_in_user.clone())
+            .collect();
         let message = state
             .values
             .iter()

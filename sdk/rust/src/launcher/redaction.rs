@@ -6,12 +6,12 @@ const MAX_CHARACTERS: usize = 128;
 const REDACTED: &str = "[REDACTED]";
 
 pub(super) fn bounded(value: &str) -> String {
-    let mut chars = value.chars();
-    let mut output: String = chars.by_ref().take(MAX_CHARACTERS).collect();
-    if chars.next().is_some() {
-        output.push_str("...[truncated]");
+    let head: String = value.chars().take(MAX_CHARACTERS).collect();
+    if value.chars().nth(MAX_CHARACTERS).is_some() {
+        format!("{head}...[truncated]")
+    } else {
+        head
     }
-    output
 }
 
 fn sensitive_key(key: &str) -> bool {
@@ -55,28 +55,38 @@ fn opaque_option_needs_value(argument: &OsString) -> bool {
     bytes.starts_with(b"-") && !bytes.contains(&b'=')
 }
 
-/// This is a display transform only, not an argv parser. It does not promise to
-/// recognize arbitrary positional secrets: credentials must never enter argv.
-pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
-    let mut redact_next = false;
-    let mut output = Vec::new();
-    for (index, argument) in arguments.iter().take(MAX_ARGUMENTS).enumerate() {
-        if redact_next {
-            output.push(REDACTED.into());
+/// Scanner state after some prefix of argv: the display items emitted so far and
+/// whether the next argument is the value of a masked option. Each step returns
+/// a new state; nothing is edited in place.
+#[derive(Default)]
+struct Scan {
+    output: Vec<String>,
+    redact_next: bool,
+}
+
+impl Scan {
+    fn emit(self, item: String, redact_next: bool) -> Self {
+        Self {
+            output: self.output.into_iter().chain([item]).collect(),
+            redact_next,
+        }
+    }
+
+    fn step(self, index: usize, argument: &OsString) -> Self {
+        if self.redact_next {
             // A masked value may itself be another option. Continue hiding its
             // possible value rather than leaking through a chain of options.
-            redact_next = opaque_option_needs_value(argument);
-            continue;
+            return self.emit(REDACTED.into(), opaque_option_needs_value(argument));
         }
         let Some(value) = argument.to_str() else {
-            output.push("[NON_UTF8]".into());
             // Do not echo a malformed key's possible value on the next iteration.
-            redact_next = index > 0 && opaque_option_needs_value(argument);
-            continue;
+            return self.emit(
+                "[NON_UTF8]".into(),
+                index > 0 && opaque_option_needs_value(argument),
+            );
         };
         if sensitive_literal(value) {
-            output.push(REDACTED.into());
-            continue;
+            return self.emit(REDACTED.into(), false);
         }
         if index > 0 {
             // Check attached short values BEFORE treating text as an option name.
@@ -86,13 +96,11 @@ pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
                 .iter()
                 .find(|alias| value.starts_with(**alias))
             {
-                if value.len() == alias.len() {
-                    redact_next = true;
-                    output.push((*alias).into());
+                return if value.len() == alias.len() {
+                    self.emit((*alias).into(), true)
                 } else {
-                    output.push(format!("{alias}{REDACTED}"));
-                }
-                continue;
+                    self.emit(format!("{alias}{REDACTED}"), false)
+                };
             }
             let (key, inline) = value
                 .split_once('=')
@@ -100,20 +108,26 @@ pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
             if (inline || key.starts_with('-')) && sensitive_key(key) {
                 // Unknown option spellings can embed a secret in the apparent
                 // key itself. Hide the entire argument, not just the =value.
-                output.push(REDACTED.into());
-                redact_next = !inline;
-                continue;
+                return self.emit(REDACTED.into(), !inline);
             }
         }
-        output.push(bounded(value));
+        self.emit(bounded(value), false)
     }
-    if arguments.len() > MAX_ARGUMENTS {
-        output.push(format!(
-            "[{} arguments omitted]",
-            arguments.len() - MAX_ARGUMENTS
-        ));
-    }
-    output
+}
+
+/// This is a display transform only, not an argv parser. It does not promise to
+/// recognize arbitrary positional secrets: credentials must never enter argv.
+pub(super) fn argv(arguments: &[OsString]) -> Vec<String> {
+    let scanned = arguments
+        .iter()
+        .take(MAX_ARGUMENTS)
+        .enumerate()
+        .fold(Scan::default(), |scan, (index, argument)| {
+            scan.step(index, argument)
+        });
+    let omitted = (arguments.len() > MAX_ARGUMENTS)
+        .then(|| format!("[{} arguments omitted]", arguments.len() - MAX_ARGUMENTS));
+    scanned.output.into_iter().chain(omitted).collect()
 }
 
 #[cfg(test)]

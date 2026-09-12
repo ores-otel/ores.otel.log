@@ -54,93 +54,94 @@ func cloneUserList(source []map[string]any) []map[string]any {
 	return target
 }
 
+// cloneLogContext returns a deep, detached copy: every nested collection is
+// rebuilt so the result never aliases the input. A non-zero TraceFlags is
+// treated as explicitly set.
 func cloneLogContext(value LogContext) LogContext {
-	if value.TraceFlags != 0 {
-		value.TraceFlagsSet = true
+	return LogContext{
+		LoggedInUser:  cloneContextMap(value.LoggedInUser),
+		Users:         cloneUserList(value.Users),
+		Fields:        cloneContextMap(value.Fields),
+		TraceID:       value.TraceID,
+		TraceIDs:      append([]string(nil), value.TraceIDs...),
+		SpanID:        value.SpanID,
+		TraceFlags:    value.TraceFlags,
+		TraceFlagsSet: value.TraceFlagsSet || value.TraceFlags != 0,
+		TraceState:    value.TraceState,
+		Remote:        value.Remote,
+		HasRemote:     value.HasRemote,
+		Baggage:       cloneStringMap(value.Baggage),
+		RoutineID:     value.RoutineID,
+		Tags:          append([]string(nil), value.Tags...),
+		Context:       cloneContextSlice(value.Context),
+		Meta:          cloneContextSlice(value.Meta),
 	}
-	value.LoggedInUser = cloneContextMap(value.LoggedInUser)
-	value.Users = cloneUserList(value.Users)
-	value.Fields = cloneContextMap(value.Fields)
-	value.TraceIDs = append([]string(nil), value.TraceIDs...)
-	value.Baggage = cloneStringMap(value.Baggage)
-	value.Tags = append([]string(nil), value.Tags...)
-	value.Context = cloneContextSlice(value.Context)
-	value.Meta = cloneContextSlice(value.Meta)
-	return value
 }
 
-func appendUniqueString(values []string, candidate string) []string {
-	if candidate == "" {
-		return values
-	}
-	for _, value := range values {
-		if value == candidate {
-			return values
+// firstNonEmpty returns the first non-empty candidate, or "".
+func firstNonEmpty(candidates ...string) string {
+	for _, candidate := range candidates {
+		if candidate != "" {
+			return candidate
 		}
 	}
-	return append(values, candidate)
+	return ""
+}
+
+func firstString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+// mergedBaggage keeps the nil shape of an absent baggage map: a nil base with
+// nothing to add stays nil; otherwise both maps are merged into a new one.
+func mergedBaggage(base, overlay map[string]string) map[string]string {
+	if base == nil && len(overlay) == 0 {
+		return nil
+	}
+	return mergeMaps(base, overlay)
 }
 
 // MergeLogContexts applies canonical scope merge rules: maps merge with the
 // inner scope winning; users/context/meta append; trace IDs and tags deduplicate
 // while retaining order; and present scalar values replace their parent value.
+//
+// Both inputs are snapshotted first and a new context is built from their
+// parts; neither argument, nor anything it references, is written to.
 func MergeLogContexts(base LogContext, patch LogContext) LogContext {
-	merged := cloneLogContext(base)
-	patch = cloneLogContext(patch)
-	if merged.TraceID != "" {
-		merged.TraceIDs = appendUniqueString(merged.TraceIDs, merged.TraceID)
-	}
-	for key, value := range patch.LoggedInUser {
-		merged.LoggedInUser[key] = value
-	}
-	for _, user := range patch.Users {
-		merged.Users = append(merged.Users, cloneContextMap(user))
-	}
-	for key, value := range patch.Fields {
-		merged.Fields[key] = value
-	}
-	if patch.TraceID != "" {
-		merged.TraceID = patch.TraceID
-		merged.TraceIDs = appendUniqueString(merged.TraceIDs, patch.TraceID)
-	}
-	for _, traceID := range patch.TraceIDs {
-		merged.TraceIDs = appendUniqueString(merged.TraceIDs, traceID)
-	}
-	if merged.TraceID == "" && len(merged.TraceIDs) > 0 {
-		merged.TraceID = merged.TraceIDs[0]
-	}
-	if patch.SpanID != "" {
-		merged.SpanID = patch.SpanID
-	}
+	outer := cloneLogContext(base)
+	inner := cloneLogContext(patch)
+	// Trace ids accumulate in this order: the outer list, the outer primary id,
+	// the inner primary id, then the inner list.
+	traceIDs := appendAllUnique(
+		appendAllUnique(outer.TraceIDs, outer.TraceID, inner.TraceID),
+		inner.TraceIDs...,
+	)
 	// Trace flags are meaningful even when zero. Explicit TraceFlagsSet is the
 	// unambiguous signal; trace/span IDs also identify an OTEL span context whose
 	// sampled bit may legitimately be zero.
-	if patch.TraceFlagsSet || patch.TraceFlags != 0 || patch.TraceID != "" || patch.SpanID != "" {
-		merged.TraceFlags = patch.TraceFlags
-		merged.TraceFlagsSet = true
+	innerHasSpanContext := inner.TraceFlagsSet || inner.TraceFlags != 0 ||
+		inner.TraceID != "" || inner.SpanID != ""
+	return LogContext{
+		LoggedInUser:  mergeMaps(outer.LoggedInUser, inner.LoggedInUser),
+		Users:         concat(outer.Users, mapSlice(inner.Users, cloneContextMap)),
+		Fields:        mergeMaps(outer.Fields, inner.Fields),
+		TraceID:       firstNonEmpty(inner.TraceID, outer.TraceID, firstString(traceIDs)),
+		TraceIDs:      traceIDs,
+		SpanID:        firstNonEmpty(inner.SpanID, outer.SpanID),
+		TraceFlags:    pick(innerHasSpanContext, inner.TraceFlags, outer.TraceFlags),
+		TraceFlagsSet: innerHasSpanContext || outer.TraceFlagsSet,
+		TraceState:    firstNonEmpty(inner.TraceState, outer.TraceState),
+		Remote:        pick(inner.HasRemote, inner.Remote, outer.Remote),
+		HasRemote:     inner.HasRemote || outer.HasRemote,
+		Baggage:       mergedBaggage(outer.Baggage, inner.Baggage),
+		RoutineID:     firstNonEmpty(inner.RoutineID, outer.RoutineID),
+		Tags:          appendAllUnique(outer.Tags, inner.Tags...),
+		Context:       concat(outer.Context, inner.Context),
+		Meta:          concat(outer.Meta, inner.Meta),
 	}
-	if patch.TraceState != "" {
-		merged.TraceState = patch.TraceState
-	}
-	if patch.HasRemote {
-		merged.Remote = patch.Remote
-		merged.HasRemote = true
-	}
-	if merged.Baggage == nil && len(patch.Baggage) > 0 {
-		merged.Baggage = make(map[string]string, len(patch.Baggage))
-	}
-	for key, value := range patch.Baggage {
-		merged.Baggage[key] = value
-	}
-	if patch.RoutineID != "" {
-		merged.RoutineID = patch.RoutineID
-	}
-	for _, tag := range patch.Tags {
-		merged.Tags = appendUniqueString(merged.Tags, tag)
-	}
-	merged.Context = append(merged.Context, patch.Context...)
-	merged.Meta = append(merged.Meta, patch.Meta...)
-	return merged
 }
 
 // MergeLogContext preserves the tracing-focused value-level API introduced by
@@ -260,22 +261,15 @@ func (event *Event) ApplyContext(ctx context.Context) *Event {
 		return event
 	}
 
-	fields := cloneContextMap(value.Fields)
-	if value.SpanID != "" {
-		fields["otel.span_id"] = value.SpanID
-	}
-	if value.TraceFlagsSet {
-		fields["otel.trace_flags"] = value.TraceFlags
-	}
-	if value.TraceState != "" {
-		fields["otel.trace_state"] = value.TraceState
-	}
-	if value.HasRemote {
-		fields["otel.remote"] = value.Remote
-	}
-	if len(value.Baggage) > 0 {
-		fields["otel.baggage"] = cloneStringMap(value.Baggage)
-	}
+	// value is already a detached snapshot, so its fields can be merged with
+	// the span attributes into one new map without a second clone.
+	fields := mergeMaps(value.Fields, mapOf(
+		kvWhen[string, any](value.SpanID != "", "otel.span_id", value.SpanID),
+		kvWhen[string, any](value.TraceFlagsSet, "otel.trace_flags", value.TraceFlags),
+		kvWhen[string, any](value.TraceState != "", "otel.trace_state", value.TraceState),
+		kvWhen[string, any](value.HasRemote, "otel.remote", value.Remote),
+		kvWhen[string, any](len(value.Baggage) > 0, "otel.baggage", cloneStringMap(value.Baggage)),
+	))
 	if len(fields) > 0 {
 		event.AddFields(fields)
 	}
