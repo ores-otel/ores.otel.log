@@ -1,0 +1,60 @@
+{
+  "description": "Shared ores.apm.resource.pressure disk series pinned for the TypeScript, Dart and Rust SDKs. Every evaluable configured threshold emits one gauge point: 1 while breached, 0 otherwise, so alerts can observe recovery. A threshold is breached when the measurement is strictly below it. A ratio threshold is not evaluable when its denominator is 0 or unknown, and then emits nothing. Points are ordered disk_free_bytes, disk_free_ratio, disk_inode_free_ratio.",
+  "metric": "ores.apm.resource.pressure",
+  "type": "gauge",
+  "unit": "1",
+  "cases": [
+    {
+      "name": "mixed-breach-and-recovery",
+      "measurement": { "path": "/data", "available_bytes": 5, "capacity_bytes": 100, "available_inodes": 1, "total_inodes": 100 },
+      "thresholds": { "min_free_bytes": 10, "min_free_ratio": 0.01, "min_inode_free_ratio": 0.5 },
+      "expected": [
+        { "value": 1, "attributes": { "ores.apm.pressure.kind": "disk_free_bytes", "ores.apm.pressure.target": "/data" } },
+        { "value": 0, "attributes": { "ores.apm.pressure.kind": "disk_free_ratio", "ores.apm.pressure.target": "/data" } },
+        { "value": 1, "attributes": { "ores.apm.pressure.kind": "disk_inode_free_ratio", "ores.apm.pressure.target": "/data" } }
+      ]
+    },
+    {
+      "name": "healthy-emits-zero-for-every-threshold",
+      "measurement": { "path": "/var/lib/data", "available_bytes": 900, "capacity_bytes": 1000, "available_inodes": 900, "total_inodes": 1000 },
+      "thresholds": { "min_free_bytes": 100, "min_free_ratio": 0.1, "min_inode_free_ratio": 0.5 },
+      "expected": [
+        { "value": 0, "attributes": { "ores.apm.pressure.kind": "disk_free_bytes", "ores.apm.pressure.target": "/var/lib/data" } },
+        { "value": 0, "attributes": { "ores.apm.pressure.kind": "disk_free_ratio", "ores.apm.pressure.target": "/var/lib/data" } },
+        { "value": 0, "attributes": { "ores.apm.pressure.kind": "disk_inode_free_ratio", "ores.apm.pressure.target": "/var/lib/data" } }
+      ]
+    },
+    {
+      "name": "threshold-equality-is-not-pressure",
+      "measurement": { "path": "/", "available_bytes": 100, "capacity_bytes": 1000, "available_inodes": 50, "total_inodes": 100 },
+      "thresholds": { "min_free_bytes": 100, "min_free_ratio": 0.1, "min_inode_free_ratio": 0.5 },
+      "expected": [
+        { "value": 0, "attributes": { "ores.apm.pressure.kind": "disk_free_bytes", "ores.apm.pressure.target": "/" } },
+        { "value": 0, "attributes": { "ores.apm.pressure.kind": "disk_free_ratio", "ores.apm.pressure.target": "/" } },
+        { "value": 0, "attributes": { "ores.apm.pressure.kind": "disk_inode_free_ratio", "ores.apm.pressure.target": "/" } }
+      ]
+    },
+    {
+      "name": "zero-capacity-skips-ratio-thresholds",
+      "measurement": { "path": "/empty", "available_bytes": 0, "capacity_bytes": 0 },
+      "thresholds": { "min_free_bytes": 1, "min_free_ratio": 0.5, "min_inode_free_ratio": 0.5 },
+      "expected": [
+        { "value": 1, "attributes": { "ores.apm.pressure.kind": "disk_free_bytes", "ores.apm.pressure.target": "/empty" } }
+      ]
+    },
+    {
+      "name": "zero-inode-total-skips-inode-threshold",
+      "measurement": { "path": "/tmp", "available_bytes": 10, "capacity_bytes": 100, "available_inodes": 0, "total_inodes": 0 },
+      "thresholds": { "min_free_ratio": 0.2, "min_inode_free_ratio": 0.5 },
+      "expected": [
+        { "value": 1, "attributes": { "ores.apm.pressure.kind": "disk_free_ratio", "ores.apm.pressure.target": "/tmp" } }
+      ]
+    },
+    {
+      "name": "no-thresholds-emit-nothing",
+      "measurement": { "path": "/data", "available_bytes": 1, "capacity_bytes": 100, "available_inodes": 1, "total_inodes": 100 },
+      "thresholds": {},
+      "expected": []
+    }
+  ]
+}

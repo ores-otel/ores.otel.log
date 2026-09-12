@@ -1,7 +1,13 @@
 //! Cross-language `.ores-otel.toml` parity: every fixture case under
 //! `tests/fixtures/ores-otel-config/` is parsed and resolved by the Rust loader
 //! and compared to the shared expected JSON (numbers compare numerically).
+//! `tests/fixtures/ores-otel-apm-disk-pressure.json` pins the
+//! `ores.apm.resource.pressure` disk series shared with TypeScript and Dart.
 
+use next_loggers::apm::{
+    evaluate_resource_snapshot, resource_metric_points, FilesystemSnapshot, MetricKind,
+    ResourceSnapshot, ResourceThresholds, METRIC_RESOURCE_PRESSURE,
+};
 use next_loggers::config::{
     ores_otel_config_file_path, parse_ores_otel_toml, parse_toml, resolve_ores_otel_config,
     OresOtelConfigError, ResolveOptions, ResolvedOresOtelConfig, RuntimeRole, TomlValue,
@@ -227,5 +233,106 @@ fn loader_env_names_match_flags_2_env_contract() {
         honoured.len(),
         ORES_OTEL_ENV_VARS.len(),
         "duplicate env names"
+    );
+}
+
+const MINIMUM_DISK_PRESSURE_CASES: usize = 6;
+
+fn optional_u64(value: &Value, field: &str) -> Option<u64> {
+    value.get(field).map(|raw| {
+        raw.as_u64()
+            .unwrap_or_else(|| panic!("{field} must be a non-negative integer"))
+    })
+}
+
+fn optional_f64(value: &Value, field: &str) -> Option<f64> {
+    value.get(field).map(|raw| {
+        raw.as_f64()
+            .unwrap_or_else(|| panic!("{field} must be a number"))
+    })
+}
+
+/// Mirrors how `sample_filesystem` derives ratios: a ratio with a zero or
+/// unknown denominator is not a measurement.
+fn filesystem_from_fixture(measurement: &Value) -> FilesystemSnapshot {
+    let capacity_bytes = optional_u64(measurement, "capacity_bytes").expect("capacity_bytes");
+    let available_bytes = optional_u64(measurement, "available_bytes").expect("available_bytes");
+    let inode_total = optional_u64(measurement, "total_inodes");
+    let inode_free = optional_u64(measurement, "available_inodes");
+    FilesystemSnapshot {
+        path: PathBuf::from(measurement["path"].as_str().expect("path")),
+        capacity_bytes,
+        free_bytes: available_bytes,
+        available_bytes,
+        free_ratio: if capacity_bytes == 0 {
+            0.0
+        } else {
+            available_bytes as f64 / capacity_bytes as f64
+        },
+        inode_total: inode_total.unwrap_or(0),
+        inode_free: inode_free.unwrap_or(0),
+        inode_free_ratio: match (inode_free, inode_total) {
+            (Some(free), Some(total)) if total > 0 => Some(free as f64 / total as f64),
+            _ => None,
+        },
+    }
+}
+
+#[test]
+fn every_disk_pressure_series_matches() {
+    let corpus: Value = serde_json::from_str(&read(
+        &repo_root().join("tests/fixtures/ores-otel-apm-disk-pressure.json"),
+    ))
+    .expect("disk-pressure corpus is JSON");
+    assert_eq!(corpus["metric"], METRIC_RESOURCE_PRESSURE);
+    let cases = corpus["cases"].as_array().expect("cases array");
+    assert!(
+        cases.len() >= MINIMUM_DISK_PRESSURE_CASES,
+        "expected at least {MINIMUM_DISK_PRESSURE_CASES} disk-pressure cases, found {}",
+        cases.len()
+    );
+    let failures = cases
+        .iter()
+        .filter_map(|case| {
+            let name = case["name"].as_str().unwrap_or("?");
+            let thresholds = &case["thresholds"];
+            let snapshot = ResourceSnapshot {
+                filesystems: vec![filesystem_from_fixture(&case["measurement"])],
+                ..ResourceSnapshot::default()
+            };
+            let health = evaluate_resource_snapshot(
+                &snapshot,
+                &ResourceThresholds {
+                    max_rss_bytes: None,
+                    min_free_bytes: optional_u64(thresholds, "min_free_bytes"),
+                    min_free_ratio: optional_f64(thresholds, "min_free_ratio"),
+                    min_inode_free_ratio: optional_f64(thresholds, "min_inode_free_ratio"),
+                },
+            );
+            let series = resource_metric_points(&snapshot, &health)
+                .into_iter()
+                .filter(|point| point.name == METRIC_RESOURCE_PRESSURE)
+                .map(|point| {
+                    assert_eq!(point.unit, corpus["unit"].as_str().expect("unit"));
+                    assert_eq!(point.kind, MetricKind::Gauge);
+                    serde_json::json!({
+                        "value": point.value,
+                        "attributes": point
+                            .attributes
+                            .iter()
+                            .map(|(key, value)| ((*key).to_owned(), Value::String(value.clone())))
+                            .collect::<serde_json::Map<_, _>>(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            json_matches(&Value::Array(series), &case["expected"], "$")
+                .err()
+                .map(|diff| format!("{name}: {diff}"))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "disk-pressure mismatches:\n{}",
+        failures.join("\n")
     );
 }
