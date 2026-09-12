@@ -32,10 +32,11 @@ module ORESoftware
       def initialize(**values)
         super
         self.trace_flags = trace_flags.nil? ? 1 : Integer(trace_flags)
-        self.fields = (fields || {}).each_with_object({}) do |(key, value), out|
+        normalized_fields = (fields || {}).each_with_object({}) do |(key, value), out|
           out[key.to_s] = value
-        end.freeze
-        self.tags = Array(tags).map(&:to_s).uniq.freeze
+        end
+        self.fields = NextLoggers.deep_snapshot(normalized_fields)
+        self.tags = NextLoggers.deep_snapshot(Array(tags).map(&:to_s).uniq)
         freeze
       end
     end
@@ -43,16 +44,67 @@ module ORESoftware
     module_function
 
     def current_context
-      Thread.current.thread_variable_get(CONTEXT_KEY)
+      # Thread#[] is Fiber-local in Ruby. That is the logical-request boundary
+      # when a scheduler multiplexes many Fibers on one OS thread.
+      Thread.current[CONTEXT_KEY]
     end
 
-    # Install context for the current thread and always restore the prior frame.
+    # Install context for the current Fiber and always restore the prior frame.
     def with_context(context)
       previous = current_context
-      Thread.current.thread_variable_set(CONTEXT_KEY, normalize_context(context))
+      Thread.current[CONTEXT_KEY] = normalize_context(context)
       yield
     ensure
-      Thread.current.thread_variable_set(CONTEXT_KEY, previous)
+      Thread.current[CONTEXT_KEY] = previous
+    end
+
+    # Normalized Context objects are recursively immutable, so capture is O(1).
+    def capture_context
+      current_context
+    end
+
+    # Child threads and Fibers receive context only through explicit capture.
+    def with_captured_context(context, &block)
+      with_context(context, &block)
+    end
+
+    MAX_CONTEXT_SNAPSHOT_DEPTH = 128
+    MAX_CONTEXT_SNAPSHOT_NODES = 10_000
+
+    def deep_snapshot(value, seen = {}, depth = 0, budget = [0])
+      raise ArgumentError, "context snapshot exceeds maximum depth" if depth > MAX_CONTEXT_SNAPSHOT_DEPTH
+
+      case value
+      when NilClass, TrueClass, FalseClass, Numeric, Symbol
+        value
+      when String, Time, Regexp
+        value.dup.freeze
+      when Hash
+        known = seen[value.object_id]
+        return known unless known.nil?
+        budget[0] += 1
+        raise ArgumentError, "context snapshot exceeds maximum node count" if budget[0] > MAX_CONTEXT_SNAPSHOT_NODES
+        copy = {}
+        seen[value.object_id] = copy
+        value.each do |key, item|
+          copy[deep_snapshot(key, seen, depth + 1, budget)] =
+            deep_snapshot(item, seen, depth + 1, budget)
+        end
+        copy.freeze
+      when Array
+        known = seen[value.object_id]
+        return known unless known.nil?
+        budget[0] += 1
+        raise ArgumentError, "context snapshot exceeds maximum node count" if budget[0] > MAX_CONTEXT_SNAPSHOT_NODES
+        copy = []
+        seen[value.object_id] = copy
+        value.each { |item| copy << deep_snapshot(item, seen, depth + 1, budget) }
+        copy.freeze
+      else
+        # Runtime-local objects are explicit opaque handles. Never invoke
+        # serialization hooks or application getters while admitting context.
+        value
+      end
     end
 
     def normalize_context(context)
