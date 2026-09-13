@@ -140,6 +140,15 @@ await log.flush({ timeoutMillis: 2_000, throwOnError: true });
 
 Circular references, errors, dates, bigints, maps, sets, functions, and symbols are normalized before transport.
 
+### Trace and routine ID convention
+
+In fleet code, trace IDs are inline literals unique per call site (`ores-trace-` + 21-character
+nanoid, for example `.addTraceId('ores-trace-…')`), and routine IDs (`ores-routine-` + 21-character
+nanoid) are declared once at the top of the function and passed to every `.addRoutineId(routineId)`.
+The legacy `dd-trace-` prefix is retired. See
+[`docs/ores-trace-and-routine-ids.md`](docs/ores-trace-and-routine-ids.md); the TypeSpec and JSON
+Schema peer contract is [`contracts/ores-ids`](contracts/ores-ids/README.md), checked with `npx tjsv check`.
+
 ## ESLint: require `.send()`
 
 The ESM-only ESLint plugin supports ESLint 9 and 10 flat config. Its recommended rule warns when a standalone logger chain forgets `.send()`:
