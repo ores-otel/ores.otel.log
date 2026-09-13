@@ -1,0 +1,42 @@
+version = 1
+
+[common]
+environment = "staging"
+
+[common.logging]
+level = "info"
+
+[common.metrics.process]
+sample_interval_ms = 5000
+
+[common.metrics.latency]
+histogram_boundaries_ms = [5, 10, 50.5, 100]
+
+[client]
+service_name = "web"
+
+[client.metrics]
+enabled = false
+
+[client.exporter]
+protocol = "otlp_http"
+endpoint_env = "WEB_OTEL_ENDPOINT"
+
+[server]
+service_name = "api"
+
+[server.tracing]
+sample_ratio = 0.5
+
+[server.metrics.filesystem]
+paths = ["/", "/var/lib/data"]
+min_free_bytes = 1073741824
+min_free_ratio = 0.1
+
+[server.metrics.saturation]
+memory_ratio_warning = 0.85
+queue_depth_warning = 1000
+
+[server.exporter]
+protocol = "otlp_grpc"
+endpoint_env = "API_OTEL_ENDPOINT"

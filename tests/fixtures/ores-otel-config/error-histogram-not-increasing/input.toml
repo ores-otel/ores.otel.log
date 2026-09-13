@@ -1,0 +1,3 @@
+version = 1
+[common.metrics.latency]
+histogram_boundaries_ms = [10, 5]

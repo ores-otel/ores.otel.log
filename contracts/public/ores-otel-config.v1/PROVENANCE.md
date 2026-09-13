@@ -4,7 +4,7 @@ This directory is a read-only distribution mirror for consumer CI.
 
 Canonical ownership remains in `ores-otel/ores-otel-interfaces` at merged commit:
 
-`b544872d13323de7be19a9d5879c419149679f7a`
+`09258f81e2e51c07ce73a2bc0f78a76a2a9502ea`
 
 The mirrored files are byte-for-byte copies of:
 

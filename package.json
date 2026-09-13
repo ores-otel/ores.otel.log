@@ -173,6 +173,10 @@
       "types": "./dist/config.d.ts",
       "default": "./dist/config.js"
     },
+    "./apm": {
+      "types": "./dist/apm.d.ts",
+      "default": "./dist/apm.js"
+    },
     "./eslint": {
       "types": "./dist/eslint-plugin.d.ts",
       "default": "./dist/eslint-plugin.js"

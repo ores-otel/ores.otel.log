@@ -36,7 +36,7 @@ jobs:
           set -euo pipefail
           provenance='contracts/public/ores-otel-config.v1/PROVENANCE.md'
           test -s "$provenance"
-          grep -Fq 'b544872d13323de7be19a9d5879c419149679f7a' "$provenance"
+          grep -Fq '09258f81e2e51c07ce73a2bc0f78a76a2a9502ea' "$provenance"
           grep -Fq 'This public mirror is not a third authority' "$provenance"
           grep -Fq 'typespec-json-schema-validator' "$provenance"
 

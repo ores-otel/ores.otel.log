@@ -1,0 +1,181 @@
+# flags-2-env fragment for `.ores-otel.toml` runtime overrides.
+# Format: https://github.com/flags-2-env/flags-2-env
+#
+# Copy (or merge) these `[flags.*]` tables into an application's own
+# `.cli-flags.toml`. flags-2-env turns argv such as
+#
+#   my-api --otel-role server --otel-log-level debug --otel-disk-paths '["/","/data"]'
+#
+# into a string->string map of ORES_OTEL_* variables. Hand that map to the
+# loader as `flagOverrides` (TypeScript), `flag_overrides` (Rust), or
+# `flagOverrides` (Dart). Resolution precedence is:
+#
+#   defaults < [common] < [client]/[server] < process environment
+#            < flags-2-env overrides < explicit runtime overrides
+#
+# No flag declares a default: a default would fabricate configuration the
+# operator never wrote and would silently outrank `.ores-otel.toml`.
+# tests/ores-otel-config-flags.test.mjs fails if this file and the env names
+# the loaders read drift apart in either direction.
+
+[flags.otel_role]
+env = "ORES_OTEL_ROLE"
+aliases = ["otel-role"]
+type = "string"
+help = "Telemetry role to select from a mixed client/server .ores-otel.toml (client|server)."
+
+[flags.otel_config_dir]
+env = "ORES_OTEL_CONFIG_DIR"
+aliases = ["otel-config-dir"]
+type = "string"
+help = "Directory containing .ores-otel.toml (defaults to the working directory)."
+
+[flags.otel_config_file]
+env = "ORES_OTEL_CONFIG_FILE"
+aliases = ["otel-config-file"]
+type = "string"
+help = "Explicit path to a .ores-otel.toml file; outranks --otel-config-dir."
+
+[flags.otel_enabled]
+env = "ORES_OTEL_ENABLED"
+aliases = ["otel-enabled"]
+type = "bool"
+help = "Master switch for logging, tracing, and metrics."
+
+[flags.otel_service_name]
+env = "ORES_OTEL_SERVICE_NAME"
+aliases = ["otel-service-name"]
+type = "string"
+help = "OpenTelemetry service.name."
+
+[flags.otel_environment]
+env = "ORES_OTEL_ENVIRONMENT"
+aliases = ["otel-environment"]
+type = "string"
+help = "Deployment environment name."
+
+[flags.otel_logging_enabled]
+env = "ORES_OTEL_LOGGING_ENABLED"
+aliases = ["otel-logging-enabled"]
+type = "bool"
+help = "Enable structured logging."
+
+[flags.otel_log_level]
+env = "ORES_OTEL_LOG_LEVEL"
+aliases = ["otel-log-level"]
+type = "string"
+help = "Maximum log level (trace|debug|info|warn|error|fatal)."
+
+[flags.otel_log_console]
+env = "ORES_OTEL_LOG_CONSOLE"
+aliases = ["otel-log-console"]
+type = "bool"
+help = "Write log records to the console."
+
+[flags.otel_log_auto_send]
+env = "ORES_OTEL_LOG_AUTO_SEND"
+aliases = ["otel-log-auto-send"]
+type = "bool"
+help = "Automatically ship log records to configured transports."
+
+[flags.otel_tracing_enabled]
+env = "ORES_OTEL_TRACING_ENABLED"
+aliases = ["otel-tracing-enabled"]
+type = "bool"
+help = "Enable tracing."
+
+[flags.otel_trace_sample_ratio]
+env = "ORES_OTEL_TRACE_SAMPLE_RATIO"
+aliases = ["otel-trace-sample-ratio"]
+type = "double"
+help = "Trace sampling ratio between 0 and 1."
+
+[flags.otel_propagators]
+env = "ORES_OTEL_PROPAGATORS"
+aliases = ["otel-propagators"]
+type = "string"
+help = "Comma-separated propagators (tracecontext,baggage)."
+
+[flags.otel_metrics_enabled]
+env = "ORES_OTEL_METRICS_ENABLED"
+aliases = ["otel-metrics-enabled"]
+type = "bool"
+help = "Master switch for APM metrics."
+
+[flags.otel_process_metrics_enabled]
+env = "ORES_OTEL_METRICS_PROCESS_ENABLED"
+aliases = ["otel-process-metrics-enabled"]
+type = "bool"
+help = "Sample process memory (RSS/heap), CPU, threads, and file descriptors."
+
+[flags.otel_metrics_sample_interval_ms]
+env = "ORES_OTEL_METRICS_SAMPLE_INTERVAL_MS"
+aliases = ["otel-metrics-sample-interval-ms"]
+type = "integer"
+help = "Resource sampling interval in milliseconds (100..3600000)."
+
+[flags.otel_disk_metrics_enabled]
+env = "ORES_OTEL_METRICS_FILESYSTEM_ENABLED"
+aliases = ["otel-disk-metrics-enabled"]
+type = "bool"
+help = "Sample free disk space for the configured paths."
+
+[flags.otel_disk_paths]
+env = "ORES_OTEL_METRICS_FILESYSTEM_PATHS"
+aliases = ["otel-disk-paths"]
+type = "array"
+help = "Filesystem paths to check for free space (JSON array or comma-separated)."
+
+[flags.otel_disk_min_free_bytes]
+env = "ORES_OTEL_METRICS_MIN_FREE_BYTES"
+aliases = ["otel-disk-min-free-bytes"]
+type = "integer"
+help = "Report disk pressure below this many available bytes."
+
+[flags.otel_disk_min_free_ratio]
+env = "ORES_OTEL_METRICS_MIN_FREE_RATIO"
+aliases = ["otel-disk-min-free-ratio"]
+type = "double"
+help = "Report disk pressure below this available/capacity ratio."
+
+[flags.otel_latency_metrics_enabled]
+env = "ORES_OTEL_METRICS_LATENCY_ENABLED"
+aliases = ["otel-latency-metrics-enabled"]
+type = "bool"
+help = "Record request/operation latency and event-loop lag histograms."
+
+[flags.otel_histogram_boundaries_ms]
+env = "ORES_OTEL_METRICS_HISTOGRAM_BOUNDARIES_MS"
+aliases = ["otel-histogram-boundaries-ms"]
+type = "array"
+help = "Strictly increasing latency histogram boundaries in ms (JSON array or comma-separated)."
+
+[flags.otel_runtime_metrics_enabled]
+env = "ORES_OTEL_METRICS_RUNTIME_ENABLED"
+aliases = ["otel-runtime-metrics-enabled"]
+type = "bool"
+help = "Record runtime GC, heap, and event-loop utilization metrics."
+
+[flags.otel_saturation_enabled]
+env = "ORES_OTEL_METRICS_SATURATION_ENABLED"
+aliases = ["otel-saturation-enabled"]
+type = "bool"
+help = "Evaluate saturation warning thresholds."
+
+[flags.otel_memory_ratio_warning]
+env = "ORES_OTEL_METRICS_MEMORY_RATIO_WARNING"
+aliases = ["otel-memory-ratio-warning"]
+type = "double"
+help = "Warn when process memory use exceeds this ratio of the memory limit."
+
+[flags.otel_exporter_protocol]
+env = "ORES_OTEL_EXPORTER_PROTOCOL"
+aliases = ["otel-exporter-protocol"]
+type = "string"
+help = "Exporter protocol (none|otlp_http|otlp_grpc)."
+
+[flags.otel_exporter_endpoint_env]
+env = "ORES_OTEL_EXPORTER_ENDPOINT_ENV"
+aliases = ["otel-exporter-endpoint-env"]
+type = "string"
+help = "Name of the environment variable that holds the exporter endpoint."

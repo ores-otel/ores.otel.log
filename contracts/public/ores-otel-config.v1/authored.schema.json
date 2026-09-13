@@ -2,6 +2,106 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/ores-otel/ores-otel-interfaces/contracts/ores-otel-config.v1/authored.schema.json",
   "$defs": {
+    "OresOtelProcessMetricsV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresOtelProcessMetricsV1.json",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "sample_interval_ms": { "type": "integer", "minimum": 100, "maximum": 3600000 },
+        "rss_bytes": { "type": "boolean" },
+        "virtual_memory_bytes": { "type": "boolean" },
+        "heap_bytes": { "type": "boolean" },
+        "cpu_seconds": { "type": "boolean" },
+        "thread_count": { "type": "boolean" },
+        "open_file_descriptors": { "type": "boolean" }
+      },
+      "unevaluatedProperties": false
+    },
+    "OresOtelFilesystemMetricsV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresOtelFilesystemMetricsV1.json",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "type": "string" }
+        },
+        "capacity_bytes": { "type": "boolean" },
+        "free_bytes": { "type": "boolean" },
+        "free_ratio": { "type": "boolean" },
+        "inode_free_ratio": { "type": "boolean" },
+        "min_free_bytes": { "type": "integer", "minimum": 0 },
+        "min_free_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "min_inode_free_ratio": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "unevaluatedProperties": false
+    },
+    "OresOtelLatencyMetricsV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresOtelLatencyMetricsV1.json",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "request_duration_ms": { "type": "boolean" },
+        "operation_duration_ms": { "type": "boolean" },
+        "queue_wait_ms": { "type": "boolean" },
+        "event_loop_lag_ms": { "type": "boolean" },
+        "histogram_boundaries_ms": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "type": "number" }
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "OresOtelRuntimeMetricsV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresOtelRuntimeMetricsV1.json",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "gc_pause_ms": { "type": "boolean" },
+        "gc_heap_bytes": { "type": "boolean" },
+        "event_loop_utilization": { "type": "boolean" },
+        "scheduler_queue_depth": { "type": "boolean" }
+      },
+      "unevaluatedProperties": false
+    },
+    "OresOtelSaturationMetricsV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresOtelSaturationMetricsV1.json",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "cpu_ratio_warning": { "type": "number", "minimum": 0, "maximum": 1 },
+        "memory_ratio_warning": { "type": "number", "minimum": 0, "maximum": 1 },
+        "disk_free_ratio_warning": { "type": "number", "minimum": 0, "maximum": 1 },
+        "queue_depth_warning": { "type": "integer", "minimum": 0 }
+      },
+      "unevaluatedProperties": false
+    },
+    "OresOtelMetricsV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresOtelMetricsV1.json",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "process": { "$ref": "OresOtelProcessMetricsV1.json" },
+        "filesystem": { "$ref": "OresOtelFilesystemMetricsV1.json" },
+        "latency": { "$ref": "OresOtelLatencyMetricsV1.json" },
+        "runtime": { "$ref": "OresOtelRuntimeMetricsV1.json" },
+        "saturation": { "$ref": "OresOtelSaturationMetricsV1.json" },
+        "exemplars": { "type": "boolean" },
+        "span_metrics": { "type": "boolean" },
+        "service_graphs": { "type": "boolean" }
+      },
+      "unevaluatedProperties": false
+    },
     "OresOtelConfigV1": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "$id": "OresOtelConfigV1",
@@ -33,11 +133,7 @@
               },
               "unevaluatedProperties": false
             },
-            "metrics": {
-              "type": "object",
-              "properties": { "enabled": { "type": "boolean" } },
-              "unevaluatedProperties": false
-            },
+            "metrics": { "$ref": "OresOtelMetricsV1.json" },
             "exporter": {
               "type": "object",
               "properties": {
@@ -74,11 +170,7 @@
               },
               "unevaluatedProperties": false
             },
-            "metrics": {
-              "type": "object",
-              "properties": { "enabled": { "type": "boolean" } },
-              "unevaluatedProperties": false
-            },
+            "metrics": { "$ref": "OresOtelMetricsV1.json" },
             "exporter": {
               "type": "object",
               "properties": {
@@ -115,11 +207,7 @@
               },
               "unevaluatedProperties": false
             },
-            "metrics": {
-              "type": "object",
-              "properties": { "enabled": { "type": "boolean" } },
-              "unevaluatedProperties": false
-            },
+            "metrics": { "$ref": "OresOtelMetricsV1.json" },
             "exporter": {
               "type": "object",
               "properties": {

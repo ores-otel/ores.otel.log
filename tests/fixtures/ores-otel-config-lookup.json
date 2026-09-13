@@ -1,0 +1,14 @@
+{
+  "description": "Shared .ores-otel.toml file-lookup order. Precedence: file_path argument, cwd argument, ORES_OTEL_CONFIG_FILE, ORES_OTEL_CONFIG_DIR, current_directory. env has flag_overrides applied on top before lookup. Blank values are skipped; values are trimmed; trailing directory separators are stripped.",
+  "cases": [
+    { "name": "defaults-to-current-directory", "file_path": null, "cwd": null, "env": {}, "flag_overrides": {}, "current_directory": "/work", "expected": "/work/.ores-otel.toml" },
+    { "name": "strips-trailing-separators", "file_path": null, "cwd": null, "env": {}, "flag_overrides": {}, "current_directory": "/work//", "expected": "/work/.ores-otel.toml" },
+    { "name": "config-dir-from-env", "file_path": null, "cwd": null, "env": { "ORES_OTEL_CONFIG_DIR": "/etc/app" }, "flag_overrides": {}, "current_directory": "/work", "expected": "/etc/app/.ores-otel.toml" },
+    { "name": "config-file-outranks-config-dir", "file_path": null, "cwd": null, "env": { "ORES_OTEL_CONFIG_DIR": "/etc/app", "ORES_OTEL_CONFIG_FILE": "/srv/custom.toml" }, "flag_overrides": {}, "current_directory": "/work", "expected": "/srv/custom.toml" },
+    { "name": "flag-config-dir-overrides-env-config-dir", "file_path": null, "cwd": null, "env": { "ORES_OTEL_CONFIG_DIR": "/etc/app" }, "flag_overrides": { "ORES_OTEL_CONFIG_DIR": "/opt/flags" }, "current_directory": "/work", "expected": "/opt/flags/.ores-otel.toml" },
+    { "name": "flag-config-dir-does-not-outrank-env-config-file", "file_path": null, "cwd": null, "env": { "ORES_OTEL_CONFIG_FILE": "/srv/custom.toml" }, "flag_overrides": { "ORES_OTEL_CONFIG_DIR": "/opt/flags" }, "current_directory": "/work", "expected": "/srv/custom.toml" },
+    { "name": "cwd-argument-outranks-config-file-env", "file_path": null, "cwd": "/repo", "env": { "ORES_OTEL_CONFIG_FILE": "/srv/custom.toml" }, "flag_overrides": {}, "current_directory": "/work", "expected": "/repo/.ores-otel.toml" },
+    { "name": "file-path-argument-outranks-everything", "file_path": "/explicit.toml", "cwd": "/repo", "env": {}, "flag_overrides": { "ORES_OTEL_CONFIG_FILE": "/srv/flag.toml" }, "current_directory": "/work", "expected": "/explicit.toml" },
+    { "name": "blank-values-are-skipped-and-trimmed", "file_path": "  ", "cwd": "", "env": { "ORES_OTEL_CONFIG_FILE": "   ", "ORES_OTEL_CONFIG_DIR": " /etc/app " }, "flag_overrides": {}, "current_directory": "/work", "expected": "/etc/app/.ores-otel.toml" }
+  ]
+}

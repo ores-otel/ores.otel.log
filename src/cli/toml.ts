@@ -3,8 +3,9 @@
  *
  * Deliberately NOT a general TOML parser. It supports exactly what the
  * flags-2-env format needs — tables, bare/quoted keys, basic strings,
- * integers, floats, booleans, and single-line arrays of strings — and throws
- * on anything else.
+ * integers, floats, booleans, and homogeneous (single- or multi-line) arrays
+ * of strings or numbers, which `.ores-otel.toml` histogram boundaries need —
+ * and throws on anything else.
  *
  * Failing closed is the entire value here. The upstream C parser silently
  * ignores unknown sections and unknown keys, so `alias =` instead of
@@ -12,7 +13,7 @@
  * drift test pass while the contract quietly rotted.
  */
 
-export type TomlValue = string | number | boolean | string[] | TomlTable;
+export type TomlValue = string | number | boolean | string[] | number[] | TomlTable;
 export interface TomlTable {
   [key: string]: TomlValue;
 }
@@ -47,14 +48,26 @@ function stripComment(line: string): string {
   return line;
 }
 
+// HOT-PATH (imperative by design): a cursor scan over one string literal; the
+// accumulator never escapes this call.
 function parseString(raw: string, lineNumber: number): string {
   if (raw.length < 2 || !raw.startsWith('"') || !raw.endsWith('"')) {
     throw new TomlError(`expected a double-quoted string, got ${raw}`, lineNumber);
   }
+  if (raw.startsWith('"""')) {
+    throw new TomlError('multi-line strings are not supported', lineNumber);
+  }
   const body = raw.slice(1, -1);
   let out = '';
   for (let index = 0; index < body.length; index += 1) {
-    const char = body[index];
+    const char = body[index] ?? '';
+    const code = char.charCodeAt(0);
+    if (char === '"') {
+      throw new TomlError('unescaped quote inside string', lineNumber);
+    }
+    if ((code < 0x20 && code !== 0x09) || code === 0x7f) {
+      throw new TomlError('control character in string', lineNumber);
+    }
     if (char !== '\\') {
       out += char;
       continue;
@@ -62,6 +75,12 @@ function parseString(raw: string, lineNumber: number): string {
     index += 1;
     const escape = body[index];
     switch (escape) {
+      case 'b':
+        out += '\b';
+        break;
+      case 'f':
+        out += '\f';
+        break;
       case 'n':
         out += '\n';
         break;
@@ -77,6 +96,21 @@ function parseString(raw: string, lineNumber: number): string {
       case '\\':
         out += '\\';
         break;
+      case 'u':
+      case 'U': {
+        const digits = escape === 'u' ? 4 : 8;
+        const hex = body.slice(index + 1, index + 1 + digits);
+        if (hex.length !== digits || !/^[0-9A-Fa-f]+$/u.test(hex)) {
+          throw new TomlError('invalid unicode escape', lineNumber);
+        }
+        const scalar = Number.parseInt(hex, 16);
+        if (scalar > 0x10ffff || (scalar >= 0xd800 && scalar <= 0xdfff)) {
+          throw new TomlError('invalid unicode scalar value', lineNumber);
+        }
+        out += String.fromCodePoint(scalar);
+        index += digits;
+        break;
+      }
       default:
         throw new TomlError(`unsupported escape \\${escape ?? ''}`, lineNumber);
     }
@@ -107,7 +141,35 @@ function bracketDepth(line: string): number {
   return depth;
 }
 
-function parseArray(raw: string, lineNumber: number): string[] {
+// TOML forbids leading zeros; a float needs a fraction or an exponent.
+const INTEGER = /^[+-]?(0|[1-9]\d*)$/;
+const FLOAT = /^[+-]?(0|[1-9]\d*)(\.\d+([eE][+-]?\d+)?|[eE][+-]?\d+)$/;
+
+function parseArrayItem(item: string, lineNumber: number): string | number {
+  if (item.startsWith('"')) {
+    return parseString(item, lineNumber);
+  }
+  if (INTEGER.test(item)) {
+    return Number.parseInt(item, 10);
+  }
+  if (FLOAT.test(item)) {
+    return Number.parseFloat(item);
+  }
+  throw new TomlError(`arrays may contain only strings or numbers, got ${item}`, lineNumber);
+}
+
+function parseArray(raw: string, lineNumber: number): string[] | number[] {
+  const values = splitArrayItems(raw).map((item) => parseArrayItem(item, lineNumber));
+  if (values.every((value): value is string => typeof value === 'string')) {
+    return values;
+  }
+  if (values.every((value): value is number => typeof value === 'number')) {
+    return values;
+  }
+  throw new TomlError('arrays must not mix strings and numbers', lineNumber);
+}
+
+function splitArrayItems(raw: string): string[] {
   const body = raw.slice(1, -1).trim();
   if (body === '') {
     return [];
@@ -136,7 +198,7 @@ function parseArray(raw: string, lineNumber: number): string[] {
   if (current.trim() !== '') {
     items.push(current.trim());
   }
-  return items.map((item) => parseString(item, lineNumber));
+  return items;
 }
 
 function parseValue(raw: string, lineNumber: number): TomlValue {
@@ -162,10 +224,10 @@ function parseValue(raw: string, lineNumber: number): TomlValue {
   if (trimmed === 'false') {
     return false;
   }
-  if (/^[+-]?\d+$/.test(trimmed)) {
+  if (INTEGER.test(trimmed)) {
     return Number.parseInt(trimmed, 10);
   }
-  if (/^[+-]?(\d+\.\d+|\d+[eE][+-]?\d+)$/.test(trimmed)) {
+  if (FLOAT.test(trimmed)) {
     return Number.parseFloat(trimmed);
   }
   throw new TomlError(`unsupported value ${trimmed}`, lineNumber);
@@ -200,9 +262,22 @@ function splitPath(header: string, lineNumber: number): string[] {
   });
 }
 
-export function parseToml(input: string): TomlTable {
+export interface ParseTomlOptions {
+  /**
+   * Called with the full key path of every scalar written as a float literal
+   * (`5000.0`, `1e3`). JavaScript numbers cannot tell `1` from `1.0`, so
+   * callers that require TOML integers use this to reject float spellings.
+   */
+  readonly onFloat?: (path: readonly string[]) => void;
+}
+
+// HOT-PATH (imperative by design): a line cursor that builds one private table
+// tree; nothing mutable escapes except the returned result.
+export function parseToml(input: string, options: ParseTomlOptions = {}): TomlTable {
   const root: TomlTable = {};
   let current = root;
+  let currentPath: readonly string[] = [];
+  const definedTables = new Set<TomlTable>();
   const lines = input.split(/\r?\n/);
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -234,7 +309,14 @@ export function parseToml(input: string): TomlTable {
           throw new TomlError(`"${segment}" is already a value, not a table`, lineNumber);
         }
       }
+      // A table created implicitly by `[a.b]` may still be defined once as
+      // `[a]`; an explicit header may never appear twice.
+      if (definedTables.has(node)) {
+        throw new TomlError(`table [${path.join('.')}] is defined more than once`, lineNumber);
+      }
+      definedTables.add(node);
       current = node;
+      currentPath = path;
       continue;
     }
 
@@ -267,7 +349,11 @@ export function parseToml(input: string): TomlTable {
         depth += bracketDepth(continuation);
       }
     }
-    current[key] = parseValue(raw, lineNumber);
+    const value = parseValue(raw, lineNumber);
+    if (typeof value === 'number' && !INTEGER.test(raw.trim())) {
+      options.onFloat?.([...currentPath, key]);
+    }
+    current[key] = value;
   }
 
   return root;
