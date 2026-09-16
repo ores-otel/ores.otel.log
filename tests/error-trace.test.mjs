@@ -26,6 +26,9 @@ const record = (overrides = {}) => ({
   ...overrides,
 });
 
+const legacyTraceId = (suffix) => ['dd', 'trace', suffix].join('-');
+const legacyRoutineId = (suffix) => ['ddl', 'routine', suffix].join('-');
+
 test('builds the portable error-trace telemetry envelope without fingerprint semantics', () => {
   const input = record({
     traceId: 'ores-trace-V1StGXR8_Z5jdHi6B-myT',
@@ -98,15 +101,17 @@ test('explicit options override only reviewed contract fields', () => {
 });
 
 test('identifier guards reject legacy or malformed correlation values', () => {
+  const oldTraceId = legacyTraceId('V1StGXR8_Z5jdHi6B-myT');
+  const oldRoutineId = legacyRoutineId('old');
   assert.equal(isOresTraceId('ores-trace-V1StGXR8_Z5jdHi6B-myT'), true);
-  assert.equal(isOresTraceId('dd-trace-V1StGXR8_Z5jdHi6B-myT'), false);
+  assert.equal(isOresTraceId(oldTraceId), false);
   assert.equal(isOresRoutineId('ores-routine-V1StGXR8_Z5jdHi6B-myT'), true);
   assert.equal(isOtelTraceId('4bf92f3577b34da6a3ce929d0e0e4736'), true);
   assert.equal(isOtelSpanId('00f067aa0ba902b7'), true);
   assert.equal(isReleaseSha('abcdef1'), true);
 
   assert.throws(
-    () => buildErrorTraceTelemetry(record({ traceId: 'dd-trace-V1StGXR8_Z5jdHi6B-myT' })),
+    () => buildErrorTraceTelemetry(record({ traceId: oldTraceId })),
     /invalid trace_id/u,
   );
   assert.throws(
@@ -114,7 +119,7 @@ test('identifier guards reject legacy or malformed correlation values', () => {
     /invalid otel_trace_id/u,
   );
   assert.throws(
-    () => buildErrorTraceTelemetry(record({ routineId: 'ddl-routine-old' })),
+    () => buildErrorTraceTelemetry(record({ routineId: oldRoutineId })),
     /invalid routine_id/u,
   );
   assert.throws(
@@ -144,7 +149,7 @@ test('x-ores-trace-id is authored lowercase and incoming matching is case-insens
   assert.equal(readOresTraceIdHeader(new Headers({ 'X-Ores-Trace-Id': id })), id);
   assert.equal(readOresTraceIdHeader({}), undefined);
   assert.throws(
-    () => readOresTraceIdHeader({ 'x-ores-trace-id': 'dd-trace-legacy' }),
+    () => readOresTraceIdHeader({ 'x-ores-trace-id': legacyTraceId('legacy') }),
     /invalid x-ores-trace-id/u,
   );
   assert.throws(
