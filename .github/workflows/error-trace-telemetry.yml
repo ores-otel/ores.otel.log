@@ -1,0 +1,145 @@
+name: Error-trace telemetry runtime admission
+
+on:
+  pull_request:
+    paths:
+      - 'src/error-trace.ts'
+      - 'tests/error-trace.test.mjs'
+      - 'docs/error-trace-telemetry.md'
+      - 'contracts/public/ores-error-trace.v1/**'
+      - 'package.json'
+      - '.github/workflows/error-trace-telemetry.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/error-trace.ts'
+      - 'tests/error-trace.test.mjs'
+      - 'contracts/public/ores-error-trace.v1/**'
+      - 'package.json'
+      - '.github/workflows/error-trace-telemetry.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: error-trace-telemetry-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-contract-admission:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out exact consumer head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+          show-progress: false
+
+      - name: Verify exact source closure and mirror provenance
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git diff --check
+          provenance='contracts/public/ores-error-trace.v1/PROVENANCE.md'
+          test -s "$provenance"
+          grep -Fq 'a24258ffb6bd6577f733382c18b1a4290ad29388' "$provenance"
+          grep -Fq 'This public mirror is not a third authority' "$provenance"
+          grep -Fq 'ORESoftware/typespec-json-schema-validator' "$provenance"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install without lifecycle side effects
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Strict typecheck and build error-trace module
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsc -p tsconfig.json --noEmit
+          npx tsc -p tsconfig.build.json
+          test -s dist/error-trace.js
+          test -s dist/error-trace.d.ts
+
+      - name: Run focused runtime/adversarial tests
+        run: node --test tests/error-trace.test.mjs
+
+      - name: Build runtime instance corpus
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .tjsv-instances/OresErrorTraceTelemetryV1/valid
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { buildErrorTraceTelemetry } from './dist/error-trace.js';
+          const event = buildErrorTraceTelemetry({
+            schema: 'next-loggers/v1',
+            id: 'ci-log-1',
+            timestamp: '2026-09-15T12:00:00.000Z',
+            level: 'ERROR',
+            runtime: 'node',
+            appName: 'payments-api',
+            message: 'query failed',
+            values: [],
+            fields: {
+              environment: 'prod',
+              repository: 'payments/payments-api',
+              release_sha: '0123456789abcdef0123456789abcdef01234567',
+              otel_trace_id: '4bf92f3577b34da6a3ce929d0e0e4736',
+              otel_span_id: '00f067aa0ba902b7'
+            },
+            traceId: 'ores-trace-V1StGXR8_Z5jdHi6B-myT',
+            routineId: 'ores-routine-V1StGXR8_Z5jdHi6B-myT',
+            errors: [{name: 'DbError', message: 'connection timeout', code: 'DB_TIMEOUT'}],
+            stackTrace: ['src/db.ts:123:45']
+          });
+          fs.writeFileSync('.tjsv-instances/OresErrorTraceTelemetryV1/valid/runtime.json', `${JSON.stringify(event, null, 2)}\n`);
+          NODE
+
+      - name: Re-admit runtime output against mirrored peer authorities
+        uses: ORESoftware/typespec-json-schema-validator@93dd73cb246a09b0a1c62d7192cc62ca6ecbe405
+        with:
+          typespec: contracts/public/ores-error-trace.v1/main.tsp
+          schema: contracts/public/ores-error-trace.v1/authored.schema.json
+          instances: .tjsv-instances
+          report: .typespec-json-schema-validator/error-trace-runtime-report.json
+          contract_ir: .typespec-json-schema-validator/error-trace-runtime-contract-ir.json
+          output_dir: .typespec-json-schema-validator/generated/error-trace-runtime
+          quiet: 'false'
+
+      - name: Require peer authority and runtime-instance evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('.typespec-json-schema-validator/error-trace-runtime-report.json', 'utf8'));
+          if (report.status !== 'passed' || report.zeroUnexplainedFindings !== true) throw new Error('runtime contract admission failed');
+          if (report.authorities?.precedence !== 'none') throw new Error('peer authority precedence drift');
+          if (report.authorities?.typespec?.authority !== 'independently-authored') throw new Error('TypeSpec authority drift');
+          if (report.authorities?.jsonSchema?.authority !== 'independently-authored') throw new Error('JSON Schema authority drift');
+          const d = report.differential?.summary;
+          if (report.coverage?.differentialInstanceValidation !== true || !d || d.divergences !== 0 || d.refusals !== 0) {
+            throw new Error('runtime differential evidence incomplete');
+          }
+          NODE
+
+      - name: Retain deterministic admission evidence
+        if: ${{ always() }}
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: error-trace-runtime-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .typespec-json-schema-validator/
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 90
