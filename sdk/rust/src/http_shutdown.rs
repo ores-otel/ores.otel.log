@@ -183,9 +183,9 @@ impl Default for HttpShutdownController {
 
 impl HttpShutdownController {
     #[must_use]
-    pub const fn new(grace_period: Duration) -> Self {
+    pub fn new(grace_period: Duration) -> Self {
         Self {
-            lifecycle: Mutex::new(ShutdownStateMachine::new()),
+            lifecycle: Mutex::new(ShutdownStateMachine::default()),
             gate: HttpShutdownGate::new(grace_period),
             finalization_claimed: AtomicBool::new(false),
         }
@@ -263,14 +263,13 @@ impl HttpShutdownController {
                 }
             }
             (ShutdownPhase::Draining, ShutdownTrigger::SigInt, true) => ShutdownDecision::Ignore,
-            (
-                ShutdownPhase::Draining,
-                ShutdownTrigger::SigInt | ShutdownTrigger::SigTerm,
-                false,
-            ) => match lifecycle.trigger() {
-                ShutdownAction::Force => ShutdownDecision::Force,
-                _ => ShutdownDecision::Ignore,
-            },
+            (ShutdownPhase::Draining, ShutdownTrigger::SigInt, false)
+            | (ShutdownPhase::Draining, ShutdownTrigger::SigTerm, _) => {
+                match lifecycle.trigger() {
+                    ShutdownAction::Force => ShutdownDecision::Force,
+                    _ => ShutdownDecision::Ignore,
+                }
+            }
             _ => ShutdownDecision::Ignore,
         };
         drop(lifecycle);
@@ -376,6 +375,23 @@ mod tests {
         assert_eq!(
             controller
                 .handle_trigger(ShutdownTrigger::SigTerm, false)
+                .decision,
+            ShutdownDecision::Force
+        );
+    }
+
+    #[test]
+    fn interactive_second_sigterm_still_forces() {
+        let controller = HttpShutdownController::default();
+        assert_eq!(
+            controller
+                .handle_trigger(ShutdownTrigger::SigInt, true)
+                .decision,
+            ShutdownDecision::Drain
+        );
+        assert_eq!(
+            controller
+                .handle_trigger(ShutdownTrigger::SigTerm, true)
                 .decision,
             ShutdownDecision::Force
         );
