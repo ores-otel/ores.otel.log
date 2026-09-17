@@ -60,7 +60,6 @@ jobs:
             sdk/go/context_test.go \
             sdk/go/request_context.go \
             sdk/go/request_context_test.go
-          cargo fmt --manifest-path sdk/rust/Cargo.toml
           cargo fmt --manifest-path sdk/rust-context/Cargo.toml
           cargo fmt --manifest-path sdk/rust-request-context/Cargo.toml
           # Run inside the package so the formatter picks up the pubspec language
@@ -85,7 +84,6 @@ jobs:
           set -euo pipefail
           git diff -- \
             sdk/go \
-            sdk/rust \
             sdk/rust-context \
             sdk/rust-request-context \
             sdk/dart \
@@ -108,7 +106,6 @@ jobs:
         run: |
           set -euo pipefail
           (cd sdk/go && go test ./...)
-          cargo test --manifest-path sdk/rust/Cargo.toml
           cargo test --manifest-path sdk/rust-context/Cargo.toml
           cargo test --manifest-path sdk/rust-context/Cargo.toml --features tokio
           cargo test --manifest-path sdk/rust-request-context/Cargo.toml
@@ -138,8 +135,6 @@ jobs:
             sdk/go/context_test.go
             sdk/go/request_context.go
             sdk/go/request_context_test.go
-            sdk/rust/src/http_shutdown.rs
-            sdk/rust/src/lib.rs
             sdk/rust-context/src/lib.rs
             sdk/rust-context/tests/context.rs
             sdk/rust-context/tests/tokio_context.rs
