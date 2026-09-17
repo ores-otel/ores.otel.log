@@ -399,7 +399,7 @@ mod tests {
     #[test]
     fn grace_deadline_escalates_without_second_signal() {
         let controller = HttpShutdownController::new(Duration::from_millis(2));
-        controller.handle_trigger(ShutdownTrigger::SigTerm, false);
+        let _ = controller.handle_trigger(ShutdownTrigger::SigTerm, false);
         thread::sleep(Duration::from_millis(4));
         assert!(controller.deadline_expired());
         assert_eq!(
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn graceful_completion_closes_without_forcing() {
         let controller = HttpShutdownController::default();
-        controller.handle_trigger(ShutdownTrigger::SigTerm, false);
+        let _ = controller.handle_trigger(ShutdownTrigger::SigTerm, false);
         assert_eq!(
             controller
                 .handle_trigger(ShutdownTrigger::GracefulComplete, false)
