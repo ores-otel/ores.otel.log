@@ -264,12 +264,10 @@ impl HttpShutdownController {
             }
             (ShutdownPhase::Draining, ShutdownTrigger::SigInt, true) => ShutdownDecision::Ignore,
             (ShutdownPhase::Draining, ShutdownTrigger::SigInt, false)
-            | (ShutdownPhase::Draining, ShutdownTrigger::SigTerm, _) => {
-                match lifecycle.trigger() {
-                    ShutdownAction::Force => ShutdownDecision::Force,
-                    _ => ShutdownDecision::Ignore,
-                }
-            }
+            | (ShutdownPhase::Draining, ShutdownTrigger::SigTerm, _) => match lifecycle.trigger() {
+                ShutdownAction::Force => ShutdownDecision::Force,
+                _ => ShutdownDecision::Ignore,
+            },
             _ => ShutdownDecision::Ignore,
         };
         drop(lifecycle);
@@ -307,7 +305,8 @@ impl HttpShutdownController {
     #[must_use]
     pub fn force_if_deadline_expired(&self) -> ShutdownDecision {
         if self.deadline_expired() {
-            self.handle_trigger(ShutdownTrigger::Deadline, false).decision
+            self.handle_trigger(ShutdownTrigger::Deadline, false)
+                .decision
         } else {
             ShutdownDecision::Ignore
         }
@@ -403,7 +402,10 @@ mod tests {
         controller.handle_trigger(ShutdownTrigger::SigTerm, false);
         thread::sleep(Duration::from_millis(4));
         assert!(controller.deadline_expired());
-        assert_eq!(controller.force_if_deadline_expired(), ShutdownDecision::Force);
+        assert_eq!(
+            controller.force_if_deadline_expired(),
+            ShutdownDecision::Force
+        );
         assert_eq!(controller.phase(), ShutdownPhase::Forced);
     }
 
