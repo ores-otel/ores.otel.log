@@ -8,6 +8,7 @@ pub use logger_core::*;
 pub mod apm;
 pub mod config;
 pub mod context;
+pub mod http_shutdown;
 #[cfg(all(unix, feature = "launcher"))]
 pub mod launcher;
 pub mod shutdown;
@@ -31,6 +32,11 @@ pub use context::{
     apply_log_context, capture_log_context, contextualize_future, current_log_context,
     enter_log_context, merge_log_context, update_log_context, with_captured_log_context,
     with_log_context, with_log_context_async, ContextFuture, LogContext, LogContextGuard,
+};
+pub use http_shutdown::{
+    HttpAdmission, HttpShutdownController, HttpShutdownGate, HttpShutdownRejection,
+    ShutdownDecision, ShutdownSignalOutcome, ShutdownTrigger, DEFAULT_HTTP_GRACE_PERIOD,
+    SHUTDOWN_HTTP_BODY, SHUTDOWN_HTTP_STATUS,
 };
 pub use shutdown::{
     transition_shutdown_state, ShutdownAction, ShutdownEvent, ShutdownPhase, ShutdownStateMachine,
