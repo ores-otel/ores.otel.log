@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "repository": "ORESoftware/next-loggers.ts",
+  "status": "compatibility_mirror",
+  "canonical_repository": "ores-otel/ores.otel.log",
+  "canonical_development_here": false,
+  "root_package": {
+    "name": "@oresoftware/next-loggers",
+    "baseline_version": "0.1.0"
+  },
+  "sdk_directories": [
+    "dart", "elixir", "erlang", "gleam", "go", "java", "nodejs", "python", "ruby", "rust", "rust-context", "rust-otel", "wasm"
+  ],
+  "compatibility_rules": {
+    "new_sdk_family": "forbidden",
+    "new_release_channel": "forbidden",
+    "new_feature_line": "forbidden",
+    "security_or_reproducibility_fix": "allowed",
+    "canonical_conformance_fix": "allowed"
+  },
+  "known_external_consumers": [
+    "ORESoftware/ores-middleware",
+    "ORESoftware/ores-cli"
+  ],
+  "migration": {
+    "typescript_javascript": "Use the same package API only while pinned; move source/development references and future releases to ores-otel/ores.otel.log.",
+    "polyglot": "Use each sdk-manifest canonicalName and immutable canonical release/tag; legacy package/module names remain compatibility identities only."
+  },
+  "retirement_criteria": [
+    "No mutable external consumer depends on this legacy remote.",
+    "All supported SDK release workflows execute from ores-otel/ores.otel.log.",
+    "No compatibility fix has been required here for 180 days."
+  ],
+  "policy_version": 1
+}
