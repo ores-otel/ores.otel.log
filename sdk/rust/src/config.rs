@@ -2353,6 +2353,125 @@ pub fn ores_otel_config_file_path(
         })
 }
 
+/// Hard ceiling on the ancestor walk, so a runaway search cannot wander the
+/// filesystem from a deeply nested starting directory.
+pub const MAX_DISCOVERY_ANCESTORS: usize = 64;
+
+/// A directory is a repository root when it holds a `.git`. That is a directory
+/// in a normal clone and a file in a worktree or submodule, so existence — not
+/// directory-ness — is the right test.
+#[must_use]
+pub fn is_repo_root(directory: &std::path::Path) -> bool {
+    directory.join(".git").exists()
+}
+
+/// Where the shared precedence rules point, before any filesystem access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OresOtelConfigStart {
+    /// An exact file was named. Use it or fail; never walk.
+    File(PathBuf),
+    /// A directory was named or defaulted. Walk upward from here.
+    Directory(PathBuf),
+}
+
+/// Classifies the configured source without touching the filesystem.
+///
+/// Same precedence as [`ores_otel_config_file_path`] — `file_path`, `cwd`,
+/// `ORES_OTEL_CONFIG_FILE`, `ORES_OTEL_CONFIG_DIR`, `current_directory` — but it
+/// reports whether the winning source named a *file* or a *directory*, which is
+/// what decides whether an upward walk is allowed.
+#[must_use]
+pub fn ores_otel_config_start(
+    file_path: Option<&std::path::Path>,
+    cwd: Option<&std::path::Path>,
+    env: &OresOtelEnv,
+    current_directory: &std::path::Path,
+) -> OresOtelConfigStart {
+    fn non_blank(value: Option<&str>) -> Option<&str> {
+        value.map(js_trim).filter(|value| !value.is_empty())
+    }
+    fn directory(value: &str) -> PathBuf {
+        PathBuf::from(value.trim_end_matches(['/', '\\']))
+    }
+    let env_value = |name: &str| non_blank(env.get(name).map(String::as_str));
+
+    if let Some(value) = non_blank(file_path.and_then(std::path::Path::to_str)) {
+        return OresOtelConfigStart::File(PathBuf::from(value));
+    }
+    if let Some(value) = non_blank(cwd.and_then(std::path::Path::to_str)) {
+        return OresOtelConfigStart::Directory(directory(value));
+    }
+    if let Some(value) = env_value(ENV_CONFIG_FILE) {
+        return OresOtelConfigStart::File(PathBuf::from(value));
+    }
+    if let Some(value) = env_value(ENV_CONFIG_DIR) {
+        return OresOtelConfigStart::Directory(directory(value));
+    }
+    OresOtelConfigStart::Directory(directory(current_directory.to_str().unwrap_or(".")))
+}
+
+/// Resolves the config path, walking up the directory tree when the winning
+/// source named a directory.
+///
+/// [`ores_otel_config_file_path`] resolves exactly one directory and is pinned
+/// by the cross-SDK lookup fixtures, so it is left untouched. This is the
+/// filesystem-aware companion: a service started from a subdirectory finds the
+/// `.ores-otel.toml` that governs it instead of missing it.
+///
+/// An explicitly named file is used exactly as given and never walked past, so
+/// pointing at a specific file cannot silently fall back to a parent's copy.
+/// When no ancestor holds the file, the first candidate is returned unchanged so
+/// the caller reports the same "missing at the expected location" error as before.
+#[must_use]
+pub fn ores_otel_config_file_path_upward(
+    file_path: Option<&std::path::Path>,
+    cwd: Option<&std::path::Path>,
+    env: &OresOtelEnv,
+    current_directory: &std::path::Path,
+) -> PathBuf {
+    match ores_otel_config_start(file_path, cwd, env, current_directory) {
+        OresOtelConfigStart::File(path) => path,
+        OresOtelConfigStart::Directory(start) => {
+            let canonical =
+                std::fs::canonicalize(&start).unwrap_or_else(|_| start.clone());
+            let first = canonical.join(ORES_OTEL_CONFIG_BASENAME);
+            for ancestor in canonical.ancestors().take(MAX_DISCOVERY_ANCESTORS) {
+                let candidate = ancestor.join(ORES_OTEL_CONFIG_BASENAME);
+                if candidate.is_file() {
+                    warn_unless_repo_root(&candidate, ancestor);
+                    return candidate;
+                }
+            }
+            first
+        }
+    }
+}
+
+/// Warns when the telemetry config governing this process was not found at a
+/// repository root.
+///
+/// The walk taking the nearest file is correct, but the same behaviour will
+/// quietly consume a config left behind in a subdirectory, or one from another
+/// tree if the walk escaped the repository. A warning, not an error: a nested
+/// config is legitimate in a workspace member.
+fn warn_unless_repo_root(path: &std::path::Path, directory: &std::path::Path) {
+    if is_repo_root(directory) {
+        return;
+    }
+    // This crate is the logger, so the warning goes out through it directly.
+    let logger = crate::logger_core::Logger::new(crate::logger_core::Options {
+        app_name: "oresoftware-next-loggers".into(),
+        name: Some("config-discovery".into()),
+        ..crate::logger_core::Options::default()
+    });
+    let _ = logger.warn(vec![crate::logger_core::json!({
+        "event": "ores.config.not_at_repo_root",
+        "config_path": path.display().to_string(),
+        "detail": "ores-otel configuration was found outside a repository root \
+(no adjacent .git); confirm this file is meant to govern the running service",
+    })]);
+}
+
 fn config_file_path(
     options: &LoadOptions,
     env: &OresOtelEnv,
@@ -2701,5 +2820,142 @@ mod tests {
         .is_err());
 
         std::fs::remove_dir_all(&dir).expect("clean temp dir");
+    }
+}
+
+#[cfg(test)]
+mod upward_discovery_tests {
+    use super::*;
+    use std::fs;
+
+    fn fixture(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("ores-otel-walk-{tag}"));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("fixture root");
+        root
+    }
+
+    fn empty_env() -> OresOtelEnv {
+        OresOtelEnv::default()
+    }
+
+    #[test]
+    fn the_pure_resolver_is_unchanged_by_the_walk() {
+        // ores_otel_config_file_path is pinned by the cross-SDK lookup fixtures
+        // and must keep resolving exactly one directory, without touching disk.
+        let resolved = ores_otel_config_file_path(
+            None,
+            None,
+            &empty_env(),
+            std::path::Path::new("/work"),
+        );
+        assert_eq!(resolved, PathBuf::from("/work/.ores-otel.toml"));
+    }
+
+    #[test]
+    fn start_classification_follows_the_shared_precedence() {
+        let mut env = empty_env();
+        env.insert(ENV_CONFIG_FILE.to_owned(), "/srv/custom.toml".to_owned());
+        env.insert(ENV_CONFIG_DIR.to_owned(), "/etc/app".to_owned());
+        let work = std::path::Path::new("/work");
+
+        assert_eq!(
+            ores_otel_config_start(Some(std::path::Path::new("/explicit.toml")), None, &env, work),
+            OresOtelConfigStart::File(PathBuf::from("/explicit.toml"))
+        );
+        // A cwd argument outranks ORES_OTEL_CONFIG_FILE, and is directory-shaped.
+        assert_eq!(
+            ores_otel_config_start(None, Some(std::path::Path::new("/repo")), &env, work),
+            OresOtelConfigStart::Directory(PathBuf::from("/repo"))
+        );
+        assert_eq!(
+            ores_otel_config_start(None, None, &env, work),
+            OresOtelConfigStart::File(PathBuf::from("/srv/custom.toml"))
+        );
+
+        let mut dir_only = empty_env();
+        dir_only.insert(ENV_CONFIG_DIR.to_owned(), "/etc/app/".to_owned());
+        assert_eq!(
+            ores_otel_config_start(None, None, &dir_only, work),
+            OresOtelConfigStart::Directory(PathBuf::from("/etc/app"))
+        );
+        assert_eq!(
+            ores_otel_config_start(None, None, &empty_env(), work),
+            OresOtelConfigStart::Directory(PathBuf::from("/work"))
+        );
+    }
+
+    #[test]
+    fn walks_up_from_a_nested_directory_to_the_nearest_config() {
+        let root = fixture("nested");
+        let deep = root.join("services/api/src");
+        fs::create_dir_all(&deep).expect("dirs");
+        fs::write(root.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").expect("write");
+
+        let found = ores_otel_config_file_path_upward(None, Some(&deep), &empty_env(), &deep);
+        assert_eq!(
+            fs::canonicalize(found).expect("canon"),
+            fs::canonicalize(root.join(ORES_OTEL_CONFIG_BASENAME)).expect("canon")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_nearest_config_wins() {
+        let root = fixture("nearest");
+        let inner = root.join("member");
+        fs::create_dir_all(&inner).expect("dirs");
+        fs::write(root.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").expect("write");
+        fs::write(inner.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").expect("write");
+
+        let found = ores_otel_config_file_path_upward(None, Some(&inner), &empty_env(), &inner);
+        assert_eq!(
+            fs::canonicalize(found).expect("canon"),
+            fs::canonicalize(inner.join(ORES_OTEL_CONFIG_BASENAME)).expect("canon")
+        );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_explicit_file_is_never_walked_past() {
+        let root = fixture("explicit");
+        fs::create_dir_all(root.join("a")).expect("dirs");
+        fs::write(root.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").expect("write");
+        let named = root.join("a/absent.toml");
+
+        // The named file does not exist, and there IS a config in the ancestor.
+        // The walk must not rescue it: an operator naming a file gets that file.
+        let found = ores_otel_config_file_path_upward(Some(&named), None, &empty_env(), &root);
+        assert_eq!(found, named);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_missing_config_returns_the_expected_location_unchanged() {
+        let root = fixture("missing");
+        let deep = root.join("x/y");
+        fs::create_dir_all(&deep).expect("dirs");
+        let found = ores_otel_config_file_path_upward(None, Some(&deep), &empty_env(), &deep);
+        // Nothing was written anywhere in the fixture, so the result must not
+        // point inside it; the caller still reports a missing-config error.
+        assert!(found.ends_with(ORES_OTEL_CONFIG_BASENAME));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn repo_root_detection_accepts_a_git_file_and_a_git_directory() {
+        let dir_root = fixture("git-dir");
+        fs::create_dir_all(dir_root.join(".git")).expect("git dir");
+        assert!(is_repo_root(&dir_root));
+        let _ = fs::remove_dir_all(&dir_root);
+
+        let worktree = fixture("git-file");
+        fs::write(worktree.join(".git"), "gitdir: /elsewhere\n").expect("git file");
+        assert!(is_repo_root(&worktree), "a .git file is still a repository root");
+        let _ = fs::remove_dir_all(&worktree);
+
+        let plain = fixture("no-git");
+        assert!(!is_repo_root(&plain));
+        let _ = fs::remove_dir_all(&plain);
     }
 }
