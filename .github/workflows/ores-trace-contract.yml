@@ -21,8 +21,20 @@ jobs:
           const cp = require('node:child_process');
           const path = require('node:path');
           const sourceExts = new Set(['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs']);
-          const ignored = /(^|\/)(node_modules|dist|build|coverage|vendor|generated)(\/|$)/;
-          const files = cp.execFileSync('git', ['ls-files'], { encoding: 'utf8' }).split(/\r?\n/).filter(Boolean).filter((file) => sourceExts.has(path.extname(file)) && !ignored.test(file));
+          // API conformance tests deliberately exercise arbitrary trace IDs. This
+          // fleet rule applies to implementation call-site markers, not fixtures
+          // that verify the logger still accepts dynamic/runtime trace context.
+          // The ESLint rule implementation itself also contains method-name
+          // literals such as '.addTraceId(' and is validated by its AST tests.
+          const ignored = /(^|\/)(node_modules|dist|build|coverage|vendor|generated|tests|\.r2g)(\/|$)/;
+          const files = cp.execFileSync('git', ['ls-files'], { encoding: 'utf8' })
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .filter((file) =>
+              sourceExts.has(path.extname(file)) &&
+              !ignored.test(file) &&
+              file !== 'src/eslint-plugin.ts'
+            );
           const failures = [];
           for (const file of files) {
             const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
@@ -37,5 +49,5 @@ jobs:
             });
           }
           if (failures.length) { console.error(failures.join('\n')); process.exit(1); }
-          console.log(`checked ${files.length} JS/TS source files for ORES trace marker conventions`);
+          console.log(`checked ${files.length} implementation JS/TS source files for ORES trace marker conventions`);
           NODE
