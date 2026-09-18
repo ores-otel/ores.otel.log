@@ -87,9 +87,9 @@ impl ResourcePressureKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::ProcessRss => "process_rss",
-            Self::FilesystemFreeBytes => "filesystem_free_bytes",
-            Self::FilesystemFreeRatio => "filesystem_free_ratio",
-            Self::FilesystemInodeFreeRatio => "filesystem_inode_free_ratio",
+            Self::FilesystemFreeBytes => "disk_free_bytes",
+            Self::FilesystemFreeRatio => "disk_free_ratio",
+            Self::FilesystemInodeFreeRatio => "disk_inode_free_ratio",
         }
     }
 }
@@ -197,7 +197,7 @@ fn pressure_point(pressure: &ResourcePressure) -> MetricPoint {
     gauge(
         METRIC_RESOURCE_PRESSURE,
         "1",
-        1.0,
+        if pressure.breached { 1.0 } else { 0.0 },
         vec![
             (ATTR_PRESSURE_KIND, pressure.kind.as_str().to_owned()),
             (ATTR_PRESSURE_TARGET, pressure.target.clone()),
@@ -207,9 +207,11 @@ fn pressure_point(pressure: &ResourcePressure) -> MetricPoint {
 
 /// Converts one resource observation into semantic-convention points.
 ///
-/// Absent process fields produce no point. Each breached threshold in `health`
-/// produces one `ores.apm.resource.pressure` gauge with value `1`; a threshold
-/// that is not breached produces nothing.
+/// Absent process fields produce no point. Each evaluated threshold in
+/// `health` produces one `ores.apm.resource.pressure` gauge: `1` while
+/// breached and `0` otherwise, so alerts observe recovery. Disk kinds use the
+/// wire names shared with the TypeScript and Dart SDKs (`disk_free_bytes`,
+/// `disk_free_ratio`, `disk_inode_free_ratio`).
 #[must_use]
 pub fn resource_metric_points(
     snapshot: &ResourceSnapshot,
@@ -455,10 +457,10 @@ mod tests {
     }
 
     #[test]
-    fn pressures_become_breach_gauges() {
+    fn every_evaluated_threshold_becomes_a_one_or_zero_gauge() {
         let thresholds = ResourceThresholds {
             min_free_bytes: Some(500),
-            min_free_ratio: Some(0.5),
+            min_free_ratio: Some(0.1),
             ..ResourceThresholds::default()
         };
         let health = evaluate_resource_snapshot(&snapshot(), &thresholds);
@@ -468,10 +470,20 @@ mod tests {
             .filter(|point| point.name == METRIC_RESOURCE_PRESSURE)
             .collect::<Vec<_>>();
         assert_eq!(pressures.len(), 2);
-        assert!(pressures.iter().all(|point| point.value == 1.0));
+        assert_eq!(
+            pressures
+                .iter()
+                .map(|point| point.value)
+                .collect::<Vec<_>>(),
+            vec![1.0, 0.0],
+            "breached free bytes is 1, recovered free ratio is 0"
+        );
         assert!(pressures[0]
             .attributes
-            .contains(&(ATTR_PRESSURE_KIND, "filesystem_free_bytes".to_owned())));
+            .contains(&(ATTR_PRESSURE_KIND, "disk_free_bytes".to_owned())));
+        assert!(pressures[1]
+            .attributes
+            .contains(&(ATTR_PRESSURE_KIND, "disk_free_ratio".to_owned())));
         assert!(pressures[0]
             .attributes
             .contains(&(ATTR_PRESSURE_TARGET, "/data".to_owned())));

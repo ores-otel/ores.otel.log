@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:oresoftware_next_loggers/oresoftware_next_loggers.dart';
 import 'package:test/test.dart';
 
-/// Cross-language parity corpus shared with the TypeScript and Rust loaders.
+/// Cross-language parity corpus shared with the TypeScript and Rust loaders
+/// and APM SDKs.
 /// Tests run with cwd = sdk/dart.
 final _fixtureRoot = Directory('../../tests/fixtures/ores-otel-config');
 
@@ -76,6 +77,47 @@ void main() {
       } else {
         expect(_normalize(resolve().toJson()), _normalize(expected));
       }
+    });
+  }
+
+  final diskPressure =
+      _readJson(_fixtureRoot.parent, 'ores-otel-apm-disk-pressure.json')!
+          as Map<String, dynamic>;
+  test('disk-pressure corpus is not empty', () {
+    expect(diskPressure['metric'], 'ores.apm.resource.pressure');
+    expect(diskPressure['cases'] as List<dynamic>,
+        hasLength(greaterThanOrEqualTo(6)));
+  });
+  for (final raw in diskPressure['cases'] as List<dynamic>) {
+    final item = raw as Map<String, dynamic>;
+    test('disk pressure: ${item['name']}', () {
+      final m = item['measurement'] as Map<String, dynamic>;
+      final t = item['thresholds'] as Map<String, dynamic>;
+      final pressure = evaluateDiskPressure(
+        path: m['path'] as String,
+        availableBytes: m['available_bytes'] as int,
+        capacityBytes: m['capacity_bytes'] as int,
+        availableInodes: m['available_inodes'] as int?,
+        totalInodes: m['total_inodes'] as int?,
+        thresholds: OresOtelResourceThresholds(
+          minFreeBytes: t['min_free_bytes'] as int?,
+          minFreeRatio: (t['min_free_ratio'] as num?)?.toDouble(),
+          minInodeFreeRatio: (t['min_inode_free_ratio'] as num?)?.toDouble(),
+        ),
+      );
+      final points = pressure.metricPoints();
+      for (final point in points) {
+        expect(point['name'], diskPressure['metric']);
+        expect(point['type'], diskPressure['type']);
+        expect(point['unit'], diskPressure['unit']);
+      }
+      expect(
+        _normalize([
+          for (final point in points)
+            {'value': point['value'], 'attributes': point['attributes']},
+        ]),
+        _normalize(item['expected']),
+      );
     });
   }
 }

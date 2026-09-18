@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ores-otel/ores.otel.log/contracts/ores-ids/authored.schema.json",
+  "$defs": {
+    "OresTraceId": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresTraceId",
+      "description": "Call-site trace identifier: inline literal, unique per call site, `ores-trace-` + 21-character nanoid.",
+      "type": "string",
+      "pattern": "^ores-trace-[A-Za-z0-9_-]{21}$"
+    },
+    "OresRoutineId": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresRoutineId",
+      "description": "Routine identifier: declared once per function or method, `ores-routine-` + 21-character nanoid.",
+      "type": "string",
+      "pattern": "^ores-routine-[A-Za-z0-9_-]{21}$"
+    }
+  }
+}

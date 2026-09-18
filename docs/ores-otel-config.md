@@ -172,7 +172,7 @@ Providers stay application-owned. The SDKs sample resources and hand OpenTelemet
 | `process.open_file_descriptor.count` | gauge | `{file_descriptor}` |
 | `system.filesystem.usage` (`system.filesystem.state` = `used`/`free`/`reserved`, `system.filesystem.mountpoint`) | gauge | `By` |
 | `system.filesystem.utilization` | gauge | `1` |
-| `ores.apm.resource.pressure` (`ores.apm.pressure.kind`, `ores.apm.pressure.target`) | gauge (1 while breached) | `1` |
+| `ores.apm.resource.pressure` (`ores.apm.pressure.kind`, `ores.apm.pressure.target`) | gauge: one point per evaluable configured threshold, `1` while breached and `0` otherwise (so recovery is observable); pinned for TS, Dart and Rust by `tests/fixtures/ores-otel-apm-disk-pressure.json` | `1` |
 | `ores.apm.latency` (`ores.apm.latency.kind` = `request`/`operation`/`queue_wait`) | histogram | `ms` |
 | `nodejs.eventloop.delay.{p50,p99,max}` | gauge | `s` |
 | `nodejs.eventloop.utilization` | gauge | `1` |

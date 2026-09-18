@@ -71,14 +71,19 @@ pub enum ResourcePressureKind {
     FilesystemInodeFreeRatio,
 }
 
+/// One evaluated threshold. `breached` is true when the observation crossed
+/// the threshold; unbreached checks are kept so metrics can report recovery.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResourcePressure {
     pub kind: ResourcePressureKind,
     pub target: String,
     pub observed: f64,
     pub threshold: f64,
+    pub breached: bool,
 }
 
+/// Every evaluable configured threshold, breached or not, in evaluation order
+/// (process RSS, then per filesystem: free bytes, free ratio, inode free ratio).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResourceHealth {
     pub pressures: Vec<ResourcePressure>,
@@ -87,11 +92,22 @@ pub struct ResourceHealth {
 impl ResourceHealth {
     #[must_use]
     pub fn is_healthy(&self) -> bool {
-        self.pressures.is_empty()
+        !self.pressures.iter().any(|pressure| pressure.breached)
+    }
+
+    /// Only the breached checks.
+    pub fn breaches(&self) -> impl Iterator<Item = &ResourcePressure> {
+        self.pressures.iter().filter(|pressure| pressure.breached)
     }
 }
 
 /// Purely evaluate a previously sampled resource snapshot.
+///
+/// Every configured threshold that can be evaluated yields one check. A ratio
+/// threshold is not evaluable, and yields nothing, when its denominator is 0:
+/// `min_free_ratio` needs `capacity_bytes > 0` and `min_inode_free_ratio`
+/// needs `inode_free_ratio`. This matches the TypeScript and Dart SDKs and is
+/// pinned by `tests/fixtures/ores-otel-apm-disk-pressure.json`.
 #[must_use]
 pub fn evaluate_resource_snapshot(
     snapshot: &ResourceSnapshot,
@@ -102,49 +118,47 @@ pub fn evaluate_resource_snapshot(
     if let (Some(observed), Some(threshold)) =
         (snapshot.process.rss_bytes, thresholds.max_rss_bytes)
     {
-        if observed > threshold {
-            pressures.push(ResourcePressure {
-                kind: ResourcePressureKind::ProcessRss,
-                target: "process".to_owned(),
-                observed: observed as f64,
-                threshold: threshold as f64,
-            });
-        }
+        pressures.push(ResourcePressure {
+            kind: ResourcePressureKind::ProcessRss,
+            target: "process".to_owned(),
+            observed: observed as f64,
+            threshold: threshold as f64,
+            breached: observed > threshold,
+        });
     }
 
     for filesystem in &snapshot.filesystems {
         let target = filesystem.path.to_string_lossy().into_owned();
         if let Some(threshold) = thresholds.min_free_bytes {
-            if filesystem.available_bytes < threshold {
-                pressures.push(ResourcePressure {
-                    kind: ResourcePressureKind::FilesystemFreeBytes,
-                    target: target.clone(),
-                    observed: filesystem.available_bytes as f64,
-                    threshold: threshold as f64,
-                });
-            }
+            pressures.push(ResourcePressure {
+                kind: ResourcePressureKind::FilesystemFreeBytes,
+                target: target.clone(),
+                observed: filesystem.available_bytes as f64,
+                threshold: threshold as f64,
+                breached: filesystem.available_bytes < threshold,
+            });
         }
         if let Some(threshold) = thresholds.min_free_ratio {
-            if filesystem.free_ratio < threshold {
+            if filesystem.capacity_bytes > 0 {
                 pressures.push(ResourcePressure {
                     kind: ResourcePressureKind::FilesystemFreeRatio,
                     target: target.clone(),
                     observed: filesystem.free_ratio,
                     threshold,
+                    breached: filesystem.free_ratio < threshold,
                 });
             }
         }
         if let (Some(observed), Some(threshold)) =
             (filesystem.inode_free_ratio, thresholds.min_inode_free_ratio)
         {
-            if observed < threshold {
-                pressures.push(ResourcePressure {
-                    kind: ResourcePressureKind::FilesystemInodeFreeRatio,
-                    target,
-                    observed,
-                    threshold,
-                });
-            }
+            pressures.push(ResourcePressure {
+                kind: ResourcePressureKind::FilesystemInodeFreeRatio,
+                target,
+                observed,
+                threshold,
+                breached: observed < threshold,
+            });
         }
     }
 
@@ -673,7 +687,25 @@ mod tests {
             },
         );
         assert_eq!(health.pressures.len(), 4);
+        assert!(health.pressures.iter().all(|pressure| pressure.breached));
+        assert_eq!(health.breaches().count(), 4);
         assert!(!health.is_healthy());
+
+        let recovered = evaluate_resource_snapshot(
+            &snapshot,
+            &ResourceThresholds {
+                max_rss_bytes: Some(1_024),
+                min_free_bytes: Some(10),
+                min_free_ratio: Some(0.01),
+                min_inode_free_ratio: Some(0.01),
+            },
+        );
+        assert_eq!(
+            recovered.pressures.len(),
+            4,
+            "unbreached thresholds are still reported"
+        );
+        assert!(recovered.is_healthy());
     }
 
     #[cfg(all(target_os = "linux", feature = "apm"))]

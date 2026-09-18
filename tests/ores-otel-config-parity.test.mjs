@@ -1,4 +1,4 @@
-// Cross-language parity corpus shared with the Dart and Rust loaders.
+// Cross-language parity corpus shared with the Dart and Rust loaders and APM SDKs.
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import {
   parseOresOtelToml,
   resolveOresOtelConfig,
 } from '../dist/config.js';
+import { evaluateDiskPressure, pressureObservations } from '../dist/apm.js';
 
 const fixtures = new URL('./fixtures/ores-otel-config/', import.meta.url);
 const readJson = (url) => JSON.parse(readFileSync(url, 'utf8'));
@@ -58,6 +59,39 @@ for (const item of lookup.cases) {
         env: { ...item.env, ...item.flag_overrides },
         currentDirectory: item.current_directory,
       }),
+      item.expected,
+    );
+  });
+}
+
+// Shared `ores.apm.resource.pressure` disk series, pinned for TS, Dart and Rust.
+const diskPressure = readJson(new URL('./fixtures/ores-otel-apm-disk-pressure.json', import.meta.url));
+
+test('disk-pressure corpus is not empty', () => {
+  assert.equal(diskPressure.metric, 'ores.apm.resource.pressure');
+  assert.ok(diskPressure.cases.length >= 6);
+});
+
+for (const item of diskPressure.cases) {
+  test(`disk pressure: ${item.name}`, () => {
+    const m = item.measurement;
+    const t = item.thresholds;
+    const pressure = evaluateDiskPressure(
+      {
+        path: m.path,
+        availableBytes: m.available_bytes,
+        capacityBytes: m.capacity_bytes,
+        availableInodes: m.available_inodes,
+        totalInodes: m.total_inodes,
+      },
+      {
+        ...(t.min_free_bytes === undefined ? {} : { minFreeBytes: t.min_free_bytes }),
+        ...(t.min_free_ratio === undefined ? {} : { minFreeRatio: t.min_free_ratio }),
+        ...(t.min_inode_free_ratio === undefined ? {} : { minInodeFreeRatio: t.min_inode_free_ratio }),
+      },
+    );
+    assert.deepStrictEqual(
+      pressureObservations(pressure.checks).map(([value, attributes]) => ({ value, attributes: { ...attributes } })),
       item.expected,
     );
   });

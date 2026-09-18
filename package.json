@@ -125,6 +125,10 @@
       "types": "./dist/otel.d.ts",
       "default": "./dist/otel.js"
     },
+    "./error-trace": {
+      "types": "./dist/error-trace.d.ts",
+      "default": "./dist/error-trace.js"
+    },
     "./loki": {
       "types": "./dist/loki.d.ts",
       "default": "./dist/loki.js"
