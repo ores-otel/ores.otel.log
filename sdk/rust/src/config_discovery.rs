@@ -7,7 +7,11 @@
 //! directory discovery is bounded and cannot cross a Git trust boundary, and
 //! the existing parser/resolver remains the sole configuration authority.
 
-use std::{fs, path::{Path, PathBuf}, sync::OnceLock};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use crate::config::{
     load_ores_otel_config, LoadOptions, LoadedOresOtelConfig, OresOtelConfigError, OresOtelEnv,
@@ -99,7 +103,10 @@ fn checked_config_leaf(path: &Path) -> Result<(), OresOtelConfigError> {
     Ok(())
 }
 
-fn load_exact(mut options: LoadOptions, path: PathBuf) -> Result<LoadedOresOtelConfig, OresOtelConfigError> {
+fn load_exact(
+    mut options: LoadOptions,
+    path: PathBuf,
+) -> Result<LoadedOresOtelConfig, OresOtelConfigError> {
     checked_config_leaf(&path)?;
     options.file_path = Some(path);
     options.cwd = None;
@@ -223,10 +230,8 @@ mod tests {
         fs::write(root.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").expect("config");
 
         let loaded = load_ores_otel_config_upward(options_with_cwd(deep)).expect("load");
-        assert_eq!(
-            loaded.file_path.as_deref(),
-            Some(root.join(ORES_OTEL_CONFIG_BASENAME).as_path())
-        );
+        let expected = root.join(ORES_OTEL_CONFIG_BASENAME);
+        assert_eq!(loaded.file_path.as_deref(), Some(expected.as_path()));
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -240,7 +245,10 @@ mod tests {
         fs::write(outer.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").expect("outer config");
 
         let loaded = load_ores_otel_config_upward(options_with_cwd(deep)).expect("defaults");
-        assert!(loaded.file_path.is_none(), "parent repository config must not be selected");
+        assert!(
+            loaded.file_path.is_none(),
+            "parent repository config must not be selected"
+        );
         fs::remove_dir_all(outer).expect("cleanup");
     }
 
