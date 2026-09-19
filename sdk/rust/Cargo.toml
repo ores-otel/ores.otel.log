@@ -29,6 +29,8 @@ path = "src/bin/ores-launcher.rs"
 required-features = ["launcher"]
 
 [dependencies]
+# Traversal only: default-features = false keeps this SDK from depending on itself.
+ores-config-discovery = { git = "https://github.com/ORESoftware/ores-config-discovery", rev = "1a60206c95c23d5c7c84f9175c89cc7432621e2d", default-features = false }
 serde = { version = "1", features = ["derive"] }
 # Exact-pin the audited version used by current zed-interfaces consumers. This
 # keeps the Rust logging SDK composable with dependency-graph tooling while

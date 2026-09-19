@@ -18,7 +18,7 @@ use crate::config::{
     ENV_CONFIG_DIR, ENV_CONFIG_FILE, ORES_OTEL_CONFIG_BASENAME,
 };
 
-pub const MAX_DISCOVERY_ANCESTORS: usize = 64;
+pub const MAX_DISCOVERY_ANCESTORS: usize = ores_config_discovery::MAX_ANCESTORS;
 pub const MAX_DISCOVERY_CONFIG_BYTES: u64 = 256 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,13 +69,6 @@ pub fn ores_otel_config_start(
     OresOtelConfigStart::Directory(current_directory.to_path_buf())
 }
 
-/// Any `.git` marker stops implicit discovery. Worktrees/submodules use a file,
-/// while a normal clone uses a directory. This is a trust-boundary test, not the
-/// stricter fleet placement test below.
-fn has_git_boundary(directory: &Path) -> bool {
-    fs::symlink_metadata(directory.join(".git")).is_ok()
-}
-
 /// Fleet placement evidence is intentionally stricter: only an adjacent `.git`
 /// directory counts as repository-root placement.
 #[must_use]
@@ -101,6 +94,34 @@ fn checked_config_leaf(path: &Path) -> Result<(), OresOtelConfigError> {
         });
     }
     Ok(())
+}
+
+/// Maps a traversal refusal onto this SDK's error type, keeping the message a
+/// caller of the native loop would have seen for an unsafe leaf.
+fn discovery_io_error(
+    error: ores_config_discovery::DiscoveryError,
+    fallback: &Path,
+) -> OresOtelConfigError {
+    use ores_config_discovery::DiscoveryError;
+    match error {
+        DiscoveryError::Symlink(path) | DiscoveryError::NotRegularFile(path) => {
+            OresOtelConfigError::Io {
+                path,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "OTel config must be a regular non-symlink file no larger than 256 KiB",
+                ),
+            }
+        }
+        DiscoveryError::Unreadable { path, kind } => OresOtelConfigError::Io {
+            path,
+            source: std::io::Error::from(kind),
+        },
+        other => OresOtelConfigError::Io {
+            path: fallback.to_path_buf(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidInput, other.to_string()),
+        },
+    }
 }
 
 fn load_exact(
@@ -138,28 +159,24 @@ pub fn load_ores_otel_config_upward(
             let start = fs::canonicalize(&start).unwrap_or(start);
             let first_candidate = start.join(ORES_OTEL_CONFIG_BASENAME);
 
-            for directory in start.ancestors().take(MAX_DISCOVERY_ANCESTORS) {
-                let candidate = directory.join(ORES_OTEL_CONFIG_BASENAME);
-                match fs::symlink_metadata(&candidate) {
-                    Ok(_) => {
-                        checked_config_leaf(&candidate)?;
-                        if !is_repo_root(directory) {
-                            warn_unless_repo_root(&candidate);
-                        }
-                        return load_exact(options, candidate);
+            // The walk is the fleet-wide primitive (ores-config-discovery): at
+            // most 64 ancestors, never past the first Git boundary of either
+            // kind, symlinked leaves refused. This module keeps its own policy:
+            // a non-regular leaf is an error, the 256 KiB cap, placement means
+            // a `.git` *directory*, and absence resolves defaults below.
+            match ores_config_discovery::Search::new(ORES_OTEL_CONFIG_BASENAME)
+                .refuse_non_regular(true)
+                .from(&start)
+            {
+                Ok(Some(located)) => {
+                    checked_config_leaf(&located.path)?;
+                    if !located.beside_git_directory() {
+                        warn_unless_repo_root(&located.path);
                     }
-                    Err(source) if source.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(source) => {
-                        return Err(OresOtelConfigError::Io {
-                            path: candidate,
-                            source,
-                        });
-                    }
+                    return load_exact(options, located.path);
                 }
-
-                if has_git_boundary(directory) {
-                    break;
-                }
+                Ok(None) => {}
+                Err(error) => return Err(discovery_io_error(error, &first_candidate)),
             }
 
             // Preserve the historical implicit-missing behavior (defaults) but
@@ -230,7 +247,9 @@ mod tests {
         fs::write(root.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").expect("config");
 
         let loaded = load_ores_otel_config_upward(options_with_cwd(deep)).expect("load");
-        let expected = root.join(ORES_OTEL_CONFIG_BASENAME);
+        // Discovery canonicalises, so compare canonical paths: the temp dir is
+        // reached through a symlink on macOS (/var -> /private/var).
+        let expected = fs::canonicalize(root.join(ORES_OTEL_CONFIG_BASENAME)).expect("canonical");
         assert_eq!(loaded.file_path.as_deref(), Some(expected.as_path()));
         fs::remove_dir_all(root).expect("cleanup");
     }
