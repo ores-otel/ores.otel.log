@@ -2313,6 +2313,9 @@ pub struct LoadedOresOtelConfig {
     pub parsed: OresOtelFileConfig,
     /// `None` when no file existed and defaults were used.
     pub file_path: Option<PathBuf>,
+    /// Set when the file was discovered below the repository root; see
+    /// [`discover_ores_otel_config_path`].
+    pub discovery_warning: Option<String>,
 }
 
 /// Picks the config file path. Precedence: `file_path`, `cwd`,
@@ -2356,17 +2359,59 @@ pub fn ores_otel_config_file_path(
 fn config_file_path(
     options: &LoadOptions,
     env: &OresOtelEnv,
-) -> Result<PathBuf, OresOtelConfigError> {
+) -> Result<(PathBuf, Option<String>), OresOtelConfigError> {
     let current = std::env::current_dir().map_err(|source| OresOtelConfigError::Io {
         path: PathBuf::from("."),
         source,
     })?;
-    Ok(ores_otel_config_file_path(
-        options.file_path.as_deref(),
-        options.cwd.as_deref(),
-        env,
-        &current,
-    ))
+    let explicit = options.file_path.is_some()
+        || options.cwd.is_some()
+        || [ENV_CONFIG_FILE, ENV_CONFIG_DIR].iter().any(|name| {
+            env.get(*name)
+                .map(|v| js_trim(v))
+                .is_some_and(|v| !v.is_empty())
+        });
+    if explicit {
+        return Ok((
+            ores_otel_config_file_path(
+                options.file_path.as_deref(),
+                options.cwd.as_deref(),
+                env,
+                &current,
+            ),
+            None,
+        ));
+    }
+    discover_ores_otel_config_path(&current)
+}
+
+/// Locates `.ores-otel.toml` by walking up from `start`, for the case where no
+/// explicit file, directory, or environment lookup was given.
+///
+/// Nearest wins. The walk never crosses a repository boundary, so a parent
+/// checkout or home-directory file cannot govern this process. A file found
+/// below the repository root is returned together with a warning, because it
+/// shadows the root copy and is probably not the file the operator meant to
+/// edit. When nothing is found, the path defaults to `start` so a missing file
+/// still resolves defaults exactly as before.
+///
+/// # Errors
+///
+/// Fails when a candidate is a symlink or cannot be inspected.
+pub fn discover_ores_otel_config_path(
+    start: &std::path::Path,
+) -> Result<(PathBuf, Option<String>), OresOtelConfigError> {
+    match ores_config_discovery::locate_from(start, ORES_OTEL_CONFIG_BASENAME) {
+        Ok(Some(located)) => {
+            let warning = located.misplacement_warning(ORES_OTEL_CONFIG_BASENAME);
+            Ok((located.path, warning))
+        }
+        Ok(None) => Ok((start.join(ORES_OTEL_CONFIG_BASENAME), None)),
+        Err(error) => Err(OresOtelConfigError::Io {
+            path: start.join(ORES_OTEL_CONFIG_BASENAME),
+            source: std::io::Error::other(error.to_string()),
+        }),
+    }
 }
 
 /// Reads `.ores-otel.toml` when present (a missing file resolves defaults, as
@@ -2375,7 +2420,13 @@ pub fn load_ores_otel_config(
     options: LoadOptions,
 ) -> Result<LoadedOresOtelConfig, OresOtelConfigError> {
     let env = options.resolve.effective_env();
-    let path = config_file_path(&options, &env)?;
+    let (path, discovery_warning) = config_file_path(&options, &env)?;
+    if let Some(warning) = &discovery_warning {
+        // This SDK is the logger; at config-load time there is no configured
+        // logger yet, so stderr is the floor. The warning is also returned so
+        // the caller can re-emit it structurally once logging is up.
+        eprintln!("warning: {warning}");
+    }
     let (parsed, file_path) = match std::fs::read_to_string(&path) {
         Ok(input) => (parse_ores_otel_toml(&input)?, Some(path)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -2388,6 +2439,7 @@ pub fn load_ores_otel_config(
         config,
         parsed,
         file_path,
+        discovery_warning,
     })
 }
 
@@ -2701,5 +2753,50 @@ mod tests {
         .is_err());
 
         std::fs::remove_dir_all(&dir).expect("clean temp dir");
+    }
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::*;
+
+    fn fixture(tag: &str) -> PathBuf {
+        let root =
+            std::env::temp_dir().join(format!("ores-otel-discover-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("crates/app/src")).unwrap();
+        std::fs::canonicalize(root).unwrap()
+    }
+
+    #[test]
+    fn a_root_config_is_discovered_from_a_nested_directory() {
+        let root = fixture("nested");
+        std::fs::write(root.join(ORES_OTEL_CONFIG_BASENAME), "version = 1\n").unwrap();
+        let (path, warning) = discover_ores_otel_config_path(&root.join("crates/app/src")).unwrap();
+        assert_eq!(path, root.join(ORES_OTEL_CONFIG_BASENAME));
+        assert!(warning.is_none(), "a root config needs no warning");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_config_below_the_root_is_used_but_reported() {
+        let root = fixture("shadow");
+        std::fs::write(root.join("crates/app/.ores-otel.toml"), "version = 1\n").unwrap();
+        let (path, warning) = discover_ores_otel_config_path(&root.join("crates/app/src")).unwrap();
+        assert_eq!(path, root.join("crates/app/.ores-otel.toml"));
+        assert!(warning.is_some_and(|w| w.contains("not a repository root")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn an_absent_config_defaults_to_the_start_directory() {
+        // Preserves the pre-discovery contract: a missing file resolves defaults.
+        let root = fixture("absent");
+        let start = root.join("crates/app/src");
+        let (path, warning) = discover_ores_otel_config_path(&start).unwrap();
+        assert_eq!(path, start.join(ORES_OTEL_CONFIG_BASENAME));
+        assert!(warning.is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

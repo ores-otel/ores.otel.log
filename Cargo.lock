@@ -363,6 +363,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
+name = "ores-config-discovery"
+version = "0.1.0"
+source = "git+https://github.com/ORESoftware/ores-config-discovery?rev=3a6d0ae764931f37724fe6ff6d07302c507378c8#3a6d0ae764931f37724fe6ff6d07302c507378c8"
+
+[[package]]
 name = "ores-otel-web"
 version = "0.1.0"
 dependencies = [
@@ -383,6 +388,7 @@ name = "oresoftware-next-loggers"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "ores-config-discovery",
  "serde",
  "serde_json",
  "time",
