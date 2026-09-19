@@ -403,6 +403,22 @@ fn next_is_mod(lines: &[&str], idx: usize) -> bool {
     false
 }
 
+/// A scan that examined nothing proves nothing. A mistyped root, a wrong
+/// working directory, or a checkout that lost its sources must fail rather
+/// than print `OK -- 0 source files checked`.
+fn vacuous_scan(root: &Path, checked: usize) -> Option<String> {
+    if !root.is_dir() {
+        return Some(format!("root {} is not a directory", root.display()));
+    }
+    if checked == 0 {
+        return Some(format!(
+            "no source files were checked under {}; refusing to report a scan that covered nothing",
+            root.display()
+        ));
+    }
+    None
+}
+
 fn main() -> ExitCode {
     let root = std::env::args().nth(1).unwrap_or_else(|| ".".to_string());
     let root = PathBuf::from(root);
@@ -422,8 +438,17 @@ fn main() -> ExitCode {
         if skip_path(&p) || is_test_file(&p) {
             continue;
         }
-        let Ok(text) = fs::read_to_string(&p) else { continue };
         let rel = p.strip_prefix(&root).unwrap_or(&p).display().to_string();
+        // A source file the checker cannot read is a file it did not check;
+        // skipping it silently would report a scope the scan never covered.
+        let Ok(text) = fs::read_to_string(&p) else {
+            findings.push(Finding {
+                file: rel,
+                line: 0,
+                msg: "source file could not be read as UTF-8, so it was not checked".to_string(),
+            });
+            continue;
+        };
         // Opt-out for a file that implements the convention rather than using
         // it (an auditor, an ESLint rule, a code generator).
         if text.contains("ores-trace-contract:ignore-file") {
@@ -446,6 +471,11 @@ fn main() -> ExitCode {
             }
             check_line(&rel, i + 1, line, &mut findings);
         }
+    }
+
+    if let Some(reason) = vacuous_scan(&root, checked) {
+        eprintln!("ores-trace-contract: REFUSED -- {reason}");
+        return ExitCode::FAILURE;
     }
 
     if findings.is_empty() {
@@ -474,6 +504,17 @@ mod tests {
     }
 
     const GOOD: &str = "ores-trace-V1sTq7bK2mNp4Rd8Xe0Lz"; // 21-char nanoid
+
+    #[test]
+    fn a_scan_that_covered_nothing_is_refused() {
+        let missing = Path::new("/nonexistent/ores-trace-contract-root");
+        assert!(vacuous_scan(missing, 0).is_some_and(|r| r.contains("not a directory")));
+        // A real directory still fails when nothing in it was checked...
+        let here = Path::new(".");
+        assert!(vacuous_scan(here, 0).is_some_and(|r| r.contains("no source files")));
+        // ...and passes once the scan actually covered something.
+        assert!(vacuous_scan(here, 1).is_none());
+    }
 
     #[test]
     fn id_length_is_pinned_to_exactly_21() {
