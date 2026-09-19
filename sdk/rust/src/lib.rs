@@ -7,6 +7,7 @@ pub use logger_core::*;
 
 pub mod apm;
 pub mod config;
+pub mod config_discovery;
 pub mod context;
 pub mod http_shutdown;
 #[cfg(all(unix, feature = "launcher"))]
@@ -27,6 +28,11 @@ pub use config::{
     resolve_ores_otel_config, LoadOptions, LoadedOresOtelConfig, OresOtelConfigError,
     OresOtelFileConfig, OresOtelFileLayer, OresOtelRole, ResolveOptions, ResolvedMetrics,
     ResolvedOresOtelConfig, RuntimeRole, ORES_OTEL_CONFIG_BASENAME,
+};
+pub use config_discovery::{
+    is_repo_root as is_ores_otel_config_repo_root, load_ores_otel_config_upward,
+    ores_otel_config_start, OresOtelConfigStart, MAX_DISCOVERY_ANCESTORS,
+    MAX_DISCOVERY_CONFIG_BYTES,
 };
 pub use context::{
     apply_log_context, capture_log_context, contextualize_future, current_log_context,
