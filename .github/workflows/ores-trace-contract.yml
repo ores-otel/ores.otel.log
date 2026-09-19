@@ -1,9 +1,11 @@
 # Static ORES trace-marker contract.
 #
-# Asserts the full id shape `^ores-(trace|routine)-[A-Za-z0-9_-]{21}$`, the
-# authored peer `OresTraceId`/`OresRoutineId` in ORESoftware/ores-interfaces
-# `contracts/rpc-operation/v1`. The first-generation guard only checked the
-# loose `{12,64}`, which accepted truncated and hand-written ids.
+# Enforces the compatibility shape `^ores-(trace|routine)-[A-Za-z0-9_-]{12,64}$`
+# across implementation call sites. New ORES-generated identifiers still use
+# the canonical 21-character nanoid width; the checker self-tests that the
+# canonical generator shape is a strict subset of the compatibility contract.
+# This keeps CI aligned with the public wire/runtime contract instead of
+# silently turning a generator convention into a breaking admission rule.
 name: ORES trace marker contract
 
 on:
