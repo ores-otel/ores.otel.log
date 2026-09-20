@@ -15,6 +15,11 @@
 //! contract. The self-tests pin both facts: compatibility bounds and the
 //! canonical 21-character generator subset.
 //!
+//! Traversal is fail-closed: unreadable directories and unreadable directory
+//! entries refuse the scan rather than silently reducing coverage. Rust inline
+//! `#[cfg(test)] mod ...` blocks are scanned too, so a test module cannot blind
+//! production code that appears later in the same source file.
+//!
 //! Single file, no external crates: build with `rustc -O`.
 //!
 //! ores-trace-contract:ignore-file
@@ -87,9 +92,15 @@ fn is_test_file(p: &Path) -> bool {
         || n.starts_with("test_")
 }
 
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = fs::read_dir(dir) else { return };
-    let mut entries: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let rd = fs::read_dir(dir)
+        .map_err(|e| format!("could not read directory {}: {e}", dir.display()))?;
+    let mut entries = Vec::new();
+    for entry in rd {
+        let entry = entry
+            .map_err(|e| format!("could not read an entry below {}: {e}", dir.display()))?;
+        entries.push(entry.path());
+    }
     entries.sort();
     for p in entries {
         if p.is_symlink() {
@@ -98,12 +109,13 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         if p.is_dir() {
             let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             if !SKIP_DIRS.contains(&name.as_str()) {
-                walk(&p, out);
+                walk(&p, out)?;
             }
         } else {
             out.push(p);
         }
     }
+    Ok(())
 }
 
 fn literal_arg(line: &str, at: usize, method: &str) -> Option<Option<String>> {
@@ -235,17 +247,6 @@ fn hoisted_trace_decl(line: &str) -> Option<String> {
     None
 }
 
-fn next_is_mod(lines: &[&str], idx: usize) -> bool {
-    for l in lines.iter().skip(idx + 1) {
-        let t = l.trim_start();
-        if t.is_empty() || t.starts_with("#[") || t.starts_with("//") {
-            continue;
-        }
-        return t.starts_with("mod ") || t.starts_with("pub mod ");
-    }
-    false
-}
-
 fn check_line(file: &str, no: usize, line: &str, findings: &mut Vec<Finding>) {
     if is_comment(line) {
         return;
@@ -304,6 +305,17 @@ fn check_line(file: &str, no: usize, line: &str, findings: &mut Vec<Finding>) {
     }
 }
 
+fn scan_text(file: &str, text: &str, findings: &mut Vec<Finding>) -> usize {
+    let mut markers = 0usize;
+    for (i, line) in text.lines().enumerate() {
+        if line.contains("ores-trace-") || line.contains("ores-routine-") {
+            markers += 1;
+        }
+        check_line(file, i + 1, line, findings);
+    }
+    markers
+}
+
 fn vacuous_scan(root: &Path, checked: usize) -> Option<String> {
     if !root.is_dir() {
         return Some(format!("root {} is not a directory", root.display()));
@@ -320,7 +332,10 @@ fn vacuous_scan(root: &Path, checked: usize) -> Option<String> {
 fn main() -> ExitCode {
     let root = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| ".".to_string()));
     let mut files = Vec::new();
-    walk(&root, &mut files);
+    if let Err(reason) = walk(&root, &mut files) {
+        eprintln!("ores-trace-contract: REFUSED -- {reason}");
+        return ExitCode::FAILURE;
+    }
 
     let mut findings = Vec::new();
     let mut checked = 0usize;
@@ -344,16 +359,7 @@ fn main() -> ExitCode {
             continue;
         }
         checked += 1;
-        let lines: Vec<&str> = text.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
-            if ext == "rs" && line.trim_start().starts_with("#[cfg(test)]") && next_is_mod(&lines, i) {
-                break;
-            }
-            if line.contains("ores-trace-") || line.contains("ores-routine-") {
-                markers += 1;
-            }
-            check_line(&rel, i + 1, line, &mut findings);
-        }
+        markers += scan_text(&rel, &text, &mut findings);
     }
 
     if let Some(reason) = vacuous_scan(&root, checked) {
@@ -428,9 +434,20 @@ mod tests {
     }
 
     #[test]
-    fn cfg_test_only_stops_at_test_module() {
-        assert!(next_is_mod(&["#[cfg(test)]", "mod tests {"], 0));
-        assert!(!next_is_mod(&["#[cfg(test)]", "use std::fmt;", "pub fn real() {}"], 0));
+    fn cfg_test_module_does_not_blind_following_code() {
+        let source = format!(
+            "#[cfg(test)]\nmod tests {{}}\npub fn real() {{ l.info(\"x\").add_trace(\"{}\", false); }}\n",
+            id("trace", 11)
+        );
+        let mut findings = Vec::new();
+        scan_text("x.rs", &source, &mut findings);
+        assert!(findings.iter().any(|f| f.line == 3));
+    }
+
+    #[test]
+    fn directory_walk_errors_fail_closed() {
+        let mut files = Vec::new();
+        assert!(walk(Path::new("__ores_trace_contract_directory_that_must_not_exist__"), &mut files).is_err());
     }
 
     #[test]
