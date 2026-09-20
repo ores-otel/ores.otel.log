@@ -364,8 +364,8 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "ores-config-discovery"
-version = "0.2.0"
-source = "git+https://github.com/ORESoftware/ores-config-discovery?rev=1a60206c95c23d5c7c84f9175c89cc7432621e2d#1a60206c95c23d5c7c84f9175c89cc7432621e2d"
+version = "0.2.2"
+source = "git+https://github.com/ORESoftware/ores-config-discovery?rev=1ffd94663a110f77fcd5e1143fd10f89b1f284e0#1ffd94663a110f77fcd5e1143fd10f89b1f284e0"
 
 [[package]]
 name = "ores-otel-web"
