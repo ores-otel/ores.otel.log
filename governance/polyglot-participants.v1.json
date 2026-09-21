@@ -1,0 +1,29 @@
+{
+  "schema": "ores.governance.polyglot-participants/v1",
+  "repository": "ores-otel/ores.otel.log",
+  "participants": [
+    {"id":"dart","path":"sdk/dart","role":"portable-runtime","zpkg_target":"dart","cargo_workspace":false},
+    {"id":"elixir","path":"sdk/elixir","role":"portable-runtime","zpkg_target":"elixir","cargo_workspace":false},
+    {"id":"erlang","path":"sdk/erlang","role":"portable-runtime","zpkg_target":"erlang","cargo_workspace":false},
+    {"id":"gleam","path":"sdk/gleam","role":"portable-runtime","zpkg_target":"gleam","cargo_workspace":false},
+    {"id":"go","path":"sdk/go","role":"portable-runtime","zpkg_target":"golang","cargo_workspace":false},
+    {"id":"java","path":"sdk/java","role":"portable-runtime","zpkg_target":"java","cargo_workspace":false},
+    {"id":"nodejs","path":"sdk/nodejs","role":"portable-runtime","zpkg_target":"nodejs","cargo_workspace":false},
+    {"id":"python","path":"sdk/python","role":"portable-runtime","zpkg_target":"python","cargo_workspace":false},
+    {"id":"ruby","path":"sdk/ruby","role":"portable-runtime","zpkg_target":"ruby","cargo_workspace":false},
+    {"id":"rust","path":"sdk/rust","role":"portable-runtime","zpkg_target":"rust","cargo_workspace":true},
+    {"id":"rust-context","path":"sdk/rust-context","role":"specialized-runtime","zpkg_target":"rust-context","cargo_workspace":true},
+    {"id":"rust-otel","path":"sdk/rust-otel","role":"specialized-runtime","zpkg_target":"rust-otel","cargo_workspace":true},
+    {"id":"rust-request-context","path":"sdk/rust-request-context","role":"specialized-runtime","zpkg_target":null,"cargo_workspace":true,"release_surface":"git-workspace"},
+    {"id":"rust-ticket","path":"sdk/rust-ticket","role":"internal-support","zpkg_target":null,"cargo_workspace":false,"release_surface":"internal"},
+    {"id":"rust-web","path":"sdk/rust-web","role":"specialized-runtime","zpkg_target":null,"cargo_workspace":true,"release_surface":"git-workspace"},
+    {"id":"wasm","path":"sdk/wasm","role":"portable-runtime","zpkg_target":"rust-wasm","cargo_workspace":true}
+  ],
+  "policy": {
+    "every_sdk_directory_governed": true,
+    "every_sdk_zpkg_target_governed": true,
+    "cargo_workspace_members_match_registry": true,
+    "unknown_conformance_participant_fails": true,
+    "runtime_specific_goldens_allowed": false
+  }
+}

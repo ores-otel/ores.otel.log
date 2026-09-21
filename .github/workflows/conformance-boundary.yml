@@ -5,6 +5,10 @@ on:
     paths:
       - 'contracts/**'
       - 'conformance/**'
+      - 'governance/**'
+      - 'sdk/**'
+      - '.zpkg.toml'
+      - 'Cargo.toml'
       - 'artifacts/conformance/evidence/**'
       - '.github/workflows/conformance-boundary.yml'
   push:
@@ -12,6 +16,10 @@ on:
     paths:
       - 'contracts/**'
       - 'conformance/**'
+      - 'governance/**'
+      - 'sdk/**'
+      - '.zpkg.toml'
+      - 'Cargo.toml'
       - 'artifacts/conformance/evidence/**'
       - '.github/workflows/conformance-boundary.yml'
 
@@ -23,10 +31,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Check conformance boundary
+      - name: Verify exact revision
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: Check conformance and polyglot governance boundaries
         run: |
+          set -euo pipefail
           node --check conformance/check.mjs
           node conformance/check.mjs
+          node --check governance/check.mjs
+          node governance/check.mjs
+          git diff --exit-code
