@@ -29,22 +29,54 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Check out exact source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
       - name: Verify exact revision
         env:
           EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-      - name: Check conformance and polyglot governance boundaries
+
+      - name: Read and validate immutable authority pin
+        id: authority-pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE' >> "$GITHUB_OUTPUT"
+          const { readFileSync } = require('node:fs');
+          const registry = JSON.parse(readFileSync('governance/upstream-authorities.v1.json', 'utf8'));
+          if (registry?.schema !== 'ores.governance.upstream-authorities/v1' || !Array.isArray(registry.authorities) || registry.authorities.length !== 1) {
+            throw new Error('expected exactly one validated upstream authority');
+          }
+          const authority = registry.authorities[0];
+          if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(authority.repository)) throw new Error('invalid authority repository');
+          if (!/^[0-9a-f]{40}$/.test(authority.revision)) throw new Error('authority revision must be immutable 40-hex');
+          const checkout = authority.repository.replace('/', '__');
+          console.log(`repository=${authority.repository}`);
+          console.log(`revision=${authority.revision}`);
+          console.log(`checkout=${checkout}`);
+          NODE
+
+      - name: Check out pinned upstream authority
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ steps.authority-pin.outputs.repository }}
+          ref: ${{ steps.authority-pin.outputs.revision }}
+          path: .upstream/${{ steps.authority-pin.outputs.checkout }}
+          persist-credentials: false
+
+      - name: Check local conformance, polyglot governance, and upstream authority
         run: |
           set -euo pipefail
           node --check conformance/check.mjs
           node conformance/check.mjs
           node --check governance/check.mjs
           node governance/check.mjs
-          git diff --exit-code
+          node --check governance/check-upstream-authorities.mjs
+          node governance/check-upstream-authorities.mjs
+          git diff --exit-code -- contracts/ conformance/ governance/ .zpkg.toml Cargo.toml
