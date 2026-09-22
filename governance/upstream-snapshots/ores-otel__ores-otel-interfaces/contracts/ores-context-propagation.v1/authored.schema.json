@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ores-otel/ores-otel-interfaces/contracts/ores-context-propagation.v1/authored.schema.json",
+  "$defs": {
+    "OresContextPropagationV1": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "OresContextPropagationV1.json",
+      "type": "object",
+      "properties": {
+        "version": {"type": "integer", "minimum": 1, "maximum": 1},
+        "traceparent": {"type": "string", "pattern": "^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"},
+        "tracestate": {"type": "string", "maxLength": 512},
+        "baggage": {"type": "string", "maxLength": 8192},
+        "request_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "service": {"type": "string", "minLength": 1, "maxLength": 256}
+      },
+      "required": ["version"],
+      "unevaluatedProperties": false
+    }
+  }
+}
