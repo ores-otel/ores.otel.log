@@ -1,0 +1,16 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "backend_disabled_handler_fallback",
+  "version": 1,
+  "input": {
+    "operation": "emit_log",
+    "backend_enabled": false,
+    "message": "portable fallback"
+  },
+  "expected": {
+    "accepted": true,
+    "backend_export_attempted": false,
+    "handler_completed": true
+  }
+}
