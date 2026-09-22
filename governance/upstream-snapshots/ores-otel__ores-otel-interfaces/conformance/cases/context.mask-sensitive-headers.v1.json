@@ -1,0 +1,23 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "mask_sensitive_headers",
+  "version": 1,
+  "input": {
+    "operation": "sanitize_headers",
+    "headers": {
+      "authorization": "Bearer secret",
+      "cookie": "session=secret",
+      "x-api-key": "secret",
+      "x-request-id": "req-42"
+    }
+  },
+  "expected": {
+    "headers": {
+      "authorization": "[REDACTED]",
+      "cookie": "[REDACTED]",
+      "x-api-key": "[REDACTED]",
+      "x-request-id": "req-42"
+    }
+  }
+}
