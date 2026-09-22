@@ -1,0 +1,16 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "request_handler_root_isolated",
+  "version": 1,
+  "input": {
+    "operation": "request_handler_boundary",
+    "ambient_request_id": "outer-request",
+    "request_id": "inner-request"
+  },
+  "expected": {
+    "inside_request_id": "inner-request",
+    "inherits_unrelated_request_identity": false,
+    "restores_ambient_after_exit": true
+  }
+}
