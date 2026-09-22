@@ -1,0 +1,14 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "baggage_duplicate_last_wins",
+  "version": 1,
+  "input": {
+    "operation": "extract_context",
+    "headers": {"baggage": "tenant=first,tenant=second"}
+  },
+  "expected": {
+    "accepted": true,
+    "baggage": {"tenant": "second"}
+  }
+}
