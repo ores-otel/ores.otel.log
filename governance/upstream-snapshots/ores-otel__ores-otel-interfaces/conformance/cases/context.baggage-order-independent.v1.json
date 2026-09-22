@@ -1,0 +1,14 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "baggage_order_independent",
+  "version": 1,
+  "input": {
+    "operation": "extract_context",
+    "headers": {"baggage": "beta=2,alpha=1"}
+  },
+  "expected": {
+    "accepted": true,
+    "baggage": {"alpha": "1", "beta": "2"}
+  }
+}

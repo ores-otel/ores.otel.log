@@ -1,0 +1,57 @@
+{
+  "schema": "ores.governance.upstream-snapshot/v1",
+  "repository": "ores-otel/ores-otel-interfaces",
+  "revision": "7a0c47cc2117762998f35946e0fc50d09191b854",
+  "source_receipt": {
+    "contracts_sha256": "55805337d47c6dceb0d5aed6e2e800d5bd25222d79111d729c603a78a6533f00",
+    "corpus_sha256": "b5dfa871ae5ccf8a27be383e2bab8e395d8fcfa666d7025f613ae94d135125ca",
+    "conformance_spec_sha256": "560173ddb004cf866b6f23b4d1bc1d437fd8ebbb171277ae8d35af93f049d93c"
+  },
+  "files": [
+    {
+      "upstream_path": "contracts/ores-context-propagation.v1/main.tsp",
+      "local_path": "contracts/ores-context-propagation.v1/main.tsp",
+      "git_blob_sha": "1193ad910b946e123944f14276f74491caa649af"
+    },
+    {
+      "upstream_path": "contracts/ores-context-propagation.v1/authored.schema.json",
+      "local_path": "contracts/ores-context-propagation.v1/authored.schema.json",
+      "git_blob_sha": "41a5826284a441a946894bea7afdeff8975459a3"
+    },
+    {
+      "upstream_path": "conformance/cases/context.backend-disabled-handler-fallback.v1.json",
+      "local_path": "conformance/cases/context.backend-disabled-handler-fallback.v1.json",
+      "git_blob_sha": "710e454f8dfb382d01cd4fb018d0174da83ee70e"
+    },
+    {
+      "upstream_path": "conformance/cases/context.baggage-duplicate-last-wins.v1.json",
+      "local_path": "conformance/cases/context.baggage-duplicate-last-wins.v1.json",
+      "git_blob_sha": "529370b3e15264972f399dbaac6681b6d4b026b0"
+    },
+    {
+      "upstream_path": "conformance/cases/context.baggage-order-independent.v1.json",
+      "local_path": "conformance/cases/context.baggage-order-independent.v1.json",
+      "git_blob_sha": "e1b5a0d262c9f009e2ad7e0d0efbb258e4a2220f"
+    },
+    {
+      "upstream_path": "conformance/cases/context.invalid-config-fails.v1.json",
+      "local_path": "conformance/cases/context.invalid-config-fails.v1.json",
+      "git_blob_sha": "84ed681d410b4f28c26bf123c56db2cc7d9dfc47"
+    },
+    {
+      "upstream_path": "conformance/cases/context.mask-sensitive-headers.v1.json",
+      "local_path": "conformance/cases/context.mask-sensitive-headers.v1.json",
+      "git_blob_sha": "d6bf96afc7dc95d8d98f936ba15b4cf1702e9f0d"
+    },
+    {
+      "upstream_path": "conformance/cases/context.request-handler-root-isolated.v1.json",
+      "local_path": "conformance/cases/context.request-handler-root-isolated.v1.json",
+      "git_blob_sha": "ecc8cc2630c563fe53aab77b80fd6af606e0db5f"
+    },
+    {
+      "upstream_path": "conformance/cases/context.traceparent-flags-only.v1.json",
+      "local_path": "conformance/cases/context.traceparent-flags-only.v1.json",
+      "git_blob_sha": "0c01cd43cf3ea515d9ad4e2059ad5e1dda36a0a4"
+    }
+  ]
+}

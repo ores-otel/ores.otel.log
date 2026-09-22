@@ -1,0 +1,15 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "invalid_config_fails",
+  "version": 1,
+  "input": {
+    "operation": "load_config",
+    "config": {"enabled": true, "endpoint": "http://user:password@example.invalid/v1/traces"}
+  },
+  "expected": {
+    "accepted": false,
+    "error_code": "invalid_config",
+    "secrets_reflected": false
+  }
+}

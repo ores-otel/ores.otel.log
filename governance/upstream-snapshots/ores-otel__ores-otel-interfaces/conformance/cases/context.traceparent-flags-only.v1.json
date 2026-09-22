@@ -1,0 +1,16 @@
+{
+  "schema": "ores.conformance.case/v1",
+  "kind": "behavior",
+  "id": "traceparent_flags_only",
+  "version": 1,
+  "input": {
+    "operation": "extract_context",
+    "headers": {"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03"}
+  },
+  "expected": {
+    "accepted": true,
+    "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "span_id": "00f067aa0ba902b7",
+    "trace_flags": "03"
+  }
+}

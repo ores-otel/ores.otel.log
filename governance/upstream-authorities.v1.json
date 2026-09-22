@@ -1,0 +1,28 @@
+{
+  "schema": "ores.governance.upstream-authorities/v1",
+  "repository": "ores-otel/ores.otel.log",
+  "authorities": [
+    {
+      "id": "context-propagation-v1",
+      "repository": "ores-otel/ores-otel-interfaces",
+      "revision": "7a0c47cc2117762998f35946e0fc50d09191b854",
+      "contract_path": "contracts/ores-context-propagation.v1",
+      "typespec_path": "contracts/ores-context-propagation.v1/main.tsp",
+      "typespec_blob_sha": "1193ad910b946e123944f14276f74491caa649af",
+      "json_schema_path": "contracts/ores-context-propagation.v1/authored.schema.json",
+      "json_schema_blob_sha": "41a5826284a441a946894bea7afdeff8975459a3",
+      "contracts_sha256": "55805337d47c6dceb0d5aed6e2e800d5bd25222d79111d729c603a78a6533f00",
+      "corpus_sha256": "b5dfa871ae5ccf8a27be383e2bab8e395d8fcfa666d7025f613ae94d135125ca",
+      "conformance_spec_sha256": "560173ddb004cf866b6f23b4d1bc1d437fd8ebbb171277ae8d35af93f049d93c",
+      "conformance_case_ids": [
+        "traceparent_flags_only",
+        "baggage_order_independent",
+        "baggage_duplicate_last_wins",
+        "mask_sensitive_headers",
+        "request_handler_root_isolated",
+        "backend_disabled_handler_fallback",
+        "invalid_config_fails"
+      ]
+    }
+  ]
+}

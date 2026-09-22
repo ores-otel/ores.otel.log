@@ -1,0 +1,54 @@
+name: conformance-boundary
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'conformance/**'
+      - 'governance/**'
+      - 'sdk/**'
+      - '.zpkg.toml'
+      - 'Cargo.toml'
+      - 'artifacts/conformance/evidence/**'
+      - '.github/workflows/conformance-boundary.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/**'
+      - 'conformance/**'
+      - 'governance/**'
+      - 'sdk/**'
+      - '.zpkg.toml'
+      - 'Cargo.toml'
+      - 'artifacts/conformance/evidence/**'
+      - '.github/workflows/conformance-boundary.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact revision
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Check conformance, polyglot governance, and immutable upstream lock
+        run: |
+          set -euo pipefail
+          node --check conformance/check.mjs
+          node conformance/check.mjs
+          node --check governance/check.mjs
+          node governance/check.mjs
+          node --check governance/check-upstream-authorities.mjs
+          node governance/check-upstream-authorities.mjs
+          git diff --exit-code -- contracts/ conformance/ governance/ .zpkg.toml Cargo.toml
