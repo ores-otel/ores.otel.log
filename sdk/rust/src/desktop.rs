@@ -1,4 +1,7 @@
 //! Shared native-desktop lifecycle logging; no global subscriber or network exporter.
+// Named-function returns follow the shared fleet style guide.
+#![allow(clippy::needless_return)]
+
 use crate::{json, LogRecord, Logger, LoggerError, Options, Transport};
 use std::io::Write;
 use std::sync::Arc;

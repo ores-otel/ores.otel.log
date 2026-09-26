@@ -1,3 +1,6 @@
+// Named-function returns follow the shared fleet style guide.
+#![allow(clippy::needless_return)]
+
 use next_loggers::desktop::DesktopSession;
 use next_loggers::{LogRecord, LoggerError, MemoryTransport, Transport};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,8 +30,8 @@ fn lifetime_emits_two_records_without_stdout_console_or_credentials() {
 #[test]
 fn explicit_finish_does_not_emit_a_second_stop_on_drop() {
     let transport = Arc::new(MemoryTransport::default());
-    let session = DesktopSession::with_transport("native-app", "1", transport.clone())
-        .expect("start");
+    let session =
+        DesktopSession::with_transport("native-app", "1", transport.clone()).expect("start");
     session.finish().expect("finish");
     assert_eq!(transport.records().len(), 2);
     assert_eq!(transport.flush_count(), 1);
@@ -73,8 +76,8 @@ fn failed_stop_still_closes_once_and_returns_error() {
         closes: AtomicUsize::new(0),
         fail_at: 1,
     });
-    let session = DesktopSession::with_transport("native-app", "1", transport.clone())
-        .expect("start");
+    let session =
+        DesktopSession::with_transport("native-app", "1", transport.clone()).expect("start");
     assert!(session.finish().is_err());
     assert_eq!(transport.closes.load(Ordering::SeqCst), 1);
     assert_eq!(transport.writes.load(Ordering::SeqCst), 2);
@@ -85,8 +88,7 @@ fn unwinding_is_not_reported_as_normal_shutdown() {
     let transport = Arc::new(MemoryTransport::default());
     let captured = transport.clone();
     let result = std::panic::catch_unwind(move || {
-        let _session = DesktopSession::with_transport("native-app", "1", captured)
-            .expect("start");
+        let _session = DesktopSession::with_transport("native-app", "1", captured).expect("start");
         panic!("test unwind");
     });
     assert!(result.is_err());
