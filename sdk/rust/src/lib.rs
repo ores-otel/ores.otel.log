@@ -9,6 +9,7 @@ pub mod apm;
 pub mod config;
 pub mod config_discovery;
 pub mod context;
+pub mod desktop;
 pub mod http_shutdown;
 #[cfg(all(unix, feature = "launcher"))]
 pub mod launcher;
