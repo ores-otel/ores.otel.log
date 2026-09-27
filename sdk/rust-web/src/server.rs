@@ -4,7 +4,7 @@
 use crate::TraceParent;
 use axum::{
     extract::{Request, State},
-    http::HeaderValue,
+    http::{HeaderMap, HeaderValue},
     middleware::{from_fn_with_state, Next},
     response::Response,
     Router,
@@ -41,17 +41,61 @@ where
         }
         .with_transport(Arc::new(JsonStdout)),
     );
-    install_with_logger(router, logger)
+    return install_with_logger(router, logger);
 }
 
 pub fn install_with_logger<S>(router: Router<S>, logger: Logger) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    router.layer(from_fn_with_state(logger, correlate))
+    return router.layer(from_fn_with_state(logger, correlate));
 }
 
-fn context_for(headers: &axum::http::HeaderMap) -> (TraceParent, Option<TraceParent>) {
+/// Sanitized server-side correlation derived from one request's `traceparent`.
+///
+/// This intentionally exposes only validated W3C correlation identifiers. Raw
+/// headers, baggage, tracestate, URL/query values, cookies, authorization, and
+/// application identity never enter this value. Services that retain their own
+/// OTLP provider or metrics pipeline can reuse this parser without installing
+/// the convenience `next_loggers` middleware.
+#[derive(Clone, Debug)]
+pub struct RequestCorrelation {
+    traceparent: TraceParent,
+    parent_span_id: Option<String>,
+}
+
+impl RequestCorrelation {
+    pub fn traceparent(&self) -> &TraceParent {
+        return &self.traceparent;
+    }
+
+    pub fn parent_span_id(&self) -> Option<&str> {
+        return self.parent_span_id.as_deref();
+    }
+
+    pub fn log_context(&self) -> LogContext {
+        let mut context = LogContext {
+            trace_id: Some(self.traceparent.trace_id().into()),
+            span_id: Some(self.traceparent.span_id().into()),
+            trace_flags: self.traceparent.flags(),
+            remote: Some(false),
+            ..Default::default()
+        };
+        if let Some(parent_span_id) = self.parent_span_id() {
+            context
+                .fields
+                .insert("otel.parent_span_id".into(), json!(parent_span_id));
+        }
+        return context;
+    }
+}
+
+/// Parse at most one valid W3C `traceparent` and derive a fresh server span.
+///
+/// Missing, malformed, non-UTF-8, or duplicate headers fail closed to a new
+/// unsampled root. The returned child is always generated locally, so callers
+/// never need to retain or echo untrusted raw header bytes.
+pub fn request_correlation(headers: &HeaderMap) -> RequestCorrelation {
     let mut values = headers.get_all("traceparent").iter();
     let first = values.next();
     let parent = if values.next().is_none() {
@@ -62,40 +106,34 @@ fn context_for(headers: &axum::http::HeaderMap) -> (TraceParent, Option<TracePar
         None
     };
     let span = Uuid::new_v4().simple().to_string()[..16].to_string();
-    let trace = match &parent {
+    let traceparent = match &parent {
         Some(parent) => parent.child(&span),
         None => TraceParent::new(&Uuid::new_v4().simple().to_string(), &span, 0),
     }
     .expect("UUID-derived nonzero lowercase IDs are valid");
-    (trace, parent)
+    let parent_span_id = parent.map(|value| value.span_id().to_string());
+    return RequestCorrelation {
+        traceparent,
+        parent_span_id,
+    };
 }
 
 async fn correlate(State(logger): State<Logger>, mut request: Request, next: Next) -> Response {
-    let (trace, parent) = context_for(request.headers());
+    let correlation = request_correlation(request.headers());
+    let trace = correlation.traceparent().clone();
     let method = match request.method().as_str() {
         "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "CONNECT" | "OPTIONS" | "TRACE" | "PATCH" => {
             request.method().as_str().to_owned()
         }
         _ => "OTHER".into(),
     };
-    let mut context = LogContext {
-        trace_id: Some(trace.trace_id().into()),
-        span_id: Some(trace.span_id().into()),
-        trace_flags: trace.flags(),
-        remote: Some(false),
-        ..Default::default()
-    };
-    if let Some(parent) = parent {
-        context
-            .fields
-            .insert("otel.parent_span_id".into(), json!(parent.span_id()));
-    }
+    let context = correlation.log_context();
     // The event API is deliberately explicit: entering a carrier alone does
     // not project its fields onto records. Keep a validated snapshot, rather
     // than copying arbitrary identity or baggage from later application scopes.
     let record_context = context.clone();
     request.extensions_mut().insert(trace.clone());
-    with_log_context_async(context, async move {
+    return with_log_context_async(context, async move {
         let mut response = next.run(request).await;
         // Validated context is exactly 55 ASCII bytes; never echo an input header.
         if let Ok(header) = HeaderValue::from_str(&trace.to_string()) {
@@ -111,9 +149,9 @@ async fn correlate(State(logger): State<Logger>, mut request: Request, next: Nex
             "http.response.status_code": response.status().as_u16()
         })]);
         let _ = next_loggers::apply_log_context(event, &record_context).send();
-        response
+        return response;
     })
-    .await
+    .await;
 }
 
 #[cfg(test)]
@@ -133,30 +171,54 @@ mod tests {
     impl Transport for Capture {
         fn write(&self, record: &LogRecord) -> Result<(), LoggerError> {
             self.0.lock().unwrap().push(record.clone());
-            Ok(())
+            return Ok(());
         }
     }
 
     #[test]
     fn missing_or_duplicate_header_starts_unsampled_root() {
         let mut headers = HeaderMap::new();
-        let (root, parent) = context_for(&headers);
-        assert!(parent.is_none());
-        assert!(!root.sampled());
+        let root = request_correlation(&headers);
+        assert!(root.parent_span_id().is_none());
+        assert!(!root.traceparent().sampled());
         headers.append("traceparent", HeaderValue::from_static(PARENT));
         headers.append("traceparent", HeaderValue::from_static(PARENT));
-        assert!(context_for(&headers).1.is_none());
+        let duplicate = request_correlation(&headers);
+        assert!(duplicate.parent_span_id().is_none());
+        assert!(!duplicate.traceparent().sampled());
     }
+
     #[test]
-    fn valid_parent_gets_new_span() {
+    fn malformed_header_starts_unsampled_root_without_retaining_input() {
+        let mut headers = HeaderMap::new();
+        headers.insert("traceparent", HeaderValue::from_static("not-a-traceparent"));
+        let correlation = request_correlation(&headers);
+        assert!(correlation.parent_span_id().is_none());
+        assert!(!correlation.traceparent().sampled());
+        assert!(!format!("{:?}", correlation).contains("not-a-traceparent"));
+    }
+
+    #[test]
+    fn valid_parent_gets_new_span_and_exposes_only_validated_parent_id() {
         let mut headers = HeaderMap::new();
         headers.insert("traceparent", HeaderValue::from_static(PARENT));
-        let (child, parent) = context_for(&headers);
-        let parent = parent.unwrap();
-        assert_eq!(child.trace_id(), parent.trace_id());
-        assert_ne!(child.span_id(), parent.span_id());
-        assert!(!child.sampled());
+        let correlation = request_correlation(&headers);
+        assert_eq!(
+            correlation.traceparent().trace_id(),
+            "4bf92f3577b34da6a3ce929d0e0e4736"
+        );
+        assert_ne!(correlation.traceparent().span_id(), "00f067aa0ba902b7");
+        assert_eq!(correlation.parent_span_id(), Some("00f067aa0ba902b7"));
+        assert!(!correlation.traceparent().sampled());
+        let context = correlation.log_context();
+        assert_eq!(
+            context.trace_id.as_deref(),
+            Some("4bf92f3577b34da6a3ce929d0e0e4736")
+        );
+        assert!(context.logged_in_user.is_empty());
+        assert!(context.baggage.is_empty());
     }
+
     #[tokio::test]
     async fn scopes_handler_and_preserves_response() {
         let capture = Arc::new(Capture::default());
@@ -179,7 +241,7 @@ mod tests {
                     );
                     assert!(context.logged_in_user.is_empty());
                     assert!(context.baggage.is_empty());
-                    (axum::http::StatusCode::ACCEPTED, "ok")
+                    return (axum::http::StatusCode::ACCEPTED, "ok");
                 }),
             ),
             logger,
