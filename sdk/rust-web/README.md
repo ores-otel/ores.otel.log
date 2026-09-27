@@ -50,6 +50,22 @@ The scope covers handler execution through response creation, NOT subsequent
 streaming response-body polling or detached tasks; explicitly carry context to
 those tasks using the canonical context helpers.
 
+Services that already own an OTLP provider, metrics pipeline, or custom logger
+can reuse only the validated correlation boundary:
+
+```rust,ignore
+let correlation = ores_otel_web::server::request_correlation(request.headers());
+let trace = correlation.traceparent();
+let parent_span_id = correlation.parent_span_id();
+```
+
+`RequestCorrelation` stores only the locally generated child `TraceParent` and,
+when exactly one valid parent was supplied, its validated parent span ID. The
+raw request header is never retained. Missing, malformed, non-UTF-8, or duplicate
+`traceparent` values fail closed to a new unsampled root. `log_context()` projects
+that sanitized correlation into a `next_loggers::LogContext` when a caller wants
+shared logging semantics without installing the convenience middleware.
+
 ## Verification
 
 `cargo test -p ores-otel-web --features axum`; compile the same crate for
