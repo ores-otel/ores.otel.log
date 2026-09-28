@@ -1,0 +1,14 @@
+# Intra-payload references .ores-lint/ does not yet satisfy, recorded so that
+# `validate` blocks NEW breakage without failing on breakage that is already
+# understood and already being fixed.
+#
+# Format: <referring file><TAB><referenced path>, both payload-relative.
+#
+# These three are the fleet-wide selftest-fixture gap: selftest.sh calls them,
+# no copy of the payload carries them, and no CI runs selftest.sh so nothing is
+# red. ores-otel/ores.otel.log#93 ships all three. When that lands, `validate`
+# prints "stale - known gap ..." for each line here; delete the lines then and
+# this file should end up holding only its comments.
+selftest.sh	require-send.test.mjs
+selftest.sh	eslint/plugin.test.mjs
+selftest.sh	tests/integration.mjs

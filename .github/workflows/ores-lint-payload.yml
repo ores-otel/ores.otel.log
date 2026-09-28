@@ -1,0 +1,54 @@
+name: ores-lint payload integrity
+
+on:
+  pull_request:
+    paths:
+      - ".ores-lint/**"
+      - "tools/ores-lint-pack/**"
+      - ".github/workflows/ores-lint-payload.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  payload-is-self-consistent:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.95.0
+
+      - name: Test the payload checker
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/ores-lint-pack-target
+        run: cargo test --locked --manifest-path tools/ores-lint-pack/Cargo.toml
+
+      - name: Every required intra-payload reference resolves
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/ores-lint-pack-target
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          actual_head="$(git rev-parse HEAD)"
+          echo "tested_head=${actual_head}"
+          test "${actual_head}" = "${HEAD_SHA}"
+          cargo run --quiet --locked --manifest-path tools/ores-lint-pack/Cargo.toml -- \
+            validate .ores-lint --known-gaps tools/ores-lint-pack/known-gaps.tsv
+
+      - name: Describe the payload that would be distributed
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/ores-lint-pack-target
+        run: |
+          set -euo pipefail
+          # Only describable once the payload validates with no recorded gaps
+          # left; until then this step reports why and does not fail the job.
+          cargo run --quiet --locked --manifest-path tools/ores-lint-pack/Cargo.toml -- \
+            manifest .ores-lint || echo "payload not yet distributable; see the validate step"

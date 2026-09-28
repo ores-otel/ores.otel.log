@@ -1,0 +1,14 @@
+[package]
+name = "ores-lint-pack"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Detached from the root workspace: this is repository tooling, not a published
+# SDK crate, and it must build without the SDK workspace's dependency graph.
+[workspace]
+
+# No dependencies, on purpose. `.ores-lint/` is a vendored, dependency-free
+# payload; the tool that certifies it is held to the same bar so it can run on
+# any runner that has a Rust toolchain and nothing else.
+[dependencies]
