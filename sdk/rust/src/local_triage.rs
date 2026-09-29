@@ -1,11 +1,11 @@
 //! Cursor-based read-only triage over the bounded desktop log spool.
 //!
-//! The scanner advances offsets across every line, including INFO/DEBUG, while
-//! returning only stderr/WARN/ERROR/FATAL/explicit-triage records. This keeps
-//! periodic repair agents from paying to reread healthy log history.
+//! The scanner advances offsets across every record, including INFO/DEBUG, while
+//! returning only stderr/WARN/ERROR/FATAL/explicit-triage records. Reads are
+//! chunk-bounded so one malformed newline-free file cannot defeat scan budgets.
 #![allow(clippy::needless_return)]
 
-use crate::{default_desktop_local_log_root, json, LogLevel, LoggerError, Value};
+use crate::{default_local_log_root, json, LogLevel, LoggerError, Value};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
@@ -15,6 +15,9 @@ use std::path::{Path, PathBuf};
 pub const DEFAULT_TRIAGE_MAX_RECORDS: usize = 256;
 pub const DEFAULT_TRIAGE_MAX_SCANNED_BYTES: u64 = 4 * 1024 * 1024;
 pub const MAX_INVALID_LINE_CAPTURE_BYTES: usize = 4096;
+pub const DEFAULT_TRIAGE_MAX_LINE_CHUNK_BYTES: usize = 256 * 1024;
+pub const DEFAULT_TRIAGE_MAX_FILES: usize = 4096;
+const MAX_APP_NAME_BYTES: usize = 128;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalTriageCursor {
@@ -60,7 +63,7 @@ pub fn scan_local_triage(
 ) -> Result<LocalTriageBatch, LoggerError> {
     return scan_local_triage_with_root(
         app_name,
-        default_desktop_local_log_root(),
+        default_local_log_root(),
         cursor,
         LocalTriageLimits::default(),
     );
@@ -72,20 +75,28 @@ pub fn scan_local_triage_with_root(
     mut cursor: LocalTriageCursor,
     limits: LocalTriageLimits,
 ) -> Result<LocalTriageBatch, LoggerError> {
-    let app_name = sanitize_path_component(app_name);
+    validate_app_name(app_name)?;
     let app_directory = root.join(app_name);
-    if !app_directory.exists() {
-        cursor.offsets.clear();
-        return Ok(LocalTriageBatch {
-            cursor,
-            records: Vec::new(),
-            scanned_bytes: 0,
-            truncated: false,
-        });
+    let metadata = match fs::symlink_metadata(&app_directory) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            cursor.offsets.clear();
+            return Ok(LocalTriageBatch {
+                cursor,
+                records: Vec::new(),
+                scanned_bytes: 0,
+                truncated: false,
+            });
+        }
+        Err(error) => return Err(LoggerError(error.to_string())),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(LoggerError(
+            "local triage app path must be an unaliased directory".into(),
+        ));
     }
 
-    let mut files = Vec::new();
-    collect_ndjson_files(&app_directory, &app_directory, &mut files)?;
+    let (mut files, file_limit_hit) = collect_ndjson_files(&app_directory)?;
     files.sort_by(|left, right| left.0.cmp(&right.0));
 
     let current_files = files
@@ -98,7 +109,7 @@ pub fn scan_local_triage_with_root(
 
     let mut records = Vec::new();
     let mut scanned_bytes = 0u64;
-    let mut truncated = false;
+    let mut truncated = file_limit_hit;
 
     'files: for (relative_path, absolute_path) in files {
         let mut file = File::open(&absolute_path).map_err(|error| LoggerError(error.to_string()))?;
@@ -107,13 +118,18 @@ pub fn scan_local_triage_with_root(
             .map_err(|error| LoggerError(error.to_string()))?
             .len();
         let requested_offset = cursor.offsets.get(&relative_path).copied().unwrap_or(0);
-        let start_offset = requested_offset.min(file_len);
+        // A shorter file at the same relative path means it was replaced or
+        // truncated. Reset rather than pinning to EOF and silently missing data.
+        let start_offset = if requested_offset <= file_len {
+            requested_offset
+        } else {
+            0
+        };
         file.seek(SeekFrom::Start(start_offset))
             .map_err(|error| LoggerError(error.to_string()))?;
 
         let mut reader = BufReader::new(file);
         let mut offset = start_offset;
-        let mut line = Vec::new();
 
         loop {
             if scanned_bytes >= limits.max_scanned_bytes
@@ -124,25 +140,45 @@ pub fn scan_local_triage_with_root(
                 break 'files;
             }
 
-            line.clear();
-            let bytes_read = reader
-                .read_until(b'\n', &mut line)
-                .map_err(|error| LoggerError(error.to_string()))?;
-            if bytes_read == 0 {
+            let remaining_budget = limits.max_scanned_bytes.saturating_sub(scanned_bytes);
+            let read_cap = usize::try_from(remaining_budget)
+                .unwrap_or(usize::MAX)
+                .min(DEFAULT_TRIAGE_MAX_LINE_CHUNK_BYTES)
+                .max(1);
+            let Some(chunk) = read_record_chunk(&mut reader, read_cap)? else {
                 cursor.offsets.insert(relative_path.clone(), offset);
                 break;
-            }
+            };
 
             let line_start = offset;
-            offset = offset.saturating_add(bytes_read as u64);
-            scanned_bytes = scanned_bytes.saturating_add(bytes_read as u64);
-            // Advance even for healthy records. This is the core token-cost
-            // invariant: a future scan never rereads INFO merely because it was
-            // filtered out of the returned batch.
+            offset = offset.saturating_add(chunk.consumed_bytes as u64);
+            scanned_bytes = scanned_bytes.saturating_add(chunk.consumed_bytes as u64);
             cursor.offsets.insert(relative_path.clone(), offset);
 
-            let parsed = serde_json::from_slice::<Value>(&line);
-            match parsed {
+            if chunk.hit_cap_without_newline {
+                truncated = true;
+                records.push(LocalTriageRecord {
+                    relative_path: relative_path.clone(),
+                    byte_offset: line_start,
+                    record: json!({
+                        "event_name": "ores.local_log.oversized_chunk",
+                        "severity_text": "ERROR",
+                        "severity_number": 17,
+                        "body": bounded_lossy(&chunk.bytes, MAX_INVALID_LINE_CAPTURE_BYTES),
+                        "attributes": {
+                            "ores.ai.triage": true,
+                            "ores.local_log.chunk_bytes": chunk.consumed_bytes,
+                            "ores.local_log.unterminated": true
+                        }
+                    }),
+                });
+                if records.len() >= limits.max_records {
+                    break 'files;
+                }
+                continue;
+            }
+
+            match serde_json::from_slice::<Value>(&chunk.bytes) {
                 Ok(value) => {
                     if is_triage_record(&value) {
                         records.push(LocalTriageRecord {
@@ -153,7 +189,7 @@ pub fn scan_local_triage_with_root(
                     }
                 }
                 Err(error) => {
-                    let body = bounded_lossy(&line, MAX_INVALID_LINE_CAPTURE_BYTES);
+                    let body = bounded_lossy(&chunk.bytes, MAX_INVALID_LINE_CAPTURE_BYTES);
                     records.push(LocalTriageRecord {
                         relative_path: relative_path.clone(),
                         byte_offset: line_start,
@@ -179,6 +215,56 @@ pub fn scan_local_triage_with_root(
         scanned_bytes,
         truncated,
     });
+}
+
+struct RecordChunk {
+    bytes: Vec<u8>,
+    consumed_bytes: usize,
+    hit_cap_without_newline: bool,
+}
+
+fn read_record_chunk<R: BufRead>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> Result<Option<RecordChunk>, LoggerError> {
+    let mut bytes = Vec::with_capacity(max_bytes.min(8 * 1024));
+    let mut consumed_bytes = 0usize;
+    let mut terminated = false;
+
+    while consumed_bytes < max_bytes {
+        let available = reader
+            .fill_buf()
+            .map_err(|error| LoggerError(error.to_string()))?;
+        if available.is_empty() {
+            break;
+        }
+        let remaining = max_bytes - consumed_bytes;
+        let inspect_len = available.len().min(remaining);
+        let inspected = &available[..inspect_len];
+        if let Some(index) = inspected.iter().position(|byte| *byte == b'\n') {
+            let take = index + 1;
+            bytes.extend_from_slice(&inspected[..index]);
+            reader.consume(take);
+            consumed_bytes = consumed_bytes.saturating_add(take);
+            terminated = true;
+            break;
+        }
+        bytes.extend_from_slice(inspected);
+        reader.consume(inspect_len);
+        consumed_bytes = consumed_bytes.saturating_add(inspect_len);
+    }
+
+    if consumed_bytes == 0 {
+        return Ok(None);
+    }
+    while matches!(bytes.last(), Some(b'\r')) {
+        bytes.pop();
+    }
+    Ok(Some(RecordChunk {
+        bytes,
+        consumed_bytes,
+        hit_cap_without_newline: !terminated && consumed_bytes >= max_bytes,
+    }))
 }
 
 pub fn is_triage_record(value: &Value) -> bool {
@@ -208,6 +294,7 @@ fn stdio_stream(value: &Value) -> Option<&str> {
         .pointer("/attributes/ores.stdio.stream")
         .or_else(|| value.pointer("/fields/ores.stdio.stream"))
         .or_else(|| value.get("ores.stdio.stream"))
+        .or_else(|| value.get("stream"))
         .and_then(Value::as_str);
 }
 
@@ -241,12 +328,12 @@ fn level_to_severity(level: &str) -> Option<LogLevel> {
     };
 }
 
-fn collect_ndjson_files(
-    root: &Path,
-    directory: &Path,
-    output: &mut Vec<(String, PathBuf)>,
-) -> Result<(), LoggerError> {
-    for entry in fs::read_dir(directory).map_err(|error| LoggerError(error.to_string()))? {
+fn collect_ndjson_files(root: &Path) -> Result<(Vec<(String, PathBuf)>, bool), LoggerError> {
+    let mut output = Vec::new();
+    let mut limit_hit = false;
+    let entries = fs::read_dir(root).map_err(|error| LoggerError(error.to_string()))?;
+
+    'outer: for entry in entries {
         let entry = entry.map_err(|error| LoggerError(error.to_string()))?;
         let file_type = entry
             .file_type()
@@ -255,21 +342,63 @@ fn collect_ndjson_files(
             continue;
         }
         let path = entry.path();
-        if file_type.is_dir() {
-            collect_ndjson_files(root, &path, output)?;
+        if file_type.is_file() {
+            if is_ndjson(&path) {
+                push_file(root, path, &mut output)?;
+            }
+            if output.len() >= DEFAULT_TRIAGE_MAX_FILES {
+                limit_hit = true;
+                break;
+            }
             continue;
         }
-        if !file_type.is_file() || path.extension().and_then(|value| value.to_str()) != Some("ndjson") {
+        if !file_type.is_dir() {
             continue;
         }
-        let relative = path
-            .strip_prefix(root)
-            .map_err(|error| LoggerError(error.to_string()))?
-            .to_string_lossy()
-            .replace('\\', "/");
-        output.push((relative, path));
+
+        let children = match fs::read_dir(&path) {
+            Ok(children) => children,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(LoggerError(error.to_string())),
+        };
+        for child in children {
+            let child = child.map_err(|error| LoggerError(error.to_string()))?;
+            let child_type = child
+                .file_type()
+                .map_err(|error| LoggerError(error.to_string()))?;
+            if child_type.is_symlink() || !child_type.is_file() {
+                continue;
+            }
+            let child_path = child.path();
+            if is_ndjson(&child_path) {
+                push_file(root, child_path, &mut output)?;
+            }
+            if output.len() >= DEFAULT_TRIAGE_MAX_FILES {
+                limit_hit = true;
+                break 'outer;
+            }
+        }
     }
-    return Ok(());
+
+    Ok((output, limit_hit))
+}
+
+fn push_file(
+    root: &Path,
+    path: PathBuf,
+    output: &mut Vec<(String, PathBuf)>,
+) -> Result<(), LoggerError> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|error| LoggerError(error.to_string()))?
+        .to_string_lossy()
+        .replace('\\', "/");
+    output.push((relative, path));
+    Ok(())
+}
+
+fn is_ndjson(path: &Path) -> bool {
+    path.extension().and_then(|value| value.to_str()) == Some("ndjson")
 }
 
 fn bounded_lossy(bytes: &[u8], max_bytes: usize) -> String {
@@ -277,21 +406,22 @@ fn bounded_lossy(bytes: &[u8], max_bytes: usize) -> String {
     return String::from_utf8_lossy(&bytes[..end]).to_string();
 }
 
-fn sanitize_path_component(value: &str) -> String {
-    let sanitized = value
-        .trim()
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
-                return character;
-            }
-            return '_';
-        })
-        .collect::<String>();
-    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
-        return "unknown".to_string();
+fn validate_app_name(value: &str) -> Result<(), LoggerError> {
+    if value.is_empty() || value.len() > MAX_APP_NAME_BYTES {
+        return Err(LoggerError(format!(
+            "app name must be between 1 and {MAX_APP_NAME_BYTES} bytes"
+        )));
     }
-    return sanitized;
+    if matches!(value, "." | "..")
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(LoggerError(
+            "app name may contain only ASCII letters, digits, '.', '_' and '-'".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -353,7 +483,11 @@ mod tests {
     }
 
     #[test]
-    fn stderr_attribute_is_triage_even_when_level_is_info() {
+    fn top_level_stderr_is_triage_even_when_level_is_info() {
+        assert!(is_triage_record(&json!({
+            "level": "INFO",
+            "stream": "stderr"
+        })));
         assert!(is_triage_record(&json!({
             "severity_number": 9,
             "attributes": {"ores.stdio.stream": "stderr"}
@@ -361,25 +495,62 @@ mod tests {
     }
 
     #[test]
-    fn symlink_files_are_not_scanned() {
-        let root = unique_root("symlink");
-        let app = root.join("demo");
-        fs::create_dir_all(&app).expect("mkdir");
-        let outside = root.join("outside.ndjson");
-        write_lines(&outside, &[json!({"severity_number": 17})]);
+    fn oversized_newline_free_input_is_chunked_with_bounded_memory() {
+        let root = unique_root("oversized");
+        let path = root.join("demo").join("123").join("stdio-1-0.ndjson");
+        fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+        fs::write(&path, vec![b'x'; DEFAULT_TRIAGE_MAX_LINE_CHUNK_BYTES + 64]).expect("write");
 
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&outside, app.join("linked.ndjson")).expect("symlink");
-            let batch = scan_local_triage_with_root(
-                "demo",
-                root.clone(),
-                LocalTriageCursor::default(),
-                LocalTriageLimits::default(),
-            )
-            .expect("scan");
-            assert!(batch.records.is_empty());
-        }
+        let batch = scan_local_triage_with_root(
+            "demo",
+            root.clone(),
+            LocalTriageCursor::default(),
+            LocalTriageLimits {
+                max_records: 8,
+                max_scanned_bytes: (DEFAULT_TRIAGE_MAX_LINE_CHUNK_BYTES + 64) as u64,
+            },
+        )
+        .expect("scan");
+        assert!(batch.truncated);
+        assert!(!batch.records.is_empty());
+        assert_eq!(
+            batch.records[0].record["event_name"],
+            "ores.local_log.oversized_chunk"
+        );
+        assert!(batch.records[0].record["body"].as_str().unwrap().len() <= MAX_INVALID_LINE_CAPTURE_BYTES);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn stale_cursor_resets_when_file_shrinks() {
+        let root = unique_root("shrink");
+        let path = root.join("demo").join("123").join("events-1-0.ndjson");
+        write_lines(&path, &[json!({"severity_number": 17, "body": "new"})]);
+        let relative = "123/events-1-0.ndjson".to_string();
+        let cursor = LocalTriageCursor {
+            offsets: [(relative, 1_000_000)].into_iter().collect(),
+        };
+        let batch = scan_local_triage_with_root(
+            "demo",
+            root.clone(),
+            cursor,
+            LocalTriageLimits::default(),
+        )
+        .expect("scan");
+        assert_eq!(batch.records.len(), 1);
+        assert_eq!(batch.records[0].record["body"], "new");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_aliased_app_names() {
+        let root = unique_root("invalid-name");
+        assert!(scan_local_triage_with_root(
+            "../escape",
+            root,
+            LocalTriageCursor::default(),
+            LocalTriageLimits::default(),
+        )
+        .is_err());
     }
 }
