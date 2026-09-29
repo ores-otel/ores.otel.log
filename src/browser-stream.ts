@@ -30,6 +30,45 @@ export interface StreamSocketLike {
   onmessage: ((event: { data: unknown }) => void) | null;
 }
 
+export interface OresSharedSocketLike {
+  send(data: string | ArrayBuffer): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface OresTransportClientLike {
+  connect(options: {
+    connection_id: string;
+    url: string;
+    protocols?: readonly string[];
+  }): Promise<OresSharedSocketLike>;
+  close(): void;
+}
+
+export interface OresTransportClientModuleLike {
+  createOresTransportClient(transportWorker?: string): OresTransportClientLike;
+}
+
+export interface OresSharedWorkerStreamOptions {
+  /**
+   * Stable logical connection identity. Tabs that resolve to the same ID, URL,
+   * and subprotocol list share one physical socket in ores-sw.js.
+   *
+   * Defaults to a deterministic hash of URL origin + pathname; query strings
+   * are deliberately excluded so credentials cannot leak into the identifier.
+   */
+  connectionId?: string;
+  /** Same-origin ores-sw.js browser client module. Default /ores-workers/client.js. */
+  clientModuleUrl?: string;
+  /** Stable same-origin SharedWorker script URL. Default is owned by ores-sw.js. */
+  transportWorkerUrl?: string;
+  protocols?: readonly string[];
+  /**
+   * Test/custom module loader. The default performs a same-origin dynamic
+   * import of clientModuleUrl in the browser.
+   */
+  moduleLoader?: (url: string) => Promise<OresTransportClientModuleLike>;
+}
+
 export interface BrowserStreamOptions {
   /**
    * Where batches go. Provide `url` for a plain WebSocket collector, or
@@ -40,6 +79,14 @@ export interface BrowserStreamOptions {
   transport?: LogTransport;
   /** Overrides the WebSocket constructor (tests, non-browser runtimes). */
   socketFactory?: (url: string) => StreamSocketLike;
+  /**
+   * Route the raw browser stream through the same-origin ores-sw.js transport
+   * SharedWorker so normal same-origin tabs reuse one physical WebSocket.
+   *
+   * This is for multiplexable wire protocols. Provider SDKs whose session
+   * state is connection-global need a provider-specific SharedWorker adapter.
+   */
+  sharedWorker?: OresSharedWorkerStreamOptions;
   /** Records buffered before the oldest are dropped. Default 2000. */
   maxQueueSize?: number;
   /** Records per outgoing batch. Default 120. */
@@ -72,6 +119,55 @@ export interface BrowserStreamOptions {
 }
 
 const DEFAULT_URGENT_LEVELS = ['ERROR', 'FATAL'] as const;
+
+function stableConnectionId(rawUrl: string): string {
+  const base = typeof globalThis.location?.href === 'string'
+    ? globalThis.location.href
+    : undefined;
+  const url = base ? new URL(rawUrl, base) : new URL(rawUrl);
+  const stable = `${url.origin}${url.pathname}`;
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < stable.length; index += 1) {
+    hash ^= stable.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `ores-otel-${hash.toString(16).padStart(8, '0')}`;
+}
+
+function resolveSameOriginModuleUrl(raw: string): string {
+  const location = globalThis.location;
+  if (!location?.href || !location.origin) {
+    throw new Error(
+      'ORES shared browser transport requires a browser location or a custom moduleLoader',
+    );
+  }
+  const url = new URL(raw, location.href);
+  if (
+    url.origin !== location.origin ||
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.hash
+  ) {
+    throw new TypeError(
+      'ORES shared browser transport clientModuleUrl must be same-origin HTTP(S) without credentials or a fragment',
+    );
+  }
+  return url.href;
+}
+
+async function defaultOresModuleLoader(
+  rawUrl: string,
+): Promise<OresTransportClientModuleLike> {
+  const url = resolveSameOriginModuleUrl(rawUrl);
+  const module = (await import(url)) as unknown as Partial<OresTransportClientModuleLike>;
+  if (typeof module.createOresTransportClient !== 'function') {
+    throw new TypeError(
+      'ORES browser client module does not export createOresTransportClient',
+    );
+  }
+  return module as OresTransportClientModuleLike;
+}
 
 /**
  * FIFO queue with a head cursor: shift() advances a pointer instead of
@@ -139,6 +235,9 @@ export class BrowserStreamTransport implements LogTransport {
 
   private socket: StreamSocketLike | null = null;
   private connectPromise: Promise<StreamSocketLike> | null = null;
+  private sharedSocket: OresSharedSocketLike | null = null;
+  private sharedConnectPromise: Promise<OresSharedSocketLike> | null = null;
+  private sharedClient: OresTransportClientLike | null = null;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private flushInFlight = false;
   private closed = false;
@@ -148,6 +247,16 @@ export class BrowserStreamTransport implements LogTransport {
   constructor(options: BrowserStreamOptions) {
     if (!options.url && !options.transport) {
       throw new TypeError('BrowserStreamTransport requires either url or transport');
+    }
+    if (options.sharedWorker && options.transport) {
+      throw new TypeError(
+        'BrowserStreamTransport sharedWorker cannot be combined with transport',
+      );
+    }
+    if (options.sharedWorker && options.socketFactory) {
+      throw new TypeError(
+        'BrowserStreamTransport sharedWorker cannot be combined with socketFactory',
+      );
     }
     this.options = options;
     this.urgentLevels = new Set(options.urgentLevels ?? DEFAULT_URGENT_LEVELS);
@@ -270,6 +379,51 @@ export class BrowserStreamTransport implements LogTransport {
     return this.connectPromise;
   }
 
+  private async connectShared(): Promise<OresSharedSocketLike> {
+    if (this.sharedSocket) {
+      return this.sharedSocket;
+    }
+    if (this.sharedConnectPromise) {
+      return this.sharedConnectPromise;
+    }
+    const shared = this.options.sharedWorker;
+    const url = this.options.url;
+    if (!shared || !url) {
+      throw new Error('ORES shared browser transport requires a WebSocket url');
+    }
+
+    const task = (async (): Promise<OresSharedSocketLike> => {
+      const loader = shared.moduleLoader ?? defaultOresModuleLoader;
+      const module = await loader(
+        shared.clientModuleUrl ?? '/ores-workers/client.js',
+      );
+      const client = module.createOresTransportClient(shared.transportWorkerUrl);
+      this.sharedClient = client;
+      try {
+        const socket = await client.connect({
+          connection_id: shared.connectionId ?? stableConnectionId(url),
+          url,
+          ...(shared.protocols ? { protocols: shared.protocols } : {}),
+        });
+        this.sharedSocket = socket;
+        return socket;
+      } catch (error) {
+        this.sharedClient = null;
+        client.close();
+        throw error;
+      }
+    })();
+
+    this.sharedConnectPromise = task;
+    try {
+      return await task;
+    } finally {
+      if (this.sharedConnectPromise === task) {
+        this.sharedConnectPromise = null;
+      }
+    }
+  }
+
   private encode(records: readonly LogRecord[]): string {
     return this.options.mapBatch?.(records) ?? JSON.stringify({ type: 'log-batch', records });
   }
@@ -298,6 +452,9 @@ export class BrowserStreamTransport implements LogTransport {
           for (const record of batch) {
             await this.options.transport.write(record);
           }
+        } else if (this.options.sharedWorker) {
+          const socket = await this.connectShared();
+          await socket.send(this.encode(batch));
         } else {
           const socket = await this.connect();
           socket.send(this.encode(batch));
@@ -432,6 +589,19 @@ export class BrowserStreamTransport implements LogTransport {
     this.removePageHideHandlers?.();
     this.socket?.close(1000, 'next-loggers stream closed');
     this.socket = null;
+    const sharedSocket = this.sharedSocket;
+    this.sharedSocket = null;
+    if (sharedSocket) {
+      try {
+        await sharedSocket.close();
+      } finally {
+        this.sharedClient?.close();
+        this.sharedClient = null;
+      }
+    } else if (this.sharedClient) {
+      this.sharedClient.close();
+      this.sharedClient = null;
+    }
     await this.options.transport?.close?.();
   }
 }
