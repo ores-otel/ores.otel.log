@@ -106,12 +106,14 @@ pub fn attach_child_stdio_capture(
     }
 
     let process_id = child.id();
-    let stdout = child.stdout.take().ok_or_else(|| {
-        LoggerError("captured child stdout pipe unavailable".to_string())
-    })?;
-    let stderr = child.stderr.take().ok_or_else(|| {
-        LoggerError("captured child stderr pipe unavailable".to_string())
-    })?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| LoggerError("captured child stdout pipe unavailable".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| LoggerError("captured child stderr pipe unavailable".to_string()))?;
     let journal = Arc::new(LocalJournal::open(LocalJournalOptions::for_app(app_name)?)?);
 
     spawn_stdio_reader(
@@ -121,13 +123,7 @@ pub fn attach_child_stdio_capture(
         unit_name,
         StdioStream::Stdout,
     );
-    spawn_stdio_reader(
-        stderr,
-        journal,
-        process_id,
-        unit_name,
-        StdioStream::Stderr,
-    );
+    spawn_stdio_reader(stderr, journal, process_id, unit_name, StdioStream::Stderr);
     return Ok(());
 }
 
@@ -275,10 +271,7 @@ impl DesktopSession {
         return Self::with_transport(app_name, app_version, Arc::new(DesktopStderr));
     }
 
-    pub fn start_with_local_file(
-        app_name: &str,
-        app_version: &str,
-    ) -> Result<Self, LoggerError> {
+    pub fn start_with_local_file(app_name: &str, app_version: &str) -> Result<Self, LoggerError> {
         let journal = Arc::new(LocalJournal::open(LocalJournalOptions::for_app(app_name)?)?);
         let tee = DesktopTee::new(Arc::new(DesktopStderr), journal);
         return Self::with_transport(app_name, app_version, Arc::new(tee));
