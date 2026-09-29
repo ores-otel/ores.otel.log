@@ -97,3 +97,11 @@ class AuditLogger extends BaseLogger<AuditEvent> {
 }
 
 void new AuditLogger().info('extended').withActor('user-1').send();
+
+
+import type { OresSharedWorkerStreamOptions } from '@oresoftware/next-loggers/browser';
+const sharedBrowserStream: OresSharedWorkerStreamOptions = {
+  connectionId: 'ores-otel',
+  protocols: ['ores.logs.v1'],
+};
+void sharedBrowserStream;
