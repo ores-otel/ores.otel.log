@@ -94,15 +94,6 @@ pub enum StdioStream {
     Stderr,
 }
 
-impl StdioStream {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Stdout => "stdout",
-            Self::Stderr => "stderr",
-        }
-    }
-}
-
 #[derive(Debug)]
 struct SegmentWriter {
     segment_start: u64,
@@ -210,7 +201,7 @@ impl LocalJournal {
         let kept = &line[..line.len().min(self.options.max_stdio_line_bytes)];
         let message = String::from_utf8_lossy(kept).into_owned();
         let truncated = kept.len() != original_bytes;
-        let severity = structured_level(line).unwrap_or_else(|| match stream {
+        let severity = structured_level(line).unwrap_or(match stream {
             StdioStream::Stdout => LogLevel::Info,
             StdioStream::Stderr => LogLevel::Warn,
         });
