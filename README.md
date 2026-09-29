@@ -532,6 +532,31 @@ const stream = createBrowserStreamTransport({
 });
 ```
 
+### Share the browser log socket across tabs
+
+ORES web apps can route the raw browser log stream through `ORESoftware/ores-sw.js`. The `transport` SharedWorker owns the physical WebSocket, while each tab keeps its own logger queue and teardown beacon. Ten normal same-origin tabs using the same logical connection therefore reuse one socket instead of opening ten.
+
+```ts
+const log = createBrowserLogger({
+  appName: 'web',
+  stream: {
+    url: 'wss://logs.example.com/ingest',
+    sharedWorker: {
+      // Optional. Defaults to a stable ores-otel hash of URL origin + path.
+      connectionId: 'ores-otel',
+      clientModuleUrl: '/ores-workers/client.js',
+      transportWorkerUrl: '/ores-workers/transport.shared-worker.js',
+      protocols: ['ores.logs.v1'],
+    },
+    beaconUrl: 'https://logs.example.com/ingest-beacon',
+  },
+});
+```
+
+The default connection ID deliberately excludes the WebSocket query string so tokens or other query data cannot leak into worker identity. Explicit IDs must be stable across tabs and should never contain credentials.
+
+This option is for multiplexable raw stream protocols. It is safe for a collector that accepts independent ORES log batches from multiple tabs, including a Supabase Edge Function designed that way. Do not point several connection-session-bound SDK instances at the same raw shared socket. Supabase Realtime/Phoenix subscriptions and the durable Supabase WebSocket ingest protocol need provider-specific multiplexing so joins, refs, heartbeats, session identity, and ACK ownership are coordinated in the SharedWorker rather than duplicated per tab.
+
 ## Serialization limits
 
 Every record is serialized under caps, so one oversized payload cannot take down
