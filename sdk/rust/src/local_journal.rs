@@ -127,7 +127,7 @@ pub struct BoundedStdioLineDecoder {
 impl BoundedStdioLineDecoder {
     pub fn new(max_bytes: usize) -> Self {
         Self {
-            buffer: Vec::with_capacity(max_bytes.min(8 * 1024).max(1)),
+            buffer: Vec::with_capacity(max_bytes.clamp(1, 8 * 1024)),
             max_bytes: max_bytes.max(1),
             observed_bytes: 0,
         }
@@ -483,9 +483,10 @@ fn open_segment_file(
         match options.open(&path) {
             Ok(file) => {
                 #[cfg(unix)]
-                file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(|error| {
-                    LoggerError(format!("could not harden local log segment: {error}"))
-                })?;
+                file.set_permissions(fs::Permissions::from_mode(0o600))
+                    .map_err(|error| {
+                        LoggerError(format!("could not harden local log segment: {error}"))
+                    })?;
                 return Ok((file, sequence));
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -788,8 +789,7 @@ fn redact_bearer_tokens(value: &str) -> (String, bool) {
         let start = search_from + relative;
         let boundary_ok = start == 0
             || bytes.get(start - 1).is_some_and(|byte| {
-                byte.is_ascii_whitespace()
-                    || matches!(*byte, b':' | b'=' | b'\'' | b'"')
+                byte.is_ascii_whitespace() || matches!(*byte, b':' | b'=' | b'\'' | b'"')
             });
         let token_start = start + "bearer ".len();
         if boundary_ok && token_start < bytes.len() {
@@ -922,8 +922,8 @@ mod tests {
     #[test]
     fn unstructured_stderr_is_not_promoted_to_warn() {
         let root = scratch("stderr-info");
-        let journal = LocalJournal::open(LocalJournalOptions::at_root(&root, "example-app"))
-            .expect("open");
+        let journal =
+            LocalJournal::open(LocalJournalOptions::at_root(&root, "example-app")).expect("open");
         journal
             .write_stdio_line("worker", None, StdioStream::Stderr, b"plain stderr")
             .expect("write");
