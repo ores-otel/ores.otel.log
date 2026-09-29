@@ -49,8 +49,10 @@ pub use http_shutdown::{
     SHUTDOWN_HTTP_BODY, SHUTDOWN_HTTP_STATUS,
 };
 pub use local_journal::{
-    LocalJournal, LocalJournalOptions, StdioStream, DEFAULT_LOCAL_LOG_RETENTION,
-    DEFAULT_LOCAL_LOG_SEGMENT_DURATION, DEFAULT_MAX_STDIO_LINE_BYTES,
+    default_local_log_root, BoundedStdioLineDecoder, DecodedStdioLine, LocalJournal,
+    LocalJournalOptions, StdioStream, DEFAULT_LOCAL_LOG_RETENTION,
+    DEFAULT_LOCAL_LOG_SEGMENT_DURATION, DEFAULT_MAX_LOCAL_PROCESS_BYTES,
+    DEFAULT_MAX_LOCAL_SEGMENT_BYTES, DEFAULT_MAX_STDIO_LINE_BYTES, LOCAL_LOG_ROOT_ENV,
 };
 pub use local_triage::{
     is_triage_record, scan_local_triage, scan_local_triage_with_root, LocalTriageBatch,
