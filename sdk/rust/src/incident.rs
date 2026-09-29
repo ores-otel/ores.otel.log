@@ -167,7 +167,10 @@ pub fn scan_local_incidents(options: &IncidentScanOptions) -> Result<IncidentBun
                 )))
             }
         };
-        for raw in contents.split(|byte| *byte == b'\n').filter(|line| !line.is_empty()) {
+        for raw in contents
+            .split(|byte| *byte == b'\n')
+            .filter(|line| !line.is_empty())
+        {
             scanned_records = scanned_records.saturating_add(1);
             let Some(candidate) = incident_candidate(raw, &path, options.max_message_bytes) else {
                 continue;
@@ -285,9 +288,7 @@ fn recent_segment_files(app_dir: &Path, cutoff: u64) -> Result<Vec<PathBuf>, Log
             };
             // Segment timestamps are lower bounds. Retain the first segment whose end overlaps
             // the requested lookback, then let record severity decide whether it is interesting.
-            if segment_start
-                .saturating_add(DEFAULT_LOCAL_LOG_SEGMENT_DURATION.as_secs())
-                >= cutoff
+            if segment_start.saturating_add(DEFAULT_LOCAL_LOG_SEGMENT_DURATION.as_secs()) >= cutoff
             {
                 files.push(child.path());
             }
@@ -488,15 +489,9 @@ mod tests {
             &current_segment_name("stdio"),
             &[stdio, stdio, info],
         );
-        write_segment(
-            &root,
-            app,
-            &current_segment_name("events"),
-            &[warning],
-        );
+        write_segment(&root, app, &current_segment_name("events"), &[warning]);
 
-        let bundle =
-            scan_local_incidents(&IncidentScanOptions::at_root(&root, app)).expect("scan");
+        let bundle = scan_local_incidents(&IncidentScanOptions::at_root(&root, app)).expect("scan");
         assert_eq!(bundle.scanned_records, 4);
         assert_eq!(bundle.matching_records, 3);
         assert_eq!(bundle.unique_incidents, 2);
@@ -559,9 +554,7 @@ mod tests {
             scan_local_incidents(&IncidentScanOptions::at_root(&root, app)).expect("scan");
         assert_eq!(bundle.scanned_records, 0);
         assert!(!bundle.has_incidents());
-        assert!(
-            scan_local_incidents(&IncidentScanOptions::at_root(&root, "../escape")).is_err()
-        );
+        assert!(scan_local_incidents(&IncidentScanOptions::at_root(&root, "../escape")).is_err());
         let _ = fs::remove_dir_all(root);
     }
 }
