@@ -2,12 +2,14 @@
 // Named-function returns follow the shared fleet style guide.
 #![allow(clippy::needless_return)]
 
-use crate::{json, LogRecord, Logger, LoggerError, Options, Transport};
+use crate::{json, JsonObject, LogLevel, LogRecord, Logger, LoggerError, Options, Transport, Value};
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_DESKTOP_LOCAL_LOG_RETENTION_SECS: u64 = 6 * 60 * 60;
@@ -55,12 +57,27 @@ impl std::fmt::Debug for DesktopLocalFile {
 
 impl DesktopLocalFile {
     pub fn new(app_name: &str) -> Result<Self, LoggerError> {
-        return Self::with_root(app_name, default_desktop_local_log_root());
+        return Self::for_process_with_root(
+            app_name,
+            std::process::id(),
+            default_desktop_local_log_root(),
+        );
     }
 
     pub fn with_root(app_name: &str, root: PathBuf) -> Result<Self, LoggerError> {
+        return Self::for_process_with_root(app_name, std::process::id(), root);
+    }
+
+    pub fn for_process(app_name: &str, process_id: u32) -> Result<Self, LoggerError> {
+        return Self::for_process_with_root(app_name, process_id, default_desktop_local_log_root());
+    }
+
+    pub fn for_process_with_root(
+        app_name: &str,
+        process_id: u32,
+        root: PathBuf,
+    ) -> Result<Self, LoggerError> {
         let app_name = sanitize_path_component(app_name);
-        let process_id = std::process::id();
         let transport = Self {
             root,
             app_name,
@@ -212,6 +229,175 @@ impl Transport for DesktopTee {
         let first = self.first.close();
         let second = self.second.close();
         return first.and(second);
+    }
+}
+
+/// Spawn a supervised child with stdout/stderr captured through the canonical
+/// logger while preserving the exact interactive terminal byte stream.
+///
+/// The caller remains responsible for environment clearing, working directory,
+/// process-group semantics, shutdown and restart policy. This helper owns only
+/// stdio capture and the short-lived local log cache.
+pub fn spawn_with_local_stdio_capture(
+    command: &mut Command,
+    app_name: &str,
+    unit_name: &str,
+) -> Result<Child, LoggerError> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| LoggerError(error.to_string()))?;
+    let process_id = child.id();
+    let stdout = child.stdout.take().ok_or_else(|| {
+        return LoggerError("captured child stdout pipe unavailable".to_string());
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        return LoggerError("captured child stderr pipe unavailable".to_string());
+    })?;
+    let file = match DesktopLocalFile::for_process(app_name, process_id) {
+        Ok(file) => Arc::new(file),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    let logger = Logger::new(
+        Options {
+            app_name: app_name.to_owned(),
+            name: Some("captured-stdio".to_owned()),
+            console: false,
+            ..Options::default()
+        }
+        .with_transport(file),
+    );
+
+    spawn_stdio_reader(stdout, logger.clone(), process_id, unit_name, CapturedStream::Stdout);
+    spawn_stdio_reader(stderr, logger, process_id, unit_name, CapturedStream::Stderr);
+    return Ok(child);
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CapturedStream {
+    Stdout,
+    Stderr,
+}
+
+impl CapturedStream {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Stdout => return "stdout",
+            Self::Stderr => return "stderr",
+        }
+    }
+
+    fn default_level(self) -> LogLevel {
+        match self {
+            Self::Stdout => return LogLevel::Info,
+            Self::Stderr => return LogLevel::Warn,
+        }
+    }
+}
+
+fn spawn_stdio_reader<R>(
+    reader: R,
+    logger: Logger,
+    process_id: u32,
+    unit_name: &str,
+    stream: CapturedStream,
+) where
+    R: Read + Send + 'static,
+{
+    let unit_name = unit_name.to_owned();
+    thread::spawn(move || {
+        let mut reader = BufReader::new(reader);
+        let mut buffer = Vec::new();
+        loop {
+            buffer.clear();
+            let bytes_read = match reader.read_until(b'\n', &mut buffer) {
+                Ok(bytes_read) => bytes_read,
+                Err(_) => return,
+            };
+            if bytes_read == 0 {
+                return;
+            }
+            tee_raw_stdio(stream, &buffer);
+
+            let body = String::from_utf8_lossy(&buffer)
+                .trim_end_matches(&['\r', '\n'][..])
+                .to_string();
+            let parsed = serde_json::from_str::<Value>(&body).ok();
+            let level = parsed
+                .as_ref()
+                .and_then(explicit_log_level)
+                .unwrap_or_else(|| stream.default_level());
+            let mut fields = JsonObject::new();
+            fields.insert("process.pid".to_string(), json!(process_id));
+            fields.insert("ores.process.unit".to_string(), json!(unit_name));
+            fields.insert("ores.stdio.stream".to_string(), json!(stream.as_str()));
+            fields.insert(
+                "ores.ai.triage".to_string(),
+                json!(stream == CapturedStream::Stderr || level.otel_severity_number() >= 13),
+            );
+            fields.insert("ores.source.structured".to_string(), json!(parsed.is_some()));
+            let event = match level {
+                LogLevel::Trace => logger.trace(vec![json!(body)]),
+                LogLevel::Debug => logger.debug(vec![json!(body)]),
+                LogLevel::Info => logger.info(vec![json!(body)]),
+                LogLevel::Warn => logger.warn(vec![json!(body)]),
+                LogLevel::Error => logger.error(vec![json!(body)]),
+                LogLevel::Fatal => logger.fatal(vec![json!(body)]),
+            };
+            let _ = event.add_fields(fields).send();
+        }
+    });
+}
+
+fn explicit_log_level(value: &Value) -> Option<LogLevel> {
+    let number = value
+        .get("severity_number")
+        .or_else(|| value.get("severityNumber"))
+        .and_then(Value::as_u64);
+    if let Some(number) = number {
+        return match number {
+            1..=4 => Some(LogLevel::Trace),
+            5..=8 => Some(LogLevel::Debug),
+            9..=12 => Some(LogLevel::Info),
+            13..=16 => Some(LogLevel::Warn),
+            17..=20 => Some(LogLevel::Error),
+            21..=24 => Some(LogLevel::Fatal),
+            _ => None,
+        };
+    }
+    let text = value
+        .get("level")
+        .or_else(|| value.get("severity"))
+        .or_else(|| value.get("severity_text"))
+        .or_else(|| value.get("severityText"))
+        .and_then(Value::as_str)?
+        .trim()
+        .to_ascii_lowercase();
+    return match text.as_str() {
+        "trace" => Some(LogLevel::Trace),
+        "debug" => Some(LogLevel::Debug),
+        "info" | "information" => Some(LogLevel::Info),
+        "warn" | "warning" => Some(LogLevel::Warn),
+        "error" | "err" => Some(LogLevel::Error),
+        "fatal" | "critical" | "crit" | "panic" => Some(LogLevel::Fatal),
+        _ => None,
+    };
+}
+
+fn tee_raw_stdio(stream: CapturedStream, bytes: &[u8]) {
+    match stream {
+        CapturedStream::Stdout => {
+            let mut stdout = std::io::stdout().lock();
+            let _ = stdout.write_all(bytes);
+            let _ = stdout.flush();
+        }
+        CapturedStream::Stderr => {
+            let mut stderr = std::io::stderr().lock();
+            let _ = stderr.write_all(bytes);
+            let _ = stderr.flush();
+        }
     }
 }
 
@@ -416,5 +602,18 @@ mod tests {
     #[test]
     fn default_retention_is_six_hours() {
         assert_eq!(DEFAULT_DESKTOP_LOCAL_LOG_RETENTION_SECS, 21_600);
+    }
+
+    #[test]
+    fn stderr_defaults_to_warn_and_error_json_is_preserved() {
+        assert_eq!(CapturedStream::Stderr.default_level(), LogLevel::Warn);
+        assert_eq!(
+            explicit_log_level(&json!({"level": "error"})),
+            Some(LogLevel::Error)
+        );
+        assert_eq!(
+            explicit_log_level(&json!({"severityNumber": 21})),
+            Some(LogLevel::Fatal)
+        );
     }
 }
