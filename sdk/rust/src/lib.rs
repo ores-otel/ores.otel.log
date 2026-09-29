@@ -11,6 +11,7 @@ pub mod config_discovery;
 pub mod context;
 pub mod desktop;
 pub mod http_shutdown;
+pub mod local_triage;
 #[cfg(all(unix, feature = "launcher"))]
 pub mod launcher;
 pub mod shutdown;
@@ -40,10 +41,16 @@ pub use context::{
     enter_log_context, merge_log_context, update_log_context, with_captured_log_context,
     with_log_context, with_log_context_async, ContextFuture, LogContext, LogContextGuard,
 };
+pub use desktop::default_desktop_local_log_root;
 pub use http_shutdown::{
     HttpAdmission, HttpShutdownController, HttpShutdownGate, HttpShutdownRejection,
     ShutdownDecision, ShutdownSignalOutcome, ShutdownTrigger, DEFAULT_HTTP_GRACE_PERIOD,
     SHUTDOWN_HTTP_BODY, SHUTDOWN_HTTP_STATUS,
+};
+pub use local_triage::{
+    is_triage_record, scan_local_triage, scan_local_triage_with_root, LocalTriageBatch,
+    LocalTriageCursor, LocalTriageLimits, LocalTriageRecord, DEFAULT_TRIAGE_MAX_RECORDS,
+    DEFAULT_TRIAGE_MAX_SCANNED_BYTES,
 };
 pub use shutdown::{
     transition_shutdown_state, ShutdownAction, ShutdownEvent, ShutdownPhase, ShutdownStateMachine,
