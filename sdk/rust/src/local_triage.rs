@@ -112,7 +112,8 @@ pub fn scan_local_triage_with_root(
     let mut truncated = file_limit_hit;
 
     'files: for (relative_path, absolute_path) in files {
-        let mut file = File::open(&absolute_path).map_err(|error| LoggerError(error.to_string()))?;
+        let mut file =
+            File::open(&absolute_path).map_err(|error| LoggerError(error.to_string()))?;
         let file_len = file
             .metadata()
             .map_err(|error| LoggerError(error.to_string()))?
@@ -132,9 +133,7 @@ pub fn scan_local_triage_with_root(
         let mut offset = start_offset;
 
         loop {
-            if scanned_bytes >= limits.max_scanned_bytes
-                || records.len() >= limits.max_records
-            {
+            if scanned_bytes >= limits.max_scanned_bytes || records.len() >= limits.max_records {
                 truncated = true;
                 cursor.offsets.insert(relative_path.clone(), offset);
                 break 'files;
@@ -143,8 +142,7 @@ pub fn scan_local_triage_with_root(
             let remaining_budget = limits.max_scanned_bytes.saturating_sub(scanned_bytes);
             let read_cap = usize::try_from(remaining_budget)
                 .unwrap_or(usize::MAX)
-                .min(DEFAULT_TRIAGE_MAX_LINE_CHUNK_BYTES)
-                .max(1);
+                .clamp(1, DEFAULT_TRIAGE_MAX_LINE_CHUNK_BYTES);
             let Some(chunk) = read_record_chunk(&mut reader, read_cap)? else {
                 cursor.offsets.insert(relative_path.clone(), offset);
                 break;
@@ -517,7 +515,10 @@ mod tests {
             batch.records[0].record["event_name"],
             "ores.local_log.oversized_chunk"
         );
-        assert!(batch.records[0].record["body"].as_str().unwrap().len() <= MAX_INVALID_LINE_CAPTURE_BYTES);
+        assert!(
+            batch.records[0].record["body"].as_str().unwrap().len()
+                <= MAX_INVALID_LINE_CAPTURE_BYTES
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -530,13 +531,9 @@ mod tests {
         let cursor = LocalTriageCursor {
             offsets: [(relative, 1_000_000)].into_iter().collect(),
         };
-        let batch = scan_local_triage_with_root(
-            "demo",
-            root.clone(),
-            cursor,
-            LocalTriageLimits::default(),
-        )
-        .expect("scan");
+        let batch =
+            scan_local_triage_with_root("demo", root.clone(), cursor, LocalTriageLimits::default())
+                .expect("scan");
         assert_eq!(batch.records.len(), 1);
         assert_eq!(batch.records[0].record["body"], "new");
         let _ = fs::remove_dir_all(root);
