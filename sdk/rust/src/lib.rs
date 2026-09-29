@@ -11,9 +11,10 @@ pub mod config_discovery;
 pub mod context;
 pub mod desktop;
 pub mod http_shutdown;
-pub mod local_triage;
 #[cfg(all(unix, feature = "launcher"))]
 pub mod launcher;
+pub mod local_journal;
+pub mod local_triage;
 pub mod shutdown;
 pub mod span;
 
@@ -46,6 +47,10 @@ pub use http_shutdown::{
     HttpAdmission, HttpShutdownController, HttpShutdownGate, HttpShutdownRejection,
     ShutdownDecision, ShutdownSignalOutcome, ShutdownTrigger, DEFAULT_HTTP_GRACE_PERIOD,
     SHUTDOWN_HTTP_BODY, SHUTDOWN_HTTP_STATUS,
+};
+pub use local_journal::{
+    LocalJournal, LocalJournalOptions, StdioStream, DEFAULT_LOCAL_LOG_RETENTION,
+    DEFAULT_LOCAL_LOG_SEGMENT_DURATION, DEFAULT_MAX_STDIO_LINE_BYTES,
 };
 pub use local_triage::{
     is_triage_record, scan_local_triage, scan_local_triage_with_root, LocalTriageBatch,
