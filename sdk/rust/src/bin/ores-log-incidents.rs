@@ -11,6 +11,7 @@ struct Cli {
     max_samples: usize,
     max_bytes: usize,
     max_message_bytes: usize,
+    include_messages: bool,
     exit_on_incidents: bool,
 }
 
@@ -34,6 +35,7 @@ fn run(cli: Cli) -> Result<ExitCode, String> {
     options.max_samples = cli.max_samples;
     options.max_output_bytes = cli.max_bytes;
     options.max_message_bytes = cli.max_message_bytes;
+    options.include_messages = cli.include_messages;
 
     let bundle = scan_local_incidents(&options).map_err(|error| error.to_string())?;
     println!(
@@ -55,6 +57,7 @@ fn parse_args() -> Result<Cli, String> {
     let mut max_samples = 32;
     let mut max_bytes = 24 * 1024;
     let mut max_message_bytes = 2 * 1024;
+    let mut include_messages = false;
     let mut exit_on_incidents = false;
 
     while let Some(arg) = args.next() {
@@ -74,6 +77,7 @@ fn parse_args() -> Result<Cli, String> {
                 max_message_bytes =
                     parse_usize(next_value(&mut args, "--max-message-bytes")?, "--max-message-bytes")?;
             }
+            "--include-messages" => include_messages = true,
             "--exit-on-incidents" => exit_on_incidents = true,
             "-h" | "--help" => {
                 print_help();
@@ -90,6 +94,7 @@ fn parse_args() -> Result<Cli, String> {
         max_samples,
         max_bytes,
         max_message_bytes,
+        include_messages,
         exit_on_incidents,
     })
 }
@@ -123,6 +128,7 @@ fn print_help() {
            --max-samples <n>            Maximum unique incidents (default: 32)\n\
            --max-bytes <n>              Maximum JSON bundle bytes (default: 24576)\n\
            --max-message-bytes <n>      Maximum message prefix per incident (default: 2048)\n\
+           --include-messages           Include bounded raw message prefixes (default: off)\n\
            --exit-on-incidents          Exit 10 when incidents are present; otherwise exit 0\n"
     );
 }
