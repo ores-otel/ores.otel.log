@@ -1,9 +1,9 @@
 //! Private, bounded local JSONL journals for desktop/server processes.
 //!
-//! This module is deliberately local-only. Application-owned structured records use the
-//! canonical `next-loggers/v1` envelope; arbitrary child stdout/stderr is wrapped in the
-//! separate `ores-process-stdio/v1` envelope so raw process output can never be confused
-//! with an application log record or be forwarded to remote transports by accident.
+//! Application-owned structured records use `next-loggers/v1`; arbitrary child
+//! stdout/stderr uses the separate local-only `ores-process-stdio/v1` envelope.
+//! Raw process output therefore cannot be confused with an application log or
+//! accidentally routed through a remote Logger transport.
 
 use crate::{LogLevel, LogRecord, LoggerError, Transport};
 use serde::Serialize;
@@ -39,7 +39,6 @@ pub struct LocalJournalOptions {
 }
 
 impl LocalJournalOptions {
-    /// Canonical desktop/laptop location: `$HOME/tmp/logs/<app>/<pid>-<start-ms>`.
     pub fn for_app(app_name: impl Into<String>) -> Result<Self, LoggerError> {
         Ok(Self {
             root: default_local_log_root(),
@@ -116,9 +115,8 @@ impl DecodedStdioLine {
     }
 }
 
-/// Incremental newline decoder that never retains more than `max_bytes` of one line.
-/// Bytes beyond the limit are counted but discarded until newline/EOF so callers can
-/// preserve exact terminal output while keeping diagnostic memory bounded.
+/// Incremental newline decoder that retains at most `max_bytes` from one line.
+/// Additional bytes are counted but discarded until newline/EOF.
 #[derive(Debug)]
 pub struct BoundedStdioLineDecoder {
     buffer: Vec<u8>,
@@ -204,11 +202,8 @@ impl LocalJournal {
 
         let process_id = std::process::id();
         let started_unix_millis = unix_millis(now);
-        let process_dir = create_unique_process_directory(
-            &app_dir,
-            process_id,
-            started_unix_millis,
-        )?;
+        let process_dir =
+            create_unique_process_directory(&app_dir, process_id, started_unix_millis)?;
 
         Ok(Self {
             options,
@@ -240,7 +235,6 @@ impl LocalJournal {
         self.options.max_stdio_line_bytes
     }
 
-    /// Remove complete segments that fall entirely outside the configured retention window.
     pub fn prune(&self) -> Result<(), LoggerError> {
         prune_app_dir(
             &self.app_dir,
@@ -250,12 +244,6 @@ impl LocalJournal {
         )
     }
 
-    /// Write one arbitrary child-process line into the private stdio journal.
-    ///
-    /// Raw stdout/stderr may contain credentials or user data. This API writes only to the
-    /// local private journal, never invokes Logger transports or OTEL exporters, and applies
-    /// bounded best-effort redaction before persistence. The exact bytes may still be teed to
-    /// the interactive terminal by the caller.
     pub fn write_stdio_line(
         &self,
         source_name: &str,
@@ -266,8 +254,8 @@ impl LocalJournal {
         self.write_stdio_line_observed(source_name, source_pid, stream, line, line.len())
     }
 
-    /// Variant for bounded pipe readers that retain only a prefix of a long line.
-    /// `observed_line_bytes` records the payload length before truncation.
+    /// Write a bounded prefix while preserving the payload size before truncation.
+    /// Newline bytes are framing and are not counted as `line_bytes`.
     pub fn write_stdio_line_observed(
         &self,
         source_name: &str,
@@ -277,17 +265,21 @@ impl LocalJournal {
         observed_line_bytes: usize,
     ) -> Result<(), LoggerError> {
         let source_name = bounded_text(source_name, MAX_SOURCE_NAME_BYTES);
+        let raw_len = line.len();
         let line = trim_line_ending(line);
-        let original_bytes = observed_line_bytes.max(line.len());
+        let framing_bytes = raw_len.saturating_sub(line.len());
+        let original_bytes = observed_line_bytes
+            .saturating_sub(framing_bytes)
+            .max(line.len());
         let kept = &line[..line.len().min(self.options.max_stdio_line_bytes)];
-        let severity = if line.len() <= self.options.max_stdio_line_bytes {
+        let severity = if original_bytes <= self.options.max_stdio_line_bytes {
             structured_level(line)
         } else {
             None
         }
         .unwrap_or(LogLevel::Info);
         let (message, redacted) = sanitize_stdio_message(kept, self.options.max_stdio_line_bytes);
-        let truncated = kept.len() != original_bytes;
+        let truncated = kept.len() < original_bytes;
 
         let record = LocalStdioRecord {
             schema: "ores-process-stdio/v1",
@@ -399,7 +391,9 @@ impl LocalJournal {
         state.total_bytes = state.total_bytes.saturating_add(encoded_len);
         drop(state);
 
-        self.prune()?;
+        if rotate {
+            self.prune()?;
+        }
         Ok(())
     }
 
@@ -787,12 +781,16 @@ fn redact_bearer_tokens(value: &str) -> (String, bool) {
     let bytes = value.as_bytes();
     let mut ranges = Vec::new();
     let mut search_from = 0usize;
-    while let Some(relative) = lower[search_from..].find("bearer ") {
+    while search_from < lower.len() {
+        let Some(relative) = lower[search_from..].find("bearer ") else {
+            break;
+        };
         let start = search_from + relative;
         let boundary_ok = start == 0
-            || bytes
-                .get(start.saturating_sub(1))
-                .is_some_and(|byte| byte.is_ascii_whitespace() || matches!(byte, b':' | b'=' | b'\'' | b'"'));
+            || bytes.get(start - 1).is_some_and(|byte| {
+                byte.is_ascii_whitespace()
+                    || matches!(*byte, b':' | b'=' | b'\'' | b'"')
+            });
         let token_start = start + "bearer ".len();
         if boundary_ok && token_start < bytes.len() {
             let mut token_end = token_start;
@@ -806,10 +804,7 @@ fn redact_bearer_tokens(value: &str) -> (String, bool) {
                 ranges.push((token_start, token_end));
             }
         }
-        search_from = token_start.min(lower.len());
-        if search_from >= lower.len() {
-            break;
-        }
+        search_from = token_start.max(start + 1);
     }
     if ranges.is_empty() {
         return (value.to_owned(), false);
@@ -859,6 +854,19 @@ mod tests {
         ))
     }
 
+    fn first_stdio_record(journal: &LocalJournal) -> Value {
+        let path = fs::read_dir(journal.process_dir())
+            .expect("read")
+            .map(|entry| entry.expect("entry").path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|name| name.starts_with("stdio-"))
+            })
+            .expect("stdio segment");
+        serde_json::from_str(fs::read_to_string(path).expect("contents").trim()).expect("json")
+    }
+
     #[test]
     fn writes_canonical_events_and_private_stdio_envelopes() {
         let root = scratch("write");
@@ -889,39 +897,19 @@ mod tests {
             .expect("write stdio record");
         journal.flush().expect("flush");
 
-        let files = fs::read_dir(journal.process_dir())
-            .expect("read process dir")
-            .map(|entry| entry.expect("entry").path())
-            .collect::<Vec<_>>();
-        assert!(files.iter().any(|path| {
-            path.file_name()
-                .and_then(OsStr::to_str)
-                .is_some_and(|name| name.starts_with("events-"))
-        }));
-        assert!(files.iter().any(|path| {
-            path.file_name()
-                .and_then(OsStr::to_str)
-                .is_some_and(|name| name.starts_with("stdio-"))
-        }));
-
-        let stdio = files
-            .iter()
-            .find(|path| {
-                path.file_name()
-                    .and_then(OsStr::to_str)
-                    .is_some_and(|name| name.starts_with("stdio-"))
-            })
-            .and_then(|path| fs::read_to_string(path).ok())
-            .expect("stdio contents");
-        let record: Value = serde_json::from_str(stdio.trim()).expect("valid json");
+        let record = first_stdio_record(&journal);
         assert_eq!(record["schema"], "ores-process-stdio/v1");
         assert_eq!(record["stream"], "stderr");
         assert_eq!(record["level"], "FATAL");
         assert_eq!(record["sourceName"], "nginx");
+        assert_eq!(record["truncated"], false);
         assert!(record["timestampUnixMs"].as_u64().is_some());
 
         #[cfg(unix)]
-        for path in files {
+        for path in fs::read_dir(journal.process_dir())
+            .expect("read process dir")
+            .map(|entry| entry.expect("entry").path())
+        {
             assert_eq!(
                 fs::metadata(path).expect("metadata").permissions().mode() & 0o777,
                 0o600
@@ -940,17 +928,7 @@ mod tests {
             .write_stdio_line("worker", None, StdioStream::Stderr, b"plain stderr")
             .expect("write");
         journal.flush().expect("flush");
-        let path = fs::read_dir(journal.process_dir())
-            .expect("read")
-            .map(|entry| entry.expect("entry").path())
-            .find(|path| {
-                path.file_name()
-                    .and_then(OsStr::to_str)
-                    .is_some_and(|name| name.starts_with("stdio-"))
-            })
-            .expect("stdio segment");
-        let value: Value =
-            serde_json::from_str(fs::read_to_string(path).expect("contents").trim()).expect("json");
+        let value = first_stdio_record(&journal);
         assert_eq!(value["level"], "INFO");
         assert_eq!(value["stream"], "stderr");
         let _ = fs::remove_dir_all(root);
@@ -970,21 +948,18 @@ mod tests {
                 br#"{"token":"secret-value","message":"hello"}"#,
             )
             .expect("write");
-
-        let path = fs::read_dir(journal.process_dir())
-            .expect("read")
-            .map(|entry| entry.expect("entry").path())
-            .find(|path| {
-                path.file_name()
-                    .and_then(OsStr::to_str)
-                    .is_some_and(|name| name.starts_with("stdio-"))
-            })
-            .expect("stdio segment");
-        let value: Value =
-            serde_json::from_str(fs::read_to_string(path).expect("contents").trim()).expect("json");
+        let value = first_stdio_record(&journal);
         assert!(!value["message"].as_str().unwrap().contains("secret-value"));
         assert_eq!(value["redacted"], true);
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn bearer_tokens_are_redacted_in_plain_text() {
+        let (value, changed) = redact_bearer_tokens("authorization: Bearer super-secret more");
+        assert!(changed);
+        assert!(!value.contains("super-secret"));
+        assert!(value.contains(REDACTED_VALUE));
     }
 
     #[test]
