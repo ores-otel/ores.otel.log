@@ -41,7 +41,9 @@ impl LocalJournalOptions {
         let home = std::env::var_os("HOME")
             .or_else(|| std::env::var_os("USERPROFILE"))
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| LoggerError("HOME/USERPROFILE is unavailable for local logging".into()))?;
+            .ok_or_else(|| {
+                LoggerError("HOME/USERPROFILE is unavailable for local logging".into())
+            })?;
         Ok(Self {
             root: PathBuf::from(home).join("tmp").join("logs"),
             app_name: app_name.into(),
@@ -131,12 +133,7 @@ impl LocalJournal {
         ensure_private_directory(&app_dir)?;
 
         let now = SystemTime::now();
-        prune_app_dir(
-            &app_dir,
-            options.retention,
-            options.segment_duration,
-            now,
-        )?;
+        prune_app_dir(&app_dir, options.retention, options.segment_duration, now)?;
 
         let process_id = std::process::id();
         let started_unix_millis = unix_millis(now);
@@ -285,10 +282,13 @@ impl LocalJournal {
             .state
             .lock()
             .map_err(|error| LoggerError(error.to_string()))?;
-        for writer in [&mut state.events, &mut state.stdio]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(writer) = state.events.as_mut() {
+            writer
+                .file
+                .flush()
+                .map_err(|error| LoggerError(error.to_string()))?;
+        }
+        if let Some(writer) = state.stdio.as_mut() {
             writer
                 .file
                 .flush()
@@ -509,9 +509,7 @@ fn now_rfc3339() -> String {
 }
 
 fn unix_seconds(now: SystemTime) -> u64 {
-    now.duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    now.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 fn unix_millis(now: SystemTime) -> u128 {
@@ -625,8 +623,7 @@ mod tests {
             })
             .expect("stdio segment");
         let value: Value =
-            serde_json::from_str(fs::read_to_string(path).expect("contents").trim())
-                .expect("json");
+            serde_json::from_str(fs::read_to_string(path).expect("contents").trim()).expect("json");
         assert_eq!(value["message"], "abcd");
         assert_eq!(value["lineBytes"], 8);
         assert_eq!(value["truncated"], true);
