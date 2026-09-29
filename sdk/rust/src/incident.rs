@@ -27,6 +27,7 @@ pub struct IncidentScanOptions {
     pub max_samples: usize,
     pub max_output_bytes: usize,
     pub max_message_bytes: usize,
+    pub include_messages: bool,
 }
 
 impl IncidentScanOptions {
@@ -44,6 +45,7 @@ impl IncidentScanOptions {
             max_samples: DEFAULT_INCIDENT_MAX_SAMPLES,
             max_output_bytes: DEFAULT_INCIDENT_MAX_BYTES,
             max_message_bytes: DEFAULT_INCIDENT_MESSAGE_BYTES,
+            include_messages: false,
         })
     }
 
@@ -55,6 +57,7 @@ impl IncidentScanOptions {
             max_samples: DEFAULT_INCIDENT_MAX_SAMPLES,
             max_output_bytes: DEFAULT_INCIDENT_MAX_BYTES,
             max_message_bytes: DEFAULT_INCIDENT_MESSAGE_BYTES,
+            include_messages: false,
         }
     }
 
@@ -94,7 +97,8 @@ pub struct IncidentSample {
     pub first_timestamp: String,
     pub last_timestamp: String,
     pub repeat_count: u64,
-    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
     pub message_truncated: bool,
     pub journal_file: String,
 }
@@ -191,8 +195,9 @@ pub fn scan_local_incidents(options: &IncidentScanOptions) -> Result<IncidentBun
                                 first_timestamp: candidate.timestamp.clone(),
                                 last_timestamp: candidate.timestamp,
                                 repeat_count: 1,
-                                message: candidate.message,
-                                message_truncated: candidate.message_truncated,
+                                message: options.include_messages.then_some(candidate.message),
+                                message_truncated: options.include_messages
+                                    && candidate.message_truncated,
                                 journal_file: candidate.journal_file,
                             },
                         },
@@ -526,7 +531,15 @@ mod tests {
         assert!(bundle.output_truncated);
         assert!(bundle.omitted_incidents >= 5);
         assert!(bundle.samples.len() <= 3);
-        assert!(bundle.samples.iter().all(|sample| sample.message.len() <= 128));
+        assert!(bundle.samples.iter().all(|sample| sample.message.is_none()));
+        options.include_messages = true;
+        let with_messages = scan_local_incidents(&options).expect("scan with messages");
+        assert!(with_messages.samples.iter().all(|sample| {
+            sample
+                .message
+                .as_ref()
+                .is_some_and(|message| message.len() <= 128)
+        }));
         assert!(encoded.len() <= options.max_output_bytes);
 
         let _ = fs::remove_dir_all(root);
