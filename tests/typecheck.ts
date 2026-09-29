@@ -7,7 +7,11 @@ import {
   type LogLevel,
   type LogTransport,
 } from '@oresoftware/next-loggers/base';
-import { createBrowserLogger, base as browserBase } from '@oresoftware/next-loggers/browser';
+import {
+  createBrowserLogger,
+  base as browserBase,
+  type OresSharedWorkerStreamOptions,
+} from '@oresoftware/next-loggers/browser';
 import { createBunLogger, base as bunBase } from '@oresoftware/next-loggers/bun';
 import { createDenoLogger, base as denoBase } from '@oresoftware/next-loggers/deno';
 import { createEdgeLogger, base as edgeBase } from '@oresoftware/next-loggers/edge';
@@ -98,10 +102,14 @@ class AuditLogger extends BaseLogger<AuditEvent> {
 
 void new AuditLogger().info('extended').withActor('user-1').send();
 
-
-import type { OresSharedWorkerStreamOptions } from '@oresoftware/next-loggers/browser';
 const sharedBrowserStream: OresSharedWorkerStreamOptions = {
   connectionId: 'ores-otel',
   protocols: ['ores.logs.v1'],
 };
-void sharedBrowserStream;
+void createBrowserLogger({
+  stream: {
+    url: 'wss://logs.example.test/ingest',
+    sharedWorker: sharedBrowserStream,
+    flushOnPageHide: false,
+  },
+});
