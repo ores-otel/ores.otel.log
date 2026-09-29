@@ -136,6 +136,7 @@ impl DesktopLocalFile {
             .unwrap_or(true);
 
         if needs_open {
+            *state = None;
             self.prune()?;
             ensure_private_directory(&self.process_directory())?;
             let path = self
@@ -244,7 +245,9 @@ pub fn spawn_with_local_stdio_capture(
     unit_name: &str,
 ) -> Result<Child, LoggerError> {
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| LoggerError(error.to_string()))?;
+    let mut child = command
+        .spawn()
+        .map_err(|error| LoggerError(error.to_string()))?;
     let process_id = child.id();
     let stdout = child.stdout.take().ok_or_else(|| {
         return LoggerError("captured child stdout pipe unavailable".to_string());
@@ -264,14 +267,27 @@ pub fn spawn_with_local_stdio_capture(
         Options {
             app_name: app_name.to_owned(),
             name: Some("captured-stdio".to_owned()),
+            max_level: LogLevel::Trace,
             console: false,
             ..Options::default()
         }
         .with_transport(file),
     );
 
-    spawn_stdio_reader(stdout, logger.clone(), process_id, unit_name, CapturedStream::Stdout);
-    spawn_stdio_reader(stderr, logger, process_id, unit_name, CapturedStream::Stderr);
+    spawn_stdio_reader(
+        stdout,
+        logger.clone(),
+        process_id,
+        unit_name,
+        CapturedStream::Stdout,
+    );
+    spawn_stdio_reader(
+        stderr,
+        logger,
+        process_id,
+        unit_name,
+        CapturedStream::Stderr,
+    );
     return Ok(child);
 }
 
@@ -337,7 +353,10 @@ fn spawn_stdio_reader<R>(
                 "ores.ai.triage".to_string(),
                 json!(stream == CapturedStream::Stderr || level.otel_severity_number() >= 13),
             );
-            fields.insert("ores.source.structured".to_string(), json!(parsed.is_some()));
+            fields.insert(
+                "ores.source.structured".to_string(),
+                json!(parsed.is_some()),
+            );
             let event = match level {
                 LogLevel::Trace => logger.trace(vec![json!(body)]),
                 LogLevel::Debug => logger.debug(vec![json!(body)]),
