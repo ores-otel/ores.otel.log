@@ -190,9 +190,23 @@ impl LocalJournal {
         stream: StdioStream,
         line: &[u8],
     ) -> Result<(), LoggerError> {
+        self.write_stdio_line_observed(source_name, source_pid, stream, line, line.len())
+    }
+
+    /// Variant for bounded pipe readers that intentionally retain only a prefix of a very
+    /// long line. `observed_line_bytes` preserves the original size without requiring the
+    /// caller to allocate the entire line in memory.
+    pub fn write_stdio_line_observed(
+        &self,
+        source_name: &str,
+        source_pid: Option<u32>,
+        stream: StdioStream,
+        line: &[u8],
+        observed_line_bytes: usize,
+    ) -> Result<(), LoggerError> {
         let source_name = bounded_text(source_name, MAX_SOURCE_NAME_BYTES);
         let line = trim_line_ending(line);
-        let original_bytes = line.len();
+        let original_bytes = observed_line_bytes.max(line.len());
         let kept = &line[..line.len().min(self.options.max_stdio_line_bytes)];
         let message = String::from_utf8_lossy(kept).into_owned();
         let truncated = kept.len() != original_bytes;
