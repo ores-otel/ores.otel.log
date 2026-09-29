@@ -65,17 +65,23 @@ fn parse_args() -> Result<Cli, String> {
             "--app" => app = Some(next_value(&mut args, "--app")?),
             "--root" => root = Some(PathBuf::from(next_value(&mut args, "--root")?)),
             "--lookback-seconds" => {
-                lookback_seconds = parse_u64(next_value(&mut args, "--lookback-seconds")?, "--lookback-seconds")?;
+                lookback_seconds = parse_u64(
+                    next_value(&mut args, "--lookback-seconds")?,
+                    "--lookback-seconds",
+                )?;
             }
             "--max-samples" => {
-                max_samples = parse_usize(next_value(&mut args, "--max-samples")?, "--max-samples")?;
+                max_samples =
+                    parse_usize(next_value(&mut args, "--max-samples")?, "--max-samples")?;
             }
             "--max-bytes" => {
                 max_bytes = parse_usize(next_value(&mut args, "--max-bytes")?, "--max-bytes")?;
             }
             "--max-message-bytes" => {
-                max_message_bytes =
-                    parse_usize(next_value(&mut args, "--max-message-bytes")?, "--max-message-bytes")?;
+                max_message_bytes = parse_usize(
+                    next_value(&mut args, "--max-message-bytes")?,
+                    "--max-message-bytes",
+                )?;
             }
             "--include-messages" => include_messages = true,
             "--exit-on-incidents" => exit_on_incidents = true,
@@ -157,14 +163,18 @@ mod tests {
             match arg.as_str() {
                 "--app" => app = Some(next_value(&mut iter, "--app").expect("app")),
                 "--lookback-seconds" => {
-                    lookback_seconds =
-                        parse_u64(next_value(&mut iter, "--lookback-seconds").expect("value"), "--lookback-seconds")
-                            .expect("seconds");
+                    lookback_seconds = parse_u64(
+                        next_value(&mut iter, "--lookback-seconds").expect("value"),
+                        "--lookback-seconds",
+                    )
+                    .expect("seconds");
                 }
                 "--max-samples" => {
-                    max_samples =
-                        parse_usize(next_value(&mut iter, "--max-samples").expect("value"), "--max-samples")
-                            .expect("samples");
+                    max_samples = parse_usize(
+                        next_value(&mut iter, "--max-samples").expect("value"),
+                        "--max-samples",
+                    )
+                    .expect("samples");
                 }
                 "--exit-on-incidents" => exit_on_incidents = true,
                 other => panic!("unexpected {other}"),
