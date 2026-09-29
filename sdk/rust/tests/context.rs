@@ -9,6 +9,11 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::thread;
 
+struct NoopWake;
+impl std::task::Wake for NoopWake {
+    fn wake(self: Arc<Self>) {}
+}
+
 fn object(entries: &[(&str, serde_json::Value)]) -> JsonObject {
     entries
         .iter()
@@ -112,7 +117,8 @@ fn thread_local_context_is_isolated() {
 }
 
 fn poll_to_completion<F: Future>(future: F) -> F::Output {
-    let mut task = Context::from_waker(Waker::noop());
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut task = Context::from_waker(&waker);
     let mut future = Box::pin(future);
     loop {
         match future.as_mut().poll(&mut task) {
