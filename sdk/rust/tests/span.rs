@@ -8,6 +8,11 @@ use std::future::{pending, Future};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
+struct NoopWake;
+impl std::task::Wake for NoopWake {
+    fn wake(self: Arc<Self>) {}
+}
+
 #[derive(Clone, Debug)]
 struct TestError(&'static str);
 impl Display for TestError {
@@ -155,7 +160,8 @@ fn dropping_async_span_future_ends_application_owned_span() {
         JsonObject::from_iter([("test".into(), json!(true))]),
         |_| async { pending::<Result<(), TestError>>().await },
     );
-    let mut task = Context::from_waker(Waker::noop());
+    let waker = Waker::from(Arc::new(NoopWake));
+    let mut task = Context::from_waker(&waker);
     let mut future = Box::pin(future);
     assert!(matches!(future.as_mut().poll(&mut task), Poll::Pending));
     drop(future);

@@ -14,6 +14,7 @@ pub mod http_shutdown;
 #[cfg(all(unix, feature = "launcher"))]
 pub mod launcher;
 pub mod local_journal;
+pub mod local_triage;
 pub mod shutdown;
 pub mod span;
 
@@ -41,14 +42,22 @@ pub use context::{
     enter_log_context, merge_log_context, update_log_context, with_captured_log_context,
     with_log_context, with_log_context_async, ContextFuture, LogContext, LogContextGuard,
 };
+pub use desktop::default_desktop_local_log_root;
 pub use http_shutdown::{
     HttpAdmission, HttpShutdownController, HttpShutdownGate, HttpShutdownRejection,
     ShutdownDecision, ShutdownSignalOutcome, ShutdownTrigger, DEFAULT_HTTP_GRACE_PERIOD,
     SHUTDOWN_HTTP_BODY, SHUTDOWN_HTTP_STATUS,
 };
 pub use local_journal::{
-    LocalJournal, LocalJournalOptions, StdioStream, DEFAULT_LOCAL_LOG_RETENTION,
-    DEFAULT_LOCAL_LOG_SEGMENT_DURATION, DEFAULT_MAX_STDIO_LINE_BYTES,
+    default_local_log_root, BoundedStdioLineDecoder, DecodedStdioLine, LocalJournal,
+    LocalJournalOptions, StdioStream, DEFAULT_LOCAL_LOG_RETENTION,
+    DEFAULT_LOCAL_LOG_SEGMENT_DURATION, DEFAULT_MAX_LOCAL_PROCESS_BYTES,
+    DEFAULT_MAX_LOCAL_SEGMENT_BYTES, DEFAULT_MAX_STDIO_LINE_BYTES, LOCAL_LOG_ROOT_ENV,
+};
+pub use local_triage::{
+    is_triage_record, scan_local_triage, scan_local_triage_with_root, LocalTriageBatch,
+    LocalTriageCursor, LocalTriageLimits, LocalTriageRecord, DEFAULT_TRIAGE_MAX_RECORDS,
+    DEFAULT_TRIAGE_MAX_SCANNED_BYTES,
 };
 pub use shutdown::{
     transition_shutdown_state, ShutdownAction, ShutdownEvent, ShutdownPhase, ShutdownStateMachine,

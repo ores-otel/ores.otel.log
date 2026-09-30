@@ -2,7 +2,7 @@
 name = "oresoftware-next-loggers"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.82"
 description = "Rust implementation of the next-loggers/v1 structured logging contract"
 license = "MIT"
 repository = "https://github.com/ores-otel/ores.otel.log"
@@ -34,11 +34,8 @@ ores-config-discovery = { git = "https://github.com/ORESoftware/ores-config-disc
 serde = { version = "1", features = ["derive"] }
 # Exact-pin the audited version used by current zed-interfaces consumers. This
 # keeps the Rust logging SDK composable with dependency-graph tooling while
-# preserving a deterministic graph for the supported Rust 1.88+ toolchain.
+# preserving a deterministic graph for the supported Rust 1.82+ toolchain.
 serde_json = "=1.0.151"
-# Exact-pin the audited release so fresh consumers cannot resolve a vulnerable
-# 0.3.x version while the supported resolver/toolchain remains deterministic.
-time = { version = "=0.3.54", features = ["formatting"] }
 
 [target.'cfg(unix)'.dependencies]
 # Reuse the workspace's existing locked libc for the explicitly selected
