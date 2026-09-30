@@ -13,6 +13,10 @@ export {
   BrowserStreamTransport,
   createBrowserStreamTransport,
   type BrowserStreamOptions,
+  type OresSharedSocketLike,
+  type OresSharedWorkerStreamOptions,
+  type OresTransportClientLike,
+  type OresTransportClientModuleLike,
   type StreamSocketLike,
 } from './browser-stream.js';
 

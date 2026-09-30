@@ -415,3 +415,125 @@ test('ten thousand disconnected writes retain only the newest bounded window', a
   );
   await transport.close();
 });
+
+
+test('ORES shared worker stream sends batches through one logical connection', async () => {
+  const connects = [];
+  const sent = [];
+  let sharedCloses = 0;
+  let clientCloses = 0;
+  const moduleLoader = async (moduleUrl) => {
+    assert.equal(moduleUrl, '/ores-workers/client.js');
+    return {
+      createOresTransportClient(workerUrl) {
+        assert.equal(workerUrl, '/ores-workers/transport.shared-worker.js');
+        return {
+          async connect(options) {
+            connects.push(options);
+            return {
+              async send(value) {
+                sent.push(value);
+              },
+              async close() {
+                sharedCloses += 1;
+              },
+            };
+          },
+          close() {
+            clientCloses += 1;
+          },
+        };
+      },
+    };
+  };
+
+  const transport = new BrowserStreamTransport({
+    url: 'wss://logs.example.test/ingest?public=ignored-for-identity',
+    sharedWorker: {
+      clientModuleUrl: '/ores-workers/client.js',
+      transportWorkerUrl: '/ores-workers/transport.shared-worker.js',
+      protocols: ['ores.logs.v1'],
+      moduleLoader,
+    },
+    flushOnPageHide: false,
+  });
+
+  transport.write(record(1));
+  transport.write(record(2));
+  await transport.flush();
+
+  assert.equal(connects.length, 1);
+  assert.match(connects[0].connection_id, /^ores-otel-[0-9a-f]{8}$/);
+  assert.equal(connects[0].url, 'wss://logs.example.test/ingest?public=ignored-for-identity');
+  assert.deepEqual(connects[0].protocols, ['ores.logs.v1']);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(
+    JSON.parse(sent[0]).records.map((value) => value.id),
+    ['browser-1', 'browser-2'],
+  );
+
+  await transport.close();
+  assert.equal(sharedCloses, 1);
+  assert.equal(clientCloses, 1);
+});
+
+test('ORES shared worker connection identity ignores URL query strings', async () => {
+  const ids = [];
+  const moduleLoader = async () => ({
+    createOresTransportClient() {
+      return {
+        async connect(options) {
+          ids.push(options.connection_id);
+          return {
+            async send() {},
+            async close() {},
+          };
+        },
+        close() {},
+      };
+    },
+  });
+
+  for (const url of [
+    'wss://logs.example.test/ingest?token=first',
+    'wss://logs.example.test/ingest?token=second',
+  ]) {
+    const transport = new BrowserStreamTransport({
+      url,
+      sharedWorker: { moduleLoader },
+      flushOnPageHide: false,
+    });
+    transport.write(record(1));
+    await transport.flush();
+    await transport.close();
+  }
+
+  assert.equal(ids.length, 2);
+  assert.equal(ids[0], ids[1]);
+  assert.equal(ids[0].includes('token'), false);
+  assert.equal(ids[0].includes('first'), false);
+  assert.equal(ids[0].includes('second'), false);
+});
+
+test('ORES shared worker mode rejects ambiguous competing transport factories', () => {
+  const sharedWorker = { moduleLoader: async () => ({}) };
+  assert.throws(
+    () =>
+      new BrowserStreamTransport({
+        url: 'wss://logs.example.test/ingest',
+        sharedWorker,
+        socketFactory: () => new SocketDouble('wss://logs.example.test/ingest'),
+        flushOnPageHide: false,
+      }),
+    /cannot be combined with socketFactory/,
+  );
+  assert.throws(
+    () =>
+      new BrowserStreamTransport({
+        transport: { write() {} },
+        sharedWorker,
+        flushOnPageHide: false,
+      }),
+    /cannot be combined with transport/,
+  );
+});
