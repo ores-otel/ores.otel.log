@@ -67,3 +67,35 @@ directly to the protected default branch. Require deterministic build/test/healt
 restarting onto a repaired binary. Store the incident fingerprint and attempted commit so the same
 failure is not repeatedly "fixed" with the same revision. After a small bounded retry budget,
 disable automatic edits for that incident and escalate it instead.
+
+
+## Deterministic incident scan
+
+The Rust SDK also ships `ores-log-incidents` for the cheap detection stage. It performs no network
+I/O and does not invoke a model. By default it scans only the last 20 minutes, selects stderr and
+WARN/ERROR/FATAL records, collapses identical failures by fingerprint, and caps the bundle at 32
+unique samples and 24 KiB.
+
+Raw message prefixes are **not emitted by default**. The default bundle carries severity, source,
+stream, repeat count, timestamps, fingerprint, and the local journal file. This is enough for a
+supervisor to decide whether to wake a remediation agent without copying arbitrary child stderr into
+an AI prompt.
+
+Example:
+
+```sh
+ores-log-incidents --app ores-compose --exit-on-incidents > /tmp/ores-incidents.json
+status=$?
+
+if [ "$status" -eq 10 ]; then
+  # Wake exactly one remediation workflow for this incident bundle.
+  # The agent should read only the referenced local journal records it needs.
+  run-your-remediation-agent /tmp/ores-incidents.json
+elif [ "$status" -ne 0 ]; then
+  echo "incident scanner failed" >&2
+fi
+```
+
+`--include-messages` is an explicit opt-in for bounded message prefixes when the caller has an
+appropriate local redaction/trust policy. It should not be the default for unattended model
+invocation.

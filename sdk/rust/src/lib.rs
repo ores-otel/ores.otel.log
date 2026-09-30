@@ -11,6 +11,7 @@ pub mod config_discovery;
 pub mod context;
 pub mod desktop;
 pub mod http_shutdown;
+pub mod incident;
 #[cfg(all(unix, feature = "launcher"))]
 pub mod launcher;
 pub mod local_journal;
@@ -47,6 +48,11 @@ pub use http_shutdown::{
     HttpAdmission, HttpShutdownController, HttpShutdownGate, HttpShutdownRejection,
     ShutdownDecision, ShutdownSignalOutcome, ShutdownTrigger, DEFAULT_HTTP_GRACE_PERIOD,
     SHUTDOWN_HTTP_BODY, SHUTDOWN_HTTP_STATUS,
+};
+pub use incident::{
+    scan_local_incidents, IncidentBundle, IncidentSample, IncidentScanOptions,
+    DEFAULT_INCIDENT_LOOKBACK, DEFAULT_INCIDENT_MAX_BYTES, DEFAULT_INCIDENT_MAX_SAMPLES,
+    DEFAULT_INCIDENT_MESSAGE_BYTES,
 };
 pub use local_journal::{
     default_local_log_root, BoundedStdioLineDecoder, DecodedStdioLine, LocalJournal,
