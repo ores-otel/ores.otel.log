@@ -550,8 +550,7 @@ mod tests {
             "events-1.ndjson",
             &[r#"{"schema":"next-loggers/v1","timestamp":"old","level":"FATAL","message":"old"}"#],
         );
-        let bundle =
-            scan_local_incidents(&IncidentScanOptions::at_root(&root, app)).expect("scan");
+        let bundle = scan_local_incidents(&IncidentScanOptions::at_root(&root, app)).expect("scan");
         assert_eq!(bundle.scanned_records, 0);
         assert!(!bundle.has_incidents());
         assert!(scan_local_incidents(&IncidentScanOptions::at_root(&root, "../escape")).is_err());
