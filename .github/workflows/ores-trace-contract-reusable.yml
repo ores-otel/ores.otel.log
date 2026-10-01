@@ -1,0 +1,45 @@
+# Reusable ORES static trace/routine marker contract.
+#
+# Consumers should pin this workflow to a commit SHA. The checker source is also
+# pinned so a fleet-wide rollout cannot silently change semantics underneath a
+# caller. Runtime compatibility remains:
+#   ^ores-(trace|routine)-[A-Za-z0-9_-]{12,64}$
+# New ORES generators use 21-character nanoid suffixes.
+name: ORES trace marker contract (reusable)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  ores-trace-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out consumer repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Fetch pinned ORES trace contract checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/ores-otel/ores.otel.log/fd394464b022758575ba0fa60ce8e13b92175e95/.github/ores-trace-contract.rs \
+            --output "$RUNNER_TEMP/ores-trace-contract.rs"
+
+      - name: Build the contract checker
+        shell: bash
+        run: rustc --edition=2021 -D warnings -O -o "$RUNNER_TEMP/ores-trace-contract" "$RUNNER_TEMP/ores-trace-contract.rs"
+
+      - name: Self-test compatibility and generator invariants
+        shell: bash
+        run: |
+          rustc --edition=2021 -D warnings --test -o "$RUNNER_TEMP/ores-trace-contract-test" "$RUNNER_TEMP/ores-trace-contract.rs"
+          "$RUNNER_TEMP/ores-trace-contract-test"
+
+      - name: Verify static ORES trace and routine markers
+        shell: bash
+        run: "$RUNNER_TEMP/ores-trace-contract" .
