@@ -165,7 +165,10 @@
     "test:all": "npm test && npm run test:contracts && npm run test:runtimes && npm run test:polyglot",
     "stage:nodejs": "node scripts/stage-nodejs-release.mjs",
     "release:check": "npm run build && node --test tests/zpkg.test.mjs && npm pack ./sdk/nodejs --dry-run --json",
-    "prepack": "npm test"
+    "prepack": "npm test",
+    "lint:ores": "if [ -f .ores-lint/lint.sh ]; then sh .ores-lint/lint.sh; else echo 'ores-lint not installed'; fi",
+    "prepublishOnly": "npm run lint:ores",
+    "prebuild": "npm run lint:ores"
   },
   "engines": {
     "node": ">=18"
@@ -210,5 +213,13 @@
     "cloudflare-workers",
     "workerd"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "oresLint": {
+    "note": "Declared, not installed. ores-lint resolves these from a global install - see .ores-lint/README.md",
+    "requires": {
+      "eslint": ">=9",
+      "typescript-eslint": ">=8 (optional; without it .ts files are skipped)"
+    },
+    "install": "npm i -g eslint typescript-eslint"
+  }
 }
