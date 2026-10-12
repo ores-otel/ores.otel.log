@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const MIN_ID_WIDTH: usize = 12;
+#[cfg(test)]
 const CANONICAL_GENERATOR_WIDTH: usize = 21;
 const MAX_ID_WIDTH: usize = 64;
 
@@ -67,6 +68,7 @@ fn id_ok(id: &str, kind: &str) -> bool {
     }
 }
 
+#[cfg(test)]
 fn canonical_generated_id(id: &str, kind: &str) -> bool {
     let prefix = format!("ores-{kind}-");
     match id.strip_prefix(&prefix) {
