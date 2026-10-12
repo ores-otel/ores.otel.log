@@ -27,7 +27,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --location \
-            https://raw.githubusercontent.com/ores-otel/ores.otel.log/fd394464b022758575ba0fa60ce8e13b92175e95/.github/ores-trace-contract.rs \
+            https://raw.githubusercontent.com/ores-otel/ores.otel.log/95dddae7a6994bbb8a02b20d7d0e1d02c3acc824/.github/ores-trace-contract.rs \
             --output "$RUNNER_TEMP/ores-trace-contract.rs"
 
       - name: Build the contract checker
@@ -42,4 +42,5 @@ jobs:
 
       - name: Verify static ORES trace and routine markers
         shell: bash
-        run: "$RUNNER_TEMP/ores-trace-contract" .
+        run: |
+          "$RUNNER_TEMP/ores-trace-contract" .
