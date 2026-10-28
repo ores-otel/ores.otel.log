@@ -440,19 +440,45 @@ fn unix_seconds(now: SystemTime) -> u64 {
 }
 
 fn now_rfc3339() -> String {
-    let now = SystemTime::now();
-    let elapsed = now.duration_since(UNIX_EPOCH).unwrap_or_default();
-    format_rfc3339_utc(elapsed.as_secs(), elapsed.subsec_nanos())
+    format_system_time_rfc3339(SystemTime::now())
+}
+
+fn format_system_time_rfc3339(now: SystemTime) -> String {
+    let (seconds, nanoseconds) = match now.duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => match i64::try_from(elapsed.as_secs()) {
+            Ok(seconds) => (seconds, elapsed.subsec_nanos()),
+            Err(_) => return format!("unix-seconds:{}", unix_seconds(now)),
+        },
+        Err(before_epoch) => {
+            let elapsed = before_epoch.duration();
+            let seconds = match i64::try_from(elapsed.as_secs()) {
+                Ok(seconds) => seconds,
+                Err(_) => return format!("unix-seconds:{}", unix_seconds(now)),
+            };
+            if elapsed.subsec_nanos() == 0 {
+                (-seconds, 0)
+            } else {
+                (-seconds - 1, 1_000_000_000 - elapsed.subsec_nanos())
+            }
+        }
+    };
+
+    format_rfc3339_signed(seconds, nanoseconds)
         .unwrap_or_else(|| format!("unix-seconds:{}", unix_seconds(now)))
 }
 
 fn format_rfc3339_utc(seconds: u64, nanoseconds: u32) -> Option<String> {
+    let seconds = i64::try_from(seconds).ok()?;
+    format_rfc3339_signed(seconds, nanoseconds)
+}
+
+fn format_rfc3339_signed(seconds: i64, nanoseconds: u32) -> Option<String> {
     if nanoseconds >= 1_000_000_000 {
         return None;
     }
 
-    let days = i64::try_from(seconds / 86_400).ok()?;
-    let seconds_of_day = seconds % 86_400;
+    let days = seconds.div_euclid(86_400);
+    let seconds_of_day = seconds.rem_euclid(86_400) as u64;
     let (year, month, day) = civil_from_days(days);
     if !(0..=9999).contains(&year) {
         return None;
@@ -606,6 +632,17 @@ mod tests {
         assert!(!bundle.has_incidents());
         assert!(scan_local_incidents(&IncidentScanOptions::at_root(&root, "../escape")).is_err());
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn formats_system_times_before_unix_epoch_without_fabricating_epoch() {
+        let before_epoch = UNIX_EPOCH
+            .checked_sub(Duration::from_millis(1_500))
+            .expect("representable pre-epoch time");
+        assert_eq!(
+            format_system_time_rfc3339(before_epoch),
+            "1969-12-31T23:59:58.5Z"
+        );
     }
 
     #[test]
