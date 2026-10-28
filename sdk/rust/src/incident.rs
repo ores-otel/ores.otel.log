@@ -444,27 +444,24 @@ fn now_rfc3339() -> String {
 }
 
 fn format_system_time_rfc3339(now: SystemTime) -> String {
-    let (seconds, nanoseconds) = match now.duration_since(UNIX_EPOCH) {
-        Ok(elapsed) => match i64::try_from(elapsed.as_secs()) {
-            Ok(seconds) => (seconds, elapsed.subsec_nanos()),
-            Err(_) => return format!("unix-seconds:{}", unix_seconds(now)),
-        },
+    match now.duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => format_rfc3339_utc(elapsed.as_secs(), elapsed.subsec_nanos())
+            .unwrap_or_else(|| format!("unix-seconds:{}", unix_seconds(now))),
         Err(before_epoch) => {
             let elapsed = before_epoch.duration();
             let seconds = match i64::try_from(elapsed.as_secs()) {
                 Ok(seconds) => seconds,
                 Err(_) => return format!("unix-seconds:{}", unix_seconds(now)),
             };
-            if elapsed.subsec_nanos() == 0 {
+            let (seconds, nanoseconds) = if elapsed.subsec_nanos() == 0 {
                 (-seconds, 0)
             } else {
                 (-seconds - 1, 1_000_000_000 - elapsed.subsec_nanos())
-            }
+            };
+            format_rfc3339_signed(seconds, nanoseconds)
+                .unwrap_or_else(|| format!("unix-seconds:{}", unix_seconds(now)))
         }
-    };
-
-    format_rfc3339_signed(seconds, nanoseconds)
-        .unwrap_or_else(|| format!("unix-seconds:{}", unix_seconds(now)))
+    }
 }
 
 fn format_rfc3339_utc(seconds: u64, nanoseconds: u32) -> Option<String> {
