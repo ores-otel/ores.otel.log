@@ -1,0 +1,32 @@
+// Source-level AttoLang conservation projection for ores.otel.log.
+// This is a guest-admission candidate, NOT evidence of compiler execution.
+fnc conserved(int accepted, int acknowledged, int queued, int in_flight, int dropped): int {
+  if accepted == acknowledged + queued + in_flight + dropped; do
+    return 1;
+  else
+    return 0;
+  fi
+}
+
+fnc admit(int is_open, int accepted, int limit): int {
+  if is_open == 1; do
+    if accepted < limit; do
+      return 1;
+    fi
+  fi
+  return 0;
+}
+
+pub routine main(): void {
+  stdio.stdout.write("delivery|conserved|");
+  stdio.stdout.println(conserved(3, 1, 1, 0, 1));
+  stdio.stdout.write("delivery|missing|");
+  stdio.stdout.println(conserved(3, 1, 1, 0, 0));
+  stdio.stdout.write("delivery|open|");
+  stdio.stdout.println(admit(1, 2, 3));
+  stdio.stdout.write("delivery|closed|");
+  stdio.stdout.println(admit(0, 2, 3));
+  stdio.stdout.write("delivery|full|");
+  stdio.stdout.println(admit(1, 3, 3));
+  return;
+}
