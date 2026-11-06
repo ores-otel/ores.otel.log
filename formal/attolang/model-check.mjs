@@ -31,6 +31,43 @@ function transitions(s) {
     out.push(["close", { ...s, phase: 2 }]);
   return out;
 }
+
+// Check event-to-event deltas independently of the state invariants. A buggy
+// transition can conserve totals yet still admit work after shutdown or issue
+// a second ACK; conservation alone cannot detect those protocol violations.
+const deltaByAction = Object.freeze({
+  enqueue:       {accepted: 1, acknowledged: 0, queued: 1, inflight: 0, dropped: 0, phase: 0},
+  overflow:      {accepted: 1, acknowledged: 0, queued: 0, inflight: 0, dropped: 1, phase: 0},
+  dispatch:      {accepted: 0, acknowledged: 0, queued: -1, inflight: 1, dropped: 0, phase: 0},
+  ack:           {accepted: 0, acknowledged: 1, queued: 0, inflight: -1, dropped: 0, phase: 0},
+  transportDrop: {accepted: 0, acknowledged: 0, queued: 0, inflight: -1, dropped: 1, phase: 0},
+  beginShutdown: {accepted: 0, acknowledged: 0, queued: 0, inflight: 0, dropped: 0, phase: 1},
+  shutdownDrop:  {accepted: 0, acknowledged: 0, queued: -1, inflight: 0, dropped: 1, phase: 0},
+  close:         {accepted: 0, acknowledged: 0, queued: 0, inflight: 0, dropped: 0, phase: 1}
+});
+
+function checkStep(before, after, label) {
+  const expected = deltaByAction[label];
+  assert(expected !== undefined, "unknown modeled transition");
+  assert(before.phase < 2, "closed is terminal");
+  if (label === "enqueue" || label === "overflow" || label === "beginShutdown")
+    assert(before.phase === 0, "no admission after shutdown");
+  if (label === "dispatch")
+    assert(before.queued > 0 && before.inflight === 0,
+      "dispatch requires a queued item and free flight slot");
+  if (label === "ack" || label === "transportDrop")
+    assert(before.inflight === 1, "ack/drop requires an in-flight item");
+  if (label === "shutdownDrop")
+    assert(before.phase === 1 && before.queued > 0,
+      "shutdown drops only queued items after shutdown begins");
+  if (label === "close")
+    assert(before.phase === 1 && before.queued === 0 && before.inflight === 0,
+      "close requires completed shutdown and drained work");
+  for (const [key, delta] of Object.entries(expected))
+    assert.equal(after[key] - before[key], delta,
+      "incorrect " + label + " transition delta: " + key);
+}
+
 const queue = [initial], visited = new Set([JSON.stringify(initial)]), coverage = new Set();
 let edges = 0;
 for (let i = 0; i < queue.length; ++i) {
@@ -39,6 +76,7 @@ for (let i = 0; i < queue.length; ++i) {
   for (const [label, next] of transitions(s)) {
     coverage.add(label);
     invariant(next);
+    checkStep(s, next, label);
     edges++;
     const key = JSON.stringify(next);
     if (!visited.has(key)) { visited.add(key); queue.push(next); }
@@ -52,5 +90,17 @@ assert.throws(() => invariant({ ...dispatched, acknowledged: dispatched.acknowle
   /delivery conservation/, "double-ack negative mutation must fail");
 assert.throws(() => invariant({ ...dispatched, phase: 2 }), /terminal close drained/,
   "premature close negative mutation must fail");
+const stopping = queue.find(s => s.phase === 1 && s.accepted < limit && s.queued < capacity);
+assert(stopping, "must reach a shutting-down state with spare capacity");
+assert.throws(() => checkStep(stopping,
+  { ...stopping, accepted: stopping.accepted + 1, queued: stopping.queued + 1 },
+  "enqueue"), /no admission after shutdown/,
+  "a conserved but unauthorized post-shutdown enqueue must fail");
+const idle = queue.find(s => s.phase === 1 && s.inflight === 0);
+assert(idle, "must reach shutdown state without in-flight work");
+assert.throws(() => checkStep(idle,
+  { ...idle, acknowledged: idle.acknowledged + 1, inflight: -1 },
+  "ack"), /ack\/drop requires an in-flight item/,
+  "double acknowledgement must fail even if counters offset");
 console.log("PASS bounded-delivery-model", "states=" + visited.size, "edges=" + edges,
-  "mutations=2", "guest=NOT_EXECUTED");
+  "mutations=4", "guest=NOT_EXECUTED");
