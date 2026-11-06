@@ -14,7 +14,10 @@ implementations and their contract/refinement tests remain the production owners
 | conserved() | accepted = acknowledged + queued + in-flight + dropped |
 
 Run `node formal/attolang/model-check.mjs` to exhaustively enumerate the
-finite model and confirm two deliberate unsafe mutations fail. This is an
+finite model and reject four deliberate unsafe mutations: double ACK,
+premature close, admission after shutdown, and ACK without in-flight work.
+The checker validates exact per-action counter deltas independently of state
+conservation, so a conservative-looking but unauthorized state transition fails. This is an
 **independent bounded model** over accepted<=3, queue<=2, inflight<=1,
 not execution of the production queue or `.atto` program.
 
